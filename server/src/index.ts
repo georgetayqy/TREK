@@ -76,7 +76,8 @@ if (shouldForceHttps) {
     res.redirect(301, 'https://' + req.headers.host + req.url);
   });
 }
-app.use(express.json({ limit: '100mb' }));
+app.use(express.json({ limit: '100kb' }));
+app.use(express.bodyParser({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Avatars are public (shown on login, sharing screens)
