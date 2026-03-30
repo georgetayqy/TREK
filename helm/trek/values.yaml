@@ -1,7 +1,7 @@
 config:
   name: trek
   namespace: trek
-  imageName: docker.io/asdfghjklxd/trek:latest
+  imageName: docker.io/asdfghjklxd/trek
   imageTag: latest
   port: 3000
 
