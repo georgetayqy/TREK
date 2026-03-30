@@ -1,0 +1,25 @@
+config:
+  name: trek
+  namespace: trek
+  imageName: docker.io/asdfghjklxd/trek:latest
+  imageTag: latest
+  port: 3000
+
+app:
+  replicas: 1
+
+ingress:
+  ingressName: trek-ingress
+  tlsCertName: trek-tls
+  hostName: trek.georgetay.com
+
+service:
+  serviceName: trek-service
+
+secret:
+  secretName: trek-secret
+  encryptedSecretData: AgBegKtCopBrrbUwNNnsG/YeYvA29bChGycW0AqkRCoUGU9G419xPy+XI5iGKgPCa0K3eEM4tI6U+DEIIBuZo7hIbp0XFD9B7snt7Yf1Uq57DGH3DhrhZIgsrcieaimL8kmPs2p6C7ywOnuKwcXZPlcdKzNkZd7pUwiTpfyc3Lgw9LtKySowaha6qNP+Ek2rKCefC6lL5hlIvBF3che3azzlKpbM0RyKFB0zVbNuRoH6kIvEoHejaP0/Ol4JZP8OzbhI2zRBwtVpWl50I3fO+dIuNmU6w8TsCjgYJJeBs5CTJJj9bHSRFOIyKHeVYEWruQjm4k7j8czD9SIwghwbpOtGWSUlOqL2aS0nDHjlMFURLvB5t2zABho0uWpoPnl9bXOYVBUAvBHmCiCtkzU5kppGmvfQUuRNrbhP8q3Pz6viKgcbJ4s7f8LFH0M0x+gM5/HAWozDnlDkiD9k9FejIFbAYjXIHkSzRay/VptxIyjYFjiS5s4Mt/0jM8FP6P5sqRN881b8CpcS/KUXUdtVD6gNq4z2h8a51FoC2t5LbmOLQTAmc8Snh6dO++48XV2xnvWCARaYHz+cKbuC2t0K3RjajyWyhaWLkKUrPM/9bnd4Duxz/01KSnacVV2MikU/WDSWel6vI6+hySothEuwmsshyX6U8zKWPKvwKiRWouw8frNaHvzHJBdFyHvAfpauNQXEmTCeWU3R8OAR1teebvMI9eQIK66J0+RBe5VDf9B20uKDvfFO+Zpflk7Qqu8Xpd7EXgk4dxWep5olGnmKiEfJ1OOUk4yQH49HcNVIyiUvCgVUg9Sq6vpS/M4F34PUHhd8y6dMMVyhnHb3/hu5TF04c7jTPA==
+
+pvc:
+  dataPvcName: trek-data
+  uploadPvcName: trek-uploads

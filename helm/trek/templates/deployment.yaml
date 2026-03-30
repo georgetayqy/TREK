@@ -1,0 +1,65 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.config.name }}
+  namespace: {{ .Values.config.namespace }}
+  labels:
+    app: {{ .Values.config.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.config.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.config.name }}
+    spec:
+      containers:
+        - name: {{ .Values.config.name }}
+          image: "{{ .Values.config.imageName }}.{{ .Values.config.imageTag }}"
+          ports:
+            - containerPort: {{ .Values.config.port }}
+          env:
+            - name: NODE_ENV
+              value: 'production'
+            - name: PORT
+              value: "{{ .Values.config.port }}"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.secretName }}
+                  key: JWT_SECRET
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: uploads
+              mountPath: /app/uploads
+          resources:
+            requests:
+              memory: '256Mi'
+              cpu: '250m'
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.config.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.config.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+      restartPolicy: Always
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.pvc.dataPvcName }}
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: {{ .Values.pvc.uploadPvcName }}
