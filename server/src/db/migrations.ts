@@ -205,6 +205,122 @@ function runMigrations(db: Database.Database): void {
       try { db.exec('ALTER TABLE reservations ADD COLUMN accommodation_id INTEGER REFERENCES day_accommodations(id) ON DELETE SET NULL'); } catch {}
       try { db.exec('ALTER TABLE reservations ADD COLUMN metadata TEXT'); } catch {}
     },
+    () => {
+      db.exec(`CREATE TABLE IF NOT EXISTS invite_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        token TEXT UNIQUE NOT NULL,
+        max_uses INTEGER NOT NULL DEFAULT 1,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        expires_at TEXT,
+        created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+    },
+    () => {
+      try { db.exec('ALTER TABLE users ADD COLUMN mfa_enabled INTEGER DEFAULT 0'); } catch {}
+      try { db.exec('ALTER TABLE users ADD COLUMN mfa_secret TEXT'); } catch {}
+    },
+    () => {
+      db.exec(`CREATE TABLE IF NOT EXISTS packing_category_assignees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+        category_name TEXT NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(trip_id, category_name, user_id)
+      )`);
+    },
+    () => {
+      db.exec(`CREATE TABLE IF NOT EXISTS packing_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      db.exec(`CREATE TABLE IF NOT EXISTS packing_template_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL REFERENCES packing_templates(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      )`);
+      // Recreate items table with category_id FK (replaces old template_id-based schema)
+      try { db.exec('DROP TABLE IF EXISTS packing_template_items'); } catch {}
+      db.exec(`CREATE TABLE packing_template_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category_id INTEGER NOT NULL REFERENCES packing_template_categories(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      )`);
+    },
+    () => {
+      db.exec(`CREATE TABLE IF NOT EXISTS packing_bags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#6366f1',
+        weight_limit_grams INTEGER,
+        sort_order INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      try { db.exec('ALTER TABLE packing_items ADD COLUMN weight_grams INTEGER'); } catch {}
+      try { db.exec('ALTER TABLE packing_items ADD COLUMN bag_id INTEGER REFERENCES packing_bags(id) ON DELETE SET NULL'); } catch {}
+    },
+    () => {
+      db.exec(`CREATE TABLE IF NOT EXISTS visited_countries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        country_code TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, country_code)
+      )`);
+    },
+    () => {
+      db.exec(`CREATE TABLE IF NOT EXISTS bucket_list (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        lat REAL,
+        lng REAL,
+        country_code TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+    },
+    () => {
+      // Configurable weekend days
+      try { db.exec("ALTER TABLE vacay_plans ADD COLUMN weekend_days TEXT DEFAULT '0,6'"); } catch {}
+    },
+    () => {
+      // Immich integration
+      try { db.exec("ALTER TABLE users ADD COLUMN immich_url TEXT"); } catch {}
+      try { db.exec("ALTER TABLE users ADD COLUMN immich_api_key TEXT"); } catch {}
+      db.exec(`CREATE TABLE IF NOT EXISTS trip_photos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        immich_asset_id TEXT NOT NULL,
+        shared INTEGER NOT NULL DEFAULT 1,
+        added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(trip_id, user_id, immich_asset_id)
+      )`);
+      // Add memories addon
+      try {
+        db.prepare("INSERT INTO addons (id, name, type, icon, enabled, sort_order) VALUES (?, ?, ?, ?, ?, ?)").run('memories', 'Photos', 'trip', 'Image', 0, 7);
+      } catch {}
+    },
+    () => {
+      // Allow files to be linked to multiple reservations/assignments
+      db.exec(`CREATE TABLE IF NOT EXISTS file_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id INTEGER NOT NULL REFERENCES trip_files(id) ON DELETE CASCADE,
+        reservation_id INTEGER REFERENCES reservations(id) ON DELETE CASCADE,
+        assignment_id INTEGER REFERENCES day_assignments(id) ON DELETE CASCADE,
+        place_id INTEGER REFERENCES places(id) ON DELETE CASCADE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(file_id, reservation_id),
+        UNIQUE(file_id, assignment_id),
+        UNIQUE(file_id, place_id)
+      )`);
+    },
   ];
 
   if (currentVersion < migrations.length) {

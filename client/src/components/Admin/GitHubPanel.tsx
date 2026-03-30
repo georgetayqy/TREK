@@ -18,8 +18,8 @@ export default function GitHubPanel() {
 
   const fetchReleases = async (pageNum = 1, append = false) => {
     try {
-      const res = await apiClient.get(`/auth/github-releases`, { params: { per_page: PER_PAGE, page: pageNum } })
-      const data = res.data
+      const res = await apiClient.get(`/admin/github-releases`, { params: { per_page: PER_PAGE, page: pageNum } })
+      const data = Array.isArray(res.data) ? res.data : []
       setReleases(prev => append ? [...prev, ...data] : data)
       setHasMore(data.length === PER_PAGE)
     } catch (err: unknown) {
@@ -130,7 +130,7 @@ export default function GitHubPanel() {
           </div>
           <div>
             <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Ko-fi</div>
-            <div className="text-xs" style={{ color: 'var(--text-faint)' }}>{language === 'de' ? 'Hilft mir, TREK weiterzuentwickeln' : 'Helps me keep building TREK'}</div>
+            <div className="text-xs" style={{ color: 'var(--text-faint)' }}>{t('admin.github.support')}</div>
           </div>
           <ExternalLink size={14} className="ml-auto flex-shrink-0" style={{ color: 'var(--text-faint)' }} />
         </a>
@@ -148,7 +148,7 @@ export default function GitHubPanel() {
           </div>
           <div>
             <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Buy Me a Coffee</div>
-            <div className="text-xs" style={{ color: 'var(--text-faint)' }}>{language === 'de' ? 'Hilft mir, TREK weiterzuentwickeln' : 'Helps me keep building TREK'}</div>
+            <div className="text-xs" style={{ color: 'var(--text-faint)' }}>{t('admin.github.support')}</div>
           </div>
           <ExternalLink size={14} className="ml-auto flex-shrink-0" style={{ color: 'var(--text-faint)' }} />
         </a>

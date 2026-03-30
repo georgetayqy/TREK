@@ -12,6 +12,7 @@ import PlaceFormModal from '../components/Planner/PlaceFormModal'
 import TripFormModal from '../components/Trips/TripFormModal'
 import TripMembersModal from '../components/Trips/TripMembersModal'
 import { ReservationModal } from '../components/Planner/ReservationModal'
+import MemoriesPanel from '../components/Memories/MemoriesPanel'
 import ReservationsPanel from '../components/Planner/ReservationsPanel'
 import PackingListPanel from '../components/Packing/PackingListPanel'
 import FileManager from '../components/Files/FileManager'
@@ -54,7 +55,7 @@ export default function TripPlannerPage(): React.ReactElement | null {
     addonsApi.enabled().then(data => {
       const map = {}
       data.addons.forEach(a => { map[a.id] = true })
-      setEnabledAddons({ packing: !!map.packing, budget: !!map.budget, documents: !!map.documents, collab: !!map.collab })
+      setEnabledAddons({ packing: !!map.packing, budget: !!map.budget, documents: !!map.documents, collab: !!map.collab, memories: !!map.memories })
     }).catch(() => {})
     authApi.getAppConfig().then(config => {
       if (config.allowed_file_types) setAllowedFileTypes(config.allowed_file_types)
@@ -67,6 +68,7 @@ export default function TripPlannerPage(): React.ReactElement | null {
     ...(enabledAddons.packing ? [{ id: 'packliste', label: t('trip.tabs.packing'), shortLabel: t('trip.tabs.packingShort') }] : []),
     ...(enabledAddons.budget ? [{ id: 'finanzplan', label: t('trip.tabs.budget') }] : []),
     ...(enabledAddons.documents ? [{ id: 'dateien', label: t('trip.tabs.files') }] : []),
+    ...(enabledAddons.memories ? [{ id: 'memories', label: t('memories.title') }] : []),
     ...(enabledAddons.collab ? [{ id: 'collab', label: t('admin.addons.catalog.collab.name') }] : []),
   ]
 
@@ -116,9 +118,15 @@ export default function TripPlannerPage(): React.ReactElement | null {
 
   useTripWebSocket(tripId)
 
-  const mapPlaces = useCallback(() => {
-    return places.filter(p => p.lat && p.lng)
-  }, [places])
+  const [mapCategoryFilter, setMapCategoryFilter] = useState<string>('')
+
+  const mapPlaces = useMemo(() => {
+    return places.filter(p => {
+      if (!p.lat || !p.lng) return false
+      if (mapCategoryFilter && String(p.category_id) !== String(mapCategoryFilter)) return false
+      return true
+    })
+  }, [places, mapCategoryFilter])
 
   const { route, routeSegments, routeInfo, setRoute, setRouteInfo, updateRouteForDay } = useRouteCalculation(tripStore, selectedDayId)
 
@@ -370,7 +378,7 @@ export default function TripPlannerPage(): React.ReactElement | null {
         {activeTab === 'plan' && (
           <div style={{ position: 'absolute', inset: 0 }}>
             <MapView
-              places={mapPlaces()}
+              places={mapPlaces}
               dayPlaces={dayPlaces}
               route={route}
               routeSegments={routeSegments}
@@ -496,6 +504,7 @@ export default function TripPlannerPage(): React.ReactElement | null {
                     onAssignToDay={handleAssignToDay}
                     onEditPlace={(place) => { setEditingPlace(place); setEditingAssignmentId(null); setShowPlaceForm(true) }}
                     onDeletePlace={(placeId) => handleDeletePlace(placeId)}
+                    onCategoryFilterChange={setMapCategoryFilter}
                   />
                 </div>
               </div>
@@ -594,7 +603,7 @@ export default function TripPlannerPage(): React.ReactElement | null {
                   <div style={{ flex: 1, overflow: 'auto' }}>
                     {mobileSidebarOpen === 'left'
                       ? <DayPlanSidebar tripId={tripId} trip={trip} days={days} places={places} categories={categories} assignments={assignments} selectedDayId={selectedDayId} selectedPlaceId={selectedPlaceId} selectedAssignmentId={selectedAssignmentId} onSelectDay={(id) => { handleSelectDay(id); setMobileSidebarOpen(null) }} onPlaceClick={handlePlaceClick} onReorder={handleReorder} onUpdateDayTitle={handleUpdateDayTitle} onAssignToDay={handleAssignToDay} onRouteCalculated={(r) => { if (r) { setRoute(r.coordinates); setRouteInfo({ distance: r.distanceText, duration: r.durationText }) } }} reservations={reservations} onAddReservation={(dayId) => { setEditingReservation(null); tripStore.setSelectedDay(dayId); setShowReservationModal(true); setMobileSidebarOpen(null) }} onDayDetail={(day) => { setShowDayDetail(day); setSelectedPlaceId(null); setSelectedAssignmentId(null); setMobileSidebarOpen(null) }} accommodations={tripAccommodations} />
-                      : <PlacesSidebar places={places} categories={categories} assignments={assignments} selectedDayId={selectedDayId} selectedPlaceId={selectedPlaceId} onPlaceClick={handlePlaceClick} onAddPlace={() => { setEditingPlace(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onAssignToDay={handleAssignToDay} days={days} isMobile />
+                      : <PlacesSidebar places={places} categories={categories} assignments={assignments} selectedDayId={selectedDayId} selectedPlaceId={selectedPlaceId} onPlaceClick={handlePlaceClick} onAddPlace={() => { setEditingPlace(null); setShowPlaceForm(true); setMobileSidebarOpen(null) }} onAssignToDay={handleAssignToDay} days={days} isMobile onCategoryFilterChange={setMapCategoryFilter} />
                     }
                   </div>
                 </div>
@@ -646,6 +655,12 @@ export default function TripPlannerPage(): React.ReactElement | null {
               tripId={tripId}
               allowedFileTypes={allowedFileTypes}
             />
+          </div>
+        )}
+
+        {activeTab === 'memories' && (
+          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+            <MemoriesPanel tripId={Number(tripId)} startDate={trip?.start_date || null} endDate={trip?.end_date || null} />
           </div>
         )}
 

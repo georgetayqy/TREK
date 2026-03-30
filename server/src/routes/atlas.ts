@@ -9,7 +9,7 @@ router.use(authenticate);
 const COUNTRY_BOXES: Record<string, [number, number, number, number]> = {
   AF:[60.5,29.4,75,38.5],AL:[19,39.6,21.1,42.7],DZ:[-8.7,19,12,37.1],AD:[1.4,42.4,1.8,42.7],AO:[11.7,-18.1,24.1,-4.4],
   AR:[-73.6,-55.1,-53.6,-21.8],AM:[43.4,38.8,46.6,41.3],AU:[112.9,-43.6,153.6,-10.7],AT:[9.5,46.4,17.2,49],AZ:[44.8,38.4,50.4,41.9],
-  BR:[-73.9,-33.8,-34.8,5.3],BE:[2.5,49.5,6.4,51.5],BG:[22.4,41.2,28.6,44.2],CA:[-141,41.7,-52.6,83.1],CL:[-75.6,-55.9,-66.9,-17.5],
+  BD:[88.0,20.7,92.7,26.6],BR:[-73.9,-33.8,-34.8,5.3],BE:[2.5,49.5,6.4,51.5],BG:[22.4,41.2,28.6,44.2],CA:[-141,41.7,-52.6,83.1],CL:[-75.6,-55.9,-66.9,-17.5],
   CN:[73.6,18.2,134.8,53.6],CO:[-79.1,-4.3,-66.9,12.5],HR:[13.5,42.4,19.5,46.6],CZ:[12.1,48.6,18.9,51.1],DK:[8,54.6,15.2,57.8],
   EG:[24.7,22,37,31.7],EE:[21.8,57.5,28.2,59.7],FI:[20.6,59.8,31.6,70.1],FR:[-5.1,41.3,9.6,51.1],DE:[5.9,47.3,15.1,55.1],
   GR:[19.4,34.8,29.7,41.8],HU:[16,45.7,22.9,48.6],IS:[-24.5,63.4,-13.5,66.6],IN:[68.2,6.7,97.4,35.5],ID:[95.3,-11,141,5.9],
@@ -96,7 +96,10 @@ router.get('/stats', (req: Request, res: Response) => {
 
   const tripIds = trips.map(t => t.id);
   if (tripIds.length === 0) {
-    return res.json({ countries: [], trips: [], stats: { totalTrips: 0, totalPlaces: 0, totalCountries: 0, totalDays: 0 } });
+    // Still include manually marked countries even without trips
+    const manualCountries = db.prepare('SELECT country_code FROM visited_countries WHERE user_id = ?').all(userId) as { country_code: string }[];
+    const countries = manualCountries.map(mc => ({ code: mc.country_code, placeCount: 0, tripCount: 0, firstVisit: null, lastVisit: null }));
+    return res.json({ countries, trips: [], stats: { totalTrips: 0, totalPlaces: 0, totalCountries: countries.length, totalDays: 0 } });
   }
 
   const placeholders = tripIds.map(() => '?').join(',');
@@ -152,6 +155,14 @@ router.get('/stats', (req: Request, res: Response) => {
     }
   }
   const totalCities = citySet.size;
+
+  // Merge manually marked countries
+  const manualCountries = db.prepare('SELECT country_code FROM visited_countries WHERE user_id = ?').all(userId) as { country_code: string }[];
+  for (const mc of manualCountries) {
+    if (!countries.find(c => c.code === mc.country_code)) {
+      countries.push({ code: mc.country_code, placeCount: 0, tripCount: 0, firstVisit: null, lastVisit: null });
+    }
+  }
 
   const mostVisited = countries.length > 0 ? countries.reduce((a, b) => a.placeCount > b.placeCount ? a : b) : null;
 
@@ -239,7 +250,57 @@ router.get('/country/:code', (req: Request, res: Response) => {
 
   const matchingTrips = trips.filter(t => matchingTripIds.has(t.id)).map(t => ({ id: t.id, title: t.title, start_date: t.start_date, end_date: t.end_date }));
 
-  res.json({ places: matchingPlaces, trips: matchingTrips });
+  const isManuallyMarked = !!(db.prepare('SELECT 1 FROM visited_countries WHERE user_id = ? AND country_code = ?').get(userId, code));
+  res.json({ places: matchingPlaces, trips: matchingTrips, manually_marked: isManuallyMarked });
+});
+
+// Mark/unmark country as visited
+router.post('/country/:code/mark', (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  db.prepare('INSERT OR IGNORE INTO visited_countries (user_id, country_code) VALUES (?, ?)').run(authReq.user.id, req.params.code.toUpperCase());
+  res.json({ success: true });
+});
+
+router.delete('/country/:code/mark', (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  db.prepare('DELETE FROM visited_countries WHERE user_id = ? AND country_code = ?').run(authReq.user.id, req.params.code.toUpperCase());
+  res.json({ success: true });
+});
+
+// ── Bucket List ─────────────────────────────────────────────────────────────
+
+router.get('/bucket-list', (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const items = db.prepare('SELECT * FROM bucket_list WHERE user_id = ? ORDER BY created_at DESC').all(authReq.user.id);
+  res.json({ items });
+});
+
+router.post('/bucket-list', (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { name, lat, lng, country_code, notes } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
+  const result = db.prepare('INSERT INTO bucket_list (user_id, name, lat, lng, country_code, notes) VALUES (?, ?, ?, ?, ?, ?)').run(
+    authReq.user.id, name.trim(), lat ?? null, lng ?? null, country_code ?? null, notes ?? null
+  );
+  const item = db.prepare('SELECT * FROM bucket_list WHERE id = ?').get(result.lastInsertRowid);
+  res.status(201).json({ item });
+});
+
+router.put('/bucket-list/:id', (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { name, notes } = req.body;
+  const item = db.prepare('SELECT * FROM bucket_list WHERE id = ? AND user_id = ?').get(req.params.id, authReq.user.id);
+  if (!item) return res.status(404).json({ error: 'Item not found' });
+  db.prepare('UPDATE bucket_list SET name = COALESCE(?, name), notes = COALESCE(?, notes) WHERE id = ?').run(name?.trim() || null, notes ?? null, req.params.id);
+  res.json({ item: db.prepare('SELECT * FROM bucket_list WHERE id = ?').get(req.params.id) });
+});
+
+router.delete('/bucket-list/:id', (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const item = db.prepare('SELECT * FROM bucket_list WHERE id = ? AND user_id = ?').get(req.params.id, authReq.user.id);
+  if (!item) return res.status(404).json({ error: 'Item not found' });
+  db.prepare('DELETE FROM bucket_list WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
 });
 
 export default router;
