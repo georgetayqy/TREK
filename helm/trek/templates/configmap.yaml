@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.configmap.configmapName }}
+  namespace: {{ .Values.config.namespace }}
+data:
+  NODE_ENV: "production"
+  PORT: "{{ .Values.config.port }}"

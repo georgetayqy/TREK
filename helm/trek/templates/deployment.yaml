@@ -21,16 +21,13 @@ spec:
           image: "{{ .Values.config.imageName }}:{{ .Values.config.imageTag }}"
           ports:
             - containerPort: {{ .Values.config.port }}
-          env:
-            - name: NODE_ENV
-              value: 'production'
-            - name: PORT
-              value: "{{ .Values.config.port }}"
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secret.secretName }}
-                  key: JWT_SECRET
+          envFrom:
+            - configMapRef:
+                name: {{ .Values.configmap.configmapName }}
+            - secretRef:
+                name: {{ .Values.secret.secretName }}
+            - secretRef:
+                name: {{ .Values.secret.oidcSecretName }}
           volumeMounts:
             - name: data
               mountPath: /app/data
