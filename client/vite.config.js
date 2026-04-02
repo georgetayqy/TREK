@@ -8,9 +8,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,svg,png,woff,woff2,ttf}'],
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api/, /^\/uploads/],
+        navigateFallbackDenylist: [/^\/api/, /^\/uploads/, /^\/mcp/],
         runtimeCaching: [
           {
             // Carto map tiles (default provider)
@@ -44,23 +45,24 @@ export default defineConfig({
           },
           {
             // API calls — prefer network, fall back to cache
-            urlPattern: /\/api\/.*/i,
+            // Exclude sensitive endpoints (auth, admin, backup, settings)
+            urlPattern: /\/api\/(?!auth|admin|backup|settings).*/i,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-data',
               expiration: { maxEntries: 200, maxAgeSeconds: 24 * 60 * 60 },
               networkTimeoutSeconds: 5,
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
           {
-            // Uploaded files (photos, covers, documents)
-            urlPattern: /\/uploads\/.*/i,
+            // Uploaded files (photos, covers — public assets only)
+            urlPattern: /\/uploads\/(?:covers|avatars)\/.*/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'user-uploads',
-              expiration: { maxEntries: 300, maxAgeSeconds: 30 * 24 * 60 * 60 },
-              cacheableResponse: { statuses: [0, 200] },
+              expiration: { maxEntries: 300, maxAgeSeconds: 7 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [200] },
             },
           },
         ],
@@ -86,6 +88,9 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    sourcemap: false,
+  },
   server: {
     port: 5173,
     proxy: {
@@ -100,6 +105,10 @@ export default defineConfig({
       '/ws': {
         target: 'http://localhost:3001',
         ws: true,
+      },
+      '/mcp': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
       }
     }
   }

@@ -5,6 +5,8 @@ import jwt from 'jsonwebtoken';
 import { db } from '../db/database';
 import { JWT_SECRET } from '../config';
 import { User } from '../types';
+import { decrypt_api_key } from '../services/apiKeyCrypto';
+import { setAuthCookie } from '../services/cookie';
 
 interface OidcDiscoveryDoc {
   authorization_endpoint: string;
@@ -24,6 +26,9 @@ interface OidcUserInfo {
   email?: string;
   name?: string;
   preferred_username?: string;
+  groups?: string[];
+  roles?: string[];
+  [key: string]: unknown;
 }
 
 const router = express.Router();
@@ -41,7 +46,7 @@ setInterval(() => {
   }
 }, AUTH_CODE_CLEANUP);
 
-const pendingStates = new Map<string, { createdAt: number; redirectUri: string }>();
+const pendingStates = new Map<string, { createdAt: number; redirectUri: string; inviteToken?: string }>();
 
 setInterval(() => {
   const now = Date.now();
@@ -54,35 +59,54 @@ function getOidcConfig() {
   const get = (key: string) => (db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as { value: string } | undefined)?.value || null;
   const issuer = process.env.OIDC_ISSUER || get('oidc_issuer');
   const clientId = process.env.OIDC_CLIENT_ID || get('oidc_client_id');
-  const clientSecret = process.env.OIDC_CLIENT_SECRET || get('oidc_client_secret');
+  const clientSecret = process.env.OIDC_CLIENT_SECRET || decrypt_api_key(get('oidc_client_secret'));
   const displayName = process.env.OIDC_DISPLAY_NAME || get('oidc_display_name') || 'SSO';
+  const discoveryUrl = process.env.OIDC_DISCOVERY_URL || get('oidc_discovery_url') || null;
   if (!issuer || !clientId || !clientSecret) return null;
-  return { issuer: issuer.replace(/\/+$/, ''), clientId, clientSecret, displayName };
+  return { issuer: issuer.replace(/\/+$/, ''), clientId, clientSecret, displayName, discoveryUrl };
 }
 
 let discoveryCache: OidcDiscoveryDoc | null = null;
 let discoveryCacheTime = 0;
 const DISCOVERY_TTL = 60 * 60 * 1000; // 1 hour
 
-async function discover(issuer: string) {
-  if (discoveryCache && Date.now() - discoveryCacheTime < DISCOVERY_TTL && discoveryCache._issuer === issuer) {
+async function discover(issuer: string, discoveryUrl?: string | null) {
+  const url = discoveryUrl || `${issuer}/.well-known/openid-configuration`;
+  if (discoveryCache && Date.now() - discoveryCacheTime < DISCOVERY_TTL && discoveryCache._issuer === url) {
     return discoveryCache;
   }
-  const res = await fetch(`${issuer}/.well-known/openid-configuration`);
+  const res = await fetch(url);
   if (!res.ok) throw new Error('Failed to fetch OIDC discovery document');
   const doc = await res.json() as OidcDiscoveryDoc;
-  doc._issuer = issuer;
+  doc._issuer = url;
   discoveryCache = doc;
   discoveryCacheTime = Date.now();
   return doc;
 }
 
-function generateToken(user: { id: number; username: string; email: string; role: string }) {
+function generateToken(user: { id: number }) {
   return jwt.sign(
-    { id: user.id, username: user.username, email: user.email, role: user.role },
+    { id: user.id },
     JWT_SECRET,
-    { expiresIn: '24h' }
+    { expiresIn: '24h', algorithm: 'HS256' }
   );
+}
+
+// Check if user should be admin based on OIDC claims
+// Env: OIDC_ADMIN_CLAIM (default: "groups"), OIDC_ADMIN_VALUE (required, e.g. "app-trek-admins")
+function resolveOidcRole(userInfo: OidcUserInfo, isFirstUser: boolean): 'admin' | 'user' {
+  if (isFirstUser) return 'admin';
+  const adminValue = process.env.OIDC_ADMIN_VALUE;
+  if (!adminValue) return 'user'; // No claim mapping configured
+  const claimKey = process.env.OIDC_ADMIN_CLAIM || 'groups';
+  const claimData = userInfo[claimKey];
+  if (Array.isArray(claimData)) {
+    return claimData.some(v => String(v) === adminValue) ? 'admin' : 'user';
+  }
+  if (typeof claimData === 'string') {
+    return claimData === adminValue ? 'admin' : 'user';
+  }
+  return 'user';
 }
 
 function frontendUrl(path: string): string {
@@ -99,13 +123,16 @@ router.get('/login', async (req: Request, res: Response) => {
   }
 
   try {
-    const doc = await discover(config.issuer);
+    const doc = await discover(config.issuer, config.discoveryUrl);
     const state = crypto.randomBytes(32).toString('hex');
-    const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol;
-    const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
-    const redirectUri = `${proto}://${host}/api/auth/oidc/callback`;
+    const appUrl = process.env.APP_URL || (db.prepare("SELECT value FROM app_settings WHERE key = 'app_url'").get() as { value: string } | undefined)?.value;
+    if (!appUrl) {
+      return res.status(500).json({ error: 'APP_URL is not configured. OIDC cannot be used.' });
+    }
+    const redirectUri = `${appUrl.replace(/\/+$/, '')}/api/auth/oidc/callback`;
+    const inviteToken = req.query.invite as string | undefined;
 
-    pendingStates.set(state, { createdAt: Date.now(), redirectUri });
+    pendingStates.set(state, { createdAt: Date.now(), redirectUri, inviteToken });
 
     const params = new URLSearchParams({
       response_type: 'code',
@@ -148,7 +175,7 @@ router.get('/callback', async (req: Request, res: Response) => {
   }
 
   try {
-    const doc = await discover(config.issuer);
+    const doc = await discover(config.issuer, config.discoveryUrl);
 
     const tokenRes = await fetch(doc.token_endpoint, {
       method: 'POST',
@@ -164,7 +191,7 @@ router.get('/callback', async (req: Request, res: Response) => {
 
     const tokenData = await tokenRes.json() as OidcTokenResponse;
     if (!tokenRes.ok || !tokenData.access_token) {
-      console.error('[OIDC] Token exchange failed:', tokenData);
+      console.error('[OIDC] Token exchange failed: status', tokenRes.status);
       return res.redirect(frontendUrl('/login?oidc_error=token_failed'));
     }
 
@@ -190,18 +217,35 @@ router.get('/callback', async (req: Request, res: Response) => {
       if (!user.oidc_sub) {
         db.prepare('UPDATE users SET oidc_sub = ?, oidc_issuer = ? WHERE id = ?').run(sub, config.issuer, user.id);
       }
+      // Update role based on OIDC claims on every login (if claim mapping is configured)
+      if (process.env.OIDC_ADMIN_VALUE) {
+        const newRole = resolveOidcRole(userInfo, false);
+        if (user.role !== newRole) {
+          db.prepare('UPDATE users SET role = ? WHERE id = ?').run(newRole, user.id);
+          user = { ...user, role: newRole } as User;
+        }
+      }
     } else {
       const userCount = (db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
       const isFirstUser = userCount === 0;
 
-      if (!isFirstUser) {
+      let validInvite: any = null;
+      if (pending.inviteToken) {
+        validInvite = db.prepare('SELECT * FROM invite_tokens WHERE token = ?').get(pending.inviteToken);
+        if (validInvite) {
+          if (validInvite.max_uses > 0 && validInvite.used_count >= validInvite.max_uses) validInvite = null;
+          if (validInvite?.expires_at && new Date(validInvite.expires_at) < new Date()) validInvite = null;
+        }
+      }
+
+      if (!isFirstUser && !validInvite) {
         const setting = db.prepare("SELECT value FROM app_settings WHERE key = 'allow_registration'").get() as { value: string } | undefined;
         if (setting?.value === 'false') {
           return res.redirect(frontendUrl('/login?oidc_error=registration_disabled'));
         }
       }
 
-      const role = isFirstUser ? 'admin' : 'user';
+      const role = resolveOidcRole(userInfo, isFirstUser);
       const randomPass = crypto.randomBytes(32).toString('hex');
       const bcrypt = require('bcryptjs');
       const hash = bcrypt.hashSync(randomPass, 10);
@@ -213,6 +257,15 @@ router.get('/callback', async (req: Request, res: Response) => {
       const result = db.prepare(
         'INSERT INTO users (username, email, password_hash, role, oidc_sub, oidc_issuer) VALUES (?, ?, ?, ?, ?, ?)'
       ).run(username, email, hash, role, sub, config.issuer);
+
+      if (validInvite) {
+        const updated = db.prepare(
+          'UPDATE invite_tokens SET used_count = used_count + 1 WHERE id = ? AND (max_uses = 0 OR used_count < max_uses)'
+        ).run(validInvite.id);
+        if (updated.changes === 0) {
+          console.warn(`[OIDC] Invite token ${pending.inviteToken?.slice(0, 8)}... exceeded max_uses (race condition)`);
+        }
+      }
 
       user = { id: Number(result.lastInsertRowid), username, email, role } as User;
     }
@@ -237,6 +290,7 @@ router.get('/exchange', (req: Request, res: Response) => {
   if (!entry) return res.status(400).json({ error: 'Invalid or expired code' });
   authCodes.delete(code);
   if (Date.now() - entry.created > AUTH_CODE_TTL) return res.status(400).json({ error: 'Code expired' });
+  setAuthCookie(res, entry.token);
   res.json({ token: entry.token });
 });
 

@@ -5,6 +5,8 @@ import { X, Sun, Cloud, CloudRain, CloudSnow, CloudDrizzle, CloudLightning, Wind
 const RES_TYPE_ICONS = { flight: Plane, hotel: Hotel, restaurant: Utensils, train: Train, car: Car, cruise: Ship, event: Ticket, tour: Users, other: FileText }
 const RES_TYPE_COLORS = { flight: '#3b82f6', hotel: '#8b5cf6', restaurant: '#ef4444', train: '#06b6d4', car: '#6b7280', cruise: '#0ea5e9', event: '#f59e0b', tour: '#10b981', other: '#6b7280' }
 import { weatherApi, accommodationsApi } from '../../api/client'
+import { useCanDo } from '../../store/permissionsStore'
+import { useTripStore } from '../../store/tripStore'
 import CustomSelect from '../shared/CustomSelect'
 import CustomTimePicker from '../shared/CustomTimePicker'
 import { useSettingsStore } from '../../store/settingsStore'
@@ -50,12 +52,18 @@ interface DayDetailPanelProps {
   lng: number | null
   onClose: () => void
   onAccommodationChange: () => void
+  leftWidth?: number
+  rightWidth?: number
 }
 
-export default function DayDetailPanel({ day, days, places, categories = [], tripId, assignments, reservations = [], lat, lng, onClose, onAccommodationChange }: DayDetailPanelProps) {
+export default function DayDetailPanel({ day, days, places, categories = [], tripId, assignments, reservations = [], lat, lng, onClose, onAccommodationChange, leftWidth = 0, rightWidth = 0 }: DayDetailPanelProps) {
   const { t, language, locale } = useTranslation()
+  const can = useCanDo()
+  const tripObj = useTripStore((s) => s.trip)
+  const canEditDays = can('day_edit', tripObj)
   const isFahrenheit = useSettingsStore(s => s.settings.temperature_unit) === 'fahrenheit'
   const is12h = useSettingsStore(s => s.settings.time_format) === '12h'
+  const blurCodes = useSettingsStore(s => s.settings.blur_booking_codes)
   const fmtTime = (v) => formatTime12(v, is12h)
   const unit = isFahrenheit ? '°F' : '°C'
   const [weather, setWeather] = useState(null)
@@ -108,8 +116,13 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
         check_out: hotelForm.check_out || null,
         confirmation: hotelForm.confirmation || null,
       })
-      setAccommodation(data.accommodation)
-      setAccommodations(prev => [...prev, data.accommodation])
+      const newAcc = data.accommodation
+      const updated = [...accommodations, newAcc]
+      setAccommodations(updated)
+      setAccommodation(newAcc)
+      setDayAccommodations(updated.filter(a =>
+        days.some(d => d.id >= a.start_day_id && d.id <= a.end_day_id && d.id === day?.id)
+      ))
       setShowHotelPicker(false)
       setHotelForm({ check_in: '', check_out: '', confirmation: '', place_id: null })
       onAccommodationChange?.()
@@ -129,7 +142,11 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
     if (!accommodation) return
     try {
       await accommodationsApi.delete(tripId, accommodation.id)
-      setAccommodations(prev => prev.filter(a => a.id !== accommodation.id))
+      const updated = accommodations.filter(a => a.id !== accommodation.id)
+      setAccommodations(updated)
+      setDayAccommodations(updated.filter(a =>
+        days.some(d => d.id >= a.start_day_id && d.id <= a.end_day_id && d.id === day?.id)
+      ))
       setAccommodation(null)
       onAccommodationChange?.()
     } catch {}
@@ -146,7 +163,7 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
   const font = { fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif" }
 
   return (
-    <div style={{ position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', width: 'min(800px, calc(100vw - 32px))', zIndex: 50, ...font }}>
+    <div style={{ position: 'fixed', bottom: 20, left: `calc(${leftWidth}px + (100vw - ${leftWidth}px - ${rightWidth}px) / 2)`, transform: 'translateX(-50%)', width: `min(800px, calc(100vw - ${leftWidth}px - ${rightWidth}px - 32px))`, zIndex: 50, ...font }}>
       <div style={{
         background: 'var(--bg-elevated)',
         backdropFilter: 'blur(40px) saturate(180%)',
@@ -325,13 +342,13 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
                           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acc.place_name}</div>
                           {acc.place_address && <div style={{ fontSize: 10, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acc.place_address}</div>}
                         </div>
-                        <button onClick={() => { setAccommodation(acc); setHotelForm({ check_in: acc.check_in || '', check_out: acc.check_out || '', confirmation: acc.confirmation || '', place_id: acc.place_id }); setHotelDayRange({ start: acc.start_day_id, end: acc.end_day_id }); setShowHotelPicker('edit') }}
+                        {canEditDays && <button onClick={() => { setAccommodation(acc); setHotelForm({ check_in: acc.check_in || '', check_out: acc.check_out || '', confirmation: acc.confirmation || '', place_id: acc.place_id }); setHotelDayRange({ start: acc.start_day_id, end: acc.end_day_id }); setShowHotelPicker('edit') }}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, flexShrink: 0 }}>
                           <Pencil size={12} style={{ color: 'var(--text-faint)' }} />
-                        </button>
-                        <button onClick={() => { setAccommodation(acc); handleRemoveAccommodation() }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, flexShrink: 0 }}>
+                        </button>}
+                        {canEditDays && <button onClick={() => { setAccommodation(acc); handleRemoveAccommodation() }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, flexShrink: 0 }}>
                           <X size={12} style={{ color: 'var(--text-faint)' }} />
-                        </button>
+                        </button>}
                       </div>
                       {/* Details grid */}
                       <div style={{ display: 'flex', gap: 0, margin: '0 12px 8px', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border-faint)' }}>
@@ -368,7 +385,12 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
                             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{linked.title}</div>
                             <div style={{ fontSize: 9, color: 'var(--text-faint)', display: 'flex', gap: 6, marginTop: 1 }}>
                               <span>{confirmed ? t('reservations.confirmed') : t('reservations.pending')}</span>
-                              {linked.confirmation_number && <span>#{linked.confirmation_number}</span>}
+                              {linked.confirmation_number && <span
+                                onMouseEnter={e => { if (blurCodes) e.currentTarget.style.filter = 'none' }}
+                                onMouseLeave={e => { if (blurCodes) e.currentTarget.style.filter = 'blur(4px)' }}
+                                onClick={e => { if (blurCodes) { const el = e.currentTarget; el.style.filter = el.style.filter === 'none' ? 'blur(4px)' : 'none' } }}
+                                style={{ filter: blurCodes ? 'blur(4px)' : 'none', transition: 'filter 0.2s', cursor: blurCodes ? 'pointer' : 'default' }}
+                              >#{linked.confirmation_number}</span>}
                             </div>
                           </div>
                         </div>
@@ -377,22 +399,22 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
                   )
                 })}
                 {/* Add another hotel */}
-                <button onClick={() => setShowHotelPicker(true)} style={{
+                {canEditDays && <button onClick={() => setShowHotelPicker(true)} style={{
                   width: '100%', padding: 8, border: '1.5px dashed var(--border-primary)', borderRadius: 10,
                   background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                   fontSize: 10, color: 'var(--text-faint)', fontFamily: 'inherit',
                 }}>
                   <Hotel size={10} /> {t('day.addAccommodation')}
-                </button>
+                </button>}
               </div>
             ) : (
-              <button onClick={() => setShowHotelPicker(true)} style={{
+              canEditDays ? <button onClick={() => setShowHotelPicker(true)} style={{
                 width: '100%', padding: 10, border: '1.5px dashed var(--border-primary)', borderRadius: 10,
                 background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                 fontSize: 11, color: 'var(--text-faint)', fontFamily: 'inherit',
               }}>
                 <Hotel size={12} /> {t('day.addAccommodation')}
-              </button>
+              </button> : null
             )}
 
             {/* Hotel Picker Popup — portal to body to escape transform stacking context */}
@@ -541,8 +563,12 @@ export default function DayDetailPanel({ day, days, places, categories = [], tri
                       setHotelForm({ check_in: '', check_out: '', confirmation: '', place_id: null })
                       // Reload
                       accommodationsApi.list(tripId).then(d => {
-                        setAccommodations(d.accommodations || [])
-                        const acc = (d.accommodations || []).find(a => days.some(dd => dd.id >= a.start_day_id && dd.id <= a.end_day_id && dd.id === day?.id))
+                        const all = d.accommodations || []
+                        setAccommodations(all)
+                        setDayAccommodations(all.filter(a =>
+                          days.some(dd => dd.id >= a.start_day_id && dd.id <= a.end_day_id && dd.id === day?.id)
+                        ))
+                        const acc = all.find(a => days.some(dd => dd.id >= a.start_day_id && dd.id <= a.end_day_id && dd.id === day?.id))
                         setAccommodation(acc || null)
                       })
                       onAccommodationChange?.()

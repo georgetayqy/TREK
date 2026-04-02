@@ -1,10 +1,35 @@
 import express, { Request, Response } from 'express';
+import fetch from 'node-fetch';
 import { db } from '../db/database';
 import { authenticate } from '../middleware/auth';
 import { AuthRequest, Trip, Place } from '../types';
 
 const router = express.Router();
 router.use(authenticate);
+
+// Geocode cache: rounded coords -> country code
+const geocodeCache = new Map<string, string | null>();
+
+function roundKey(lat: number, lng: number): string {
+  return `${lat.toFixed(3)},${lng.toFixed(3)}`;
+}
+
+async function reverseGeocodeCountry(lat: number, lng: number): Promise<string | null> {
+  const key = roundKey(lat, lng);
+  if (geocodeCache.has(key)) return geocodeCache.get(key)!;
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=3&accept-language=en`, {
+      headers: { 'User-Agent': 'TREK Travel Planner' },
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { address?: { country_code?: string } };
+    const code = data.address?.country_code?.toUpperCase() || null;
+    geocodeCache.set(key, code);
+    return code;
+  } catch {
+    return null;
+  }
+}
 
 const COUNTRY_BOXES: Record<string, [number, number, number, number]> = {
   AF:[60.5,29.4,75,38.5],AL:[19,39.6,21.1,42.7],DZ:[-8.7,19,12,37.1],AD:[1.4,42.4,1.8,42.7],AO:[11.7,-18.1,24.1,-4.4],
@@ -83,7 +108,7 @@ const CONTINENT_MAP: Record<string, string> = {
   SE:'Europe',CH:'Europe',TH:'Asia',TR:'Europe',UA:'Europe',AE:'Asia',GB:'Europe',US:'North America',VN:'Asia',NG:'Africa',
 };
 
-router.get('/stats', (req: Request, res: Response) => {
+router.get('/stats', async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const userId = authReq.user.id;
 
@@ -109,6 +134,9 @@ router.get('/stats', (req: Request, res: Response) => {
   const countrySet = new Map<string, CountryEntry>();
   for (const place of places) {
     let code = getCountryFromAddress(place.address);
+    if (!code && place.lat && place.lng) {
+      code = await reverseGeocodeCountry(place.lat, place.lng);
+    }
     if (!code && place.lat && place.lng) {
       code = getCountryFromCoords(place.lat, place.lng);
     }
@@ -277,10 +305,10 @@ router.get('/bucket-list', (req: Request, res: Response) => {
 
 router.post('/bucket-list', (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
-  const { name, lat, lng, country_code, notes } = req.body;
+  const { name, lat, lng, country_code, notes, target_date } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
-  const result = db.prepare('INSERT INTO bucket_list (user_id, name, lat, lng, country_code, notes) VALUES (?, ?, ?, ?, ?, ?)').run(
-    authReq.user.id, name.trim(), lat ?? null, lng ?? null, country_code ?? null, notes ?? null
+  const result = db.prepare('INSERT INTO bucket_list (user_id, name, lat, lng, country_code, notes, target_date) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    authReq.user.id, name.trim(), lat ?? null, lng ?? null, country_code ?? null, notes ?? null, target_date ?? null
   );
   const item = db.prepare('SELECT * FROM bucket_list WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json({ item });
@@ -288,10 +316,25 @@ router.post('/bucket-list', (req: Request, res: Response) => {
 
 router.put('/bucket-list/:id', (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
-  const { name, notes } = req.body;
+  const { name, notes, lat, lng, country_code, target_date } = req.body;
   const item = db.prepare('SELECT * FROM bucket_list WHERE id = ? AND user_id = ?').get(req.params.id, authReq.user.id);
   if (!item) return res.status(404).json({ error: 'Item not found' });
-  db.prepare('UPDATE bucket_list SET name = COALESCE(?, name), notes = COALESCE(?, notes) WHERE id = ?').run(name?.trim() || null, notes ?? null, req.params.id);
+  db.prepare(`UPDATE bucket_list SET
+    name = COALESCE(?, name),
+    notes = CASE WHEN ? THEN ? ELSE notes END,
+    lat = CASE WHEN ? THEN ? ELSE lat END,
+    lng = CASE WHEN ? THEN ? ELSE lng END,
+    country_code = CASE WHEN ? THEN ? ELSE country_code END,
+    target_date = CASE WHEN ? THEN ? ELSE target_date END
+    WHERE id = ?`).run(
+    name?.trim() || null,
+    notes !== undefined ? 1 : 0, notes !== undefined ? (notes || null) : null,
+    lat !== undefined ? 1 : 0, lat !== undefined ? (lat || null) : null,
+    lng !== undefined ? 1 : 0, lng !== undefined ? (lng || null) : null,
+    country_code !== undefined ? 1 : 0, country_code !== undefined ? (country_code || null) : null,
+    target_date !== undefined ? 1 : 0, target_date !== undefined ? (target_date || null) : null,
+    req.params.id
+  );
   res.json({ item: db.prepare('SELECT * FROM bucket_list WHERE id = ?').get(req.params.id) });
 });
 

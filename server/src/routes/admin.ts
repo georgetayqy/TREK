@@ -1,16 +1,26 @@
 import express, { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { db } from '../db/database';
 import { authenticate, adminOnly } from '../middleware/auth';
 import { AuthRequest, User, Addon } from '../types';
+import { writeAudit, getClientIp, logInfo } from '../services/auditLog';
+import { getAllPermissions, savePermissions, PERMISSION_ACTIONS } from '../services/permissions';
+import { revokeUserSessions } from '../mcp';
+import { maybe_encrypt_api_key, decrypt_api_key } from '../services/apiKeyCrypto';
+import { validatePassword } from '../services/passwordPolicy';
+import { updateJwtSecret } from '../config';
 
 const router = express.Router();
 
 router.use(authenticate, adminOnly);
+
+function utcSuffix(ts: string | null | undefined): string | null {
+  if (!ts) return null;
+  return ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z';
+}
 
 router.get('/users', (req: Request, res: Response) => {
   const users = db.prepare(
@@ -21,7 +31,13 @@ router.get('/users', (req: Request, res: Response) => {
     const { getOnlineUserIds } = require('../websocket');
     onlineUserIds = getOnlineUserIds();
   } catch { /* */ }
-  const usersWithStatus = users.map(u => ({ ...u, online: onlineUserIds.has(u.id) }));
+  const usersWithStatus = users.map(u => ({
+    ...u,
+    created_at: utcSuffix(u.created_at),
+    updated_at: utcSuffix(u.updated_at as string),
+    last_login: utcSuffix(u.last_login),
+    online: onlineUserIds.has(u.id),
+  }));
   res.json({ users: usersWithStatus });
 });
 
@@ -31,6 +47,9 @@ router.post('/users', (req: Request, res: Response) => {
   if (!username?.trim() || !email?.trim() || !password?.trim()) {
     return res.status(400).json({ error: 'Username, email and password are required' });
   }
+
+  const pwCheck = validatePassword(password.trim());
+  if (!pwCheck.ok) return res.status(400).json({ error: pwCheck.reason });
 
   if (role && !['user', 'admin'].includes(role)) {
     return res.status(400).json({ error: 'Invalid role' });
@@ -52,6 +71,14 @@ router.post('/users', (req: Request, res: Response) => {
     'SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?'
   ).get(result.lastInsertRowid);
 
+  const authReq = req as AuthRequest;
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.user_create',
+    resource: String(result.lastInsertRowid),
+    ip: getClientIp(req),
+    details: { username: username.trim(), email: email.trim(), role: role || 'user' },
+  });
   res.status(201).json({ user });
 });
 
@@ -74,6 +101,10 @@ router.put('/users/:id', (req: Request, res: Response) => {
     if (conflict) return res.status(409).json({ error: 'Email already taken' });
   }
 
+  if (password) {
+    const pwCheck = validatePassword(password);
+    if (!pwCheck.ok) return res.status(400).json({ error: pwCheck.reason });
+  }
   const passwordHash = password ? bcrypt.hashSync(password, 12) : null;
 
   db.prepare(`
@@ -90,6 +121,20 @@ router.put('/users/:id', (req: Request, res: Response) => {
     'SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?'
   ).get(req.params.id);
 
+  const authReq = req as AuthRequest;
+  const changed: string[] = [];
+  if (username) changed.push('username');
+  if (email) changed.push('email');
+  if (role) changed.push('role');
+  if (password) changed.push('password');
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.user_update',
+    resource: String(req.params.id),
+    ip: getClientIp(req),
+    details: { targetUser: user.email, fields: changed },
+  });
+  logInfo(`Admin ${authReq.user.email} edited user ${user.email} (fields: ${changed.join(', ')})`);
   res.json({ user: updated });
 });
 
@@ -99,10 +144,18 @@ router.delete('/users/:id', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Cannot delete own account' });
   }
 
-  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  const userToDel = db.prepare('SELECT id, email FROM users WHERE id = ?').get(req.params.id) as { id: number; email: string } | undefined;
+  if (!userToDel) return res.status(404).json({ error: 'User not found' });
 
   db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.user_delete',
+    resource: String(req.params.id),
+    ip: getClientIp(req),
+    details: { targetUser: userToDel.email },
+  });
+  logInfo(`Admin ${authReq.user.email} deleted user ${userToDel.email}`);
   res.json({ success: true });
 });
 
@@ -115,36 +168,119 @@ router.get('/stats', (_req: Request, res: Response) => {
   res.json({ totalUsers, totalTrips, totalPlaces, totalFiles });
 });
 
+// Permissions management
+router.get('/permissions', (_req: Request, res: Response) => {
+  const current = getAllPermissions();
+  const actions = PERMISSION_ACTIONS.map(a => ({
+    key: a.key,
+    level: current[a.key],
+    defaultLevel: a.defaultLevel,
+    allowedLevels: a.allowedLevels,
+  }));
+  res.json({ permissions: actions });
+});
+
+router.put('/permissions', (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { permissions } = req.body;
+  if (!permissions || typeof permissions !== 'object') {
+    return res.status(400).json({ error: 'permissions object required' });
+  }
+  const { skipped } = savePermissions(permissions);
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.permissions_update',
+    resource: 'permissions',
+    ip: getClientIp(req),
+    details: permissions,
+  });
+  res.json({ success: true, permissions: getAllPermissions(), ...(skipped.length ? { skipped } : {}) });
+});
+
+router.get('/audit-log', (req: Request, res: Response) => {
+  const limitRaw = parseInt(String(req.query.limit || '100'), 10);
+  const offsetRaw = parseInt(String(req.query.offset || '0'), 10);
+  const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
+  const offset = Math.max(Number.isFinite(offsetRaw) ? offsetRaw : 0, 0);
+  type Row = {
+    id: number;
+    created_at: string;
+    user_id: number | null;
+    username: string | null;
+    user_email: string | null;
+    action: string;
+    resource: string | null;
+    details: string | null;
+    ip: string | null;
+  };
+  const rows = db.prepare(`
+    SELECT a.id, a.created_at, a.user_id, u.username, u.email as user_email, a.action, a.resource, a.details, a.ip
+    FROM audit_log a
+    LEFT JOIN users u ON u.id = a.user_id
+    ORDER BY a.id DESC
+    LIMIT ? OFFSET ?
+  `).all(limit, offset) as Row[];
+  const total = (db.prepare('SELECT COUNT(*) as c FROM audit_log').get() as { c: number }).c;
+  res.json({
+    entries: rows.map((r) => {
+      let details: Record<string, unknown> | null = null;
+      if (r.details) {
+        try {
+          details = JSON.parse(r.details) as Record<string, unknown>;
+        } catch {
+          details = { _parse_error: true };
+        }
+      }
+      const created_at = r.created_at && !r.created_at.endsWith('Z') ? r.created_at.replace(' ', 'T') + 'Z' : r.created_at;
+      return { ...r, created_at, details };
+    }),
+    total,
+    limit,
+    offset,
+  });
+});
+
 router.get('/oidc', (_req: Request, res: Response) => {
   const get = (key: string) => (db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as { value: string } | undefined)?.value || '';
-  const secret = get('oidc_client_secret');
+  const secret = decrypt_api_key(get('oidc_client_secret'));
   res.json({
     issuer: get('oidc_issuer'),
     client_id: get('oidc_client_id'),
     client_secret_set: !!secret,
     display_name: get('oidc_display_name'),
     oidc_only: get('oidc_only') === 'true',
+    discovery_url: get('oidc_discovery_url'),
   });
 });
 
 router.put('/oidc', (req: Request, res: Response) => {
-  const { issuer, client_id, client_secret, display_name, oidc_only } = req.body;
+  const { issuer, client_id, client_secret, display_name, oidc_only, discovery_url } = req.body;
   const set = (key: string, val: string) => db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)").run(key, val || '');
   set('oidc_issuer', issuer);
   set('oidc_client_id', client_id);
-  if (client_secret !== undefined) set('oidc_client_secret', client_secret);
+  if (client_secret !== undefined) set('oidc_client_secret', maybe_encrypt_api_key(client_secret) ?? '');
   set('oidc_display_name', display_name);
   set('oidc_only', oidc_only ? 'true' : 'false');
+  set('oidc_discovery_url', discovery_url);
+  const authReq = req as AuthRequest;
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.oidc_update',
+    ip: getClientIp(req),
+    details: { oidc_only: !!oidc_only, issuer_set: !!issuer },
+  });
   res.json({ success: true });
 });
 
-router.post('/save-demo-baseline', (_req: Request, res: Response) => {
+router.post('/save-demo-baseline', (req: Request, res: Response) => {
   if (process.env.DEMO_MODE !== 'true') {
     return res.status(404).json({ error: 'Not found' });
   }
   try {
     const { saveBaseline } = require('../demo/demo-reset');
     saveBaseline();
+    const authReq = req as AuthRequest;
+    writeAudit({ userId: authReq.user.id, action: 'admin.demo_baseline_save', ip: getClientIp(req) });
     res.json({ success: true, message: 'Demo baseline saved. Hourly resets will restore to this state.' });
   } catch (err: unknown) {
     console.error(err);
@@ -201,42 +337,6 @@ router.get('/version-check', async (_req: Request, res: Response) => {
   }
 });
 
-router.post('/update', async (_req: Request, res: Response) => {
-  const rootDir = path.resolve(__dirname, '../../..');
-  const serverDir = path.resolve(__dirname, '../..');
-  const clientDir = path.join(rootDir, 'client');
-  const steps: { step: string; success?: boolean; output?: string; version?: string }[] = [];
-
-  try {
-    const pullOutput = execSync('git pull origin main', { cwd: rootDir, timeout: 60000, encoding: 'utf8' });
-    steps.push({ step: 'git pull', success: true, output: pullOutput.trim() });
-
-    execSync('npm install --production --ignore-scripts', { cwd: serverDir, timeout: 120000, encoding: 'utf8' });
-    steps.push({ step: 'npm install (server)', success: true });
-
-    if (process.env.NODE_ENV === 'production') {
-      execSync('npm install --ignore-scripts', { cwd: clientDir, timeout: 120000, encoding: 'utf8' });
-      execSync('npm run build', { cwd: clientDir, timeout: 120000, encoding: 'utf8' });
-      steps.push({ step: 'npm install + build (client)', success: true });
-    }
-
-    delete require.cache[require.resolve('../../package.json')];
-    const { version: newVersion } = require('../../package.json');
-    steps.push({ step: 'version', version: newVersion });
-
-    res.json({ success: true, steps, restarting: true });
-
-    setTimeout(() => {
-      console.log('[Update] Restarting after update...');
-      process.exit(0);
-    }, 1000);
-  } catch (err: unknown) {
-    console.error(err);
-    steps.push({ step: 'error', success: false, output: 'Internal error' });
-    res.status(500).json({ success: false, steps });
-  }
-});
-
 // ── Invite Tokens ───────────────────────────────────────────────────────────
 
 router.get('/invites', (_req: Request, res: Response) => {
@@ -260,24 +360,39 @@ router.post('/invites', (req: Request, res: Response) => {
     ? new Date(Date.now() + parseInt(expires_in_days) * 86400000).toISOString()
     : null;
 
-  db.prepare(
+  const ins = db.prepare(
     'INSERT INTO invite_tokens (token, max_uses, expires_at, created_by) VALUES (?, ?, ?, ?)'
   ).run(token, uses, expiresAt, authReq.user.id);
 
+  const inviteId = Number(ins.lastInsertRowid);
   const invite = db.prepare(`
     SELECT i.*, u.username as created_by_name
     FROM invite_tokens i
     JOIN users u ON i.created_by = u.id
-    WHERE i.id = last_insert_rowid()
-  `).get();
+    WHERE i.id = ?
+  `).get(inviteId);
 
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.invite_create',
+    resource: String(inviteId),
+    ip: getClientIp(req),
+    details: { max_uses: uses, expires_in_days: expires_in_days ?? null },
+  });
   res.status(201).json({ invite });
 });
 
-router.delete('/invites/:id', (_req: Request, res: Response) => {
-  const invite = db.prepare('SELECT id FROM invite_tokens WHERE id = ?').get(_req.params.id);
+router.delete('/invites/:id', (req: Request, res: Response) => {
+  const invite = db.prepare('SELECT id FROM invite_tokens WHERE id = ?').get(req.params.id);
   if (!invite) return res.status(404).json({ error: 'Invite not found' });
-  db.prepare('DELETE FROM invite_tokens WHERE id = ?').run(_req.params.id);
+  db.prepare('DELETE FROM invite_tokens WHERE id = ?').run(req.params.id);
+  const authReq = req as AuthRequest;
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.invite_delete',
+    resource: String(req.params.id),
+    ip: getClientIp(req),
+  });
   res.json({ success: true });
 });
 
@@ -291,6 +406,13 @@ router.get('/bag-tracking', (_req: Request, res: Response) => {
 router.put('/bag-tracking', (req: Request, res: Response) => {
   const { enabled } = req.body;
   db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('bag_tracking_enabled', ?)").run(enabled ? 'true' : 'false');
+  const authReq = req as AuthRequest;
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.bag_tracking',
+    ip: getClientIp(req),
+    details: { enabled: !!enabled },
+  });
   res.json({ enabled: !!enabled });
 });
 
@@ -337,10 +459,19 @@ router.put('/packing-templates/:id', (req: Request, res: Response) => {
   res.json({ template: db.prepare('SELECT * FROM packing_templates WHERE id = ?').get(req.params.id) });
 });
 
-router.delete('/packing-templates/:id', (_req: Request, res: Response) => {
-  const template = db.prepare('SELECT * FROM packing_templates WHERE id = ?').get(_req.params.id);
+router.delete('/packing-templates/:id', (req: Request, res: Response) => {
+  const template = db.prepare('SELECT * FROM packing_templates WHERE id = ?').get(req.params.id);
   if (!template) return res.status(404).json({ error: 'Template not found' });
-  db.prepare('DELETE FROM packing_templates WHERE id = ?').run(_req.params.id);
+  db.prepare('DELETE FROM packing_templates WHERE id = ?').run(req.params.id);
+  const authReq = req as AuthRequest;
+  const t = template as { name?: string };
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.packing_template_delete',
+    resource: String(req.params.id),
+    ip: getClientIp(req),
+    details: { name: t.name },
+  });
   res.json({ success: true });
 });
 
@@ -408,7 +539,57 @@ router.put('/addons/:id', (req: Request, res: Response) => {
   if (enabled !== undefined) db.prepare('UPDATE addons SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, req.params.id);
   if (config !== undefined) db.prepare('UPDATE addons SET config = ? WHERE id = ?').run(JSON.stringify(config), req.params.id);
   const updated = db.prepare('SELECT * FROM addons WHERE id = ?').get(req.params.id) as Addon;
+  const authReq = req as AuthRequest;
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'admin.addon_update',
+    resource: String(req.params.id),
+    ip: getClientIp(req),
+    details: { enabled: enabled !== undefined ? !!enabled : undefined, config_changed: config !== undefined },
+  });
   res.json({ addon: { ...updated, enabled: !!updated.enabled, config: JSON.parse(updated.config || '{}') } });
+});
+
+router.get('/mcp-tokens', (req: Request, res: Response) => {
+  const tokens = db.prepare(`
+    SELECT t.id, t.name, t.token_prefix, t.created_at, t.last_used_at, t.user_id, u.username
+    FROM mcp_tokens t
+    JOIN users u ON u.id = t.user_id
+    ORDER BY t.created_at DESC
+  `).all();
+  res.json({ tokens });
+});
+
+router.delete('/mcp-tokens/:id', (req: Request, res: Response) => {
+  const token = db.prepare('SELECT id, user_id FROM mcp_tokens WHERE id = ?').get(req.params.id) as { id: number; user_id: number } | undefined;
+  if (!token) return res.status(404).json({ error: 'Token not found' });
+  db.prepare('DELETE FROM mcp_tokens WHERE id = ?').run(req.params.id);
+  revokeUserSessions(token.user_id);
+  res.json({ success: true });
+});
+
+router.post('/rotate-jwt-secret', (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const newSecret = crypto.randomBytes(32).toString('hex');
+  const dataDir = path.resolve(__dirname, '../../data');
+  const secretFile = path.join(dataDir, '.jwt_secret');
+  try {
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(secretFile, newSecret, { mode: 0o600 });
+  } catch (err: unknown) {
+    return res.status(500).json({ error: 'Failed to persist new JWT secret to disk' });
+  }
+  updateJwtSecret(newSecret);
+  writeAudit({
+    user_id: authReq.user?.id ?? null,
+    username: authReq.user?.username ?? 'unknown',
+    action: 'admin.rotate_jwt_secret',
+    target_type: 'system',
+    target_id: null,
+    details: null,
+    ip: getClientIp(req),
+  });
+  res.json({ success: true });
 });
 
 export default router;

@@ -4,9 +4,14 @@ import unzipper from 'unzipper';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import Database from 'better-sqlite3';
 import { authenticate, adminOnly } from '../middleware/auth';
 import * as scheduler from '../scheduler';
 import { db, closeDb, reinitialize } from '../db/database';
+import { AuthRequest } from '../types';
+import { writeAudit, getClientIp } from '../services/auditLog';
+
+type RestoreAuditInfo = { userId: number; ip: string | null; source: 'backup.restore' | 'backup.upload_restore'; label: string };
 
 const router = express.Router();
 
@@ -103,6 +108,14 @@ router.post('/create', backupRateLimiter(3, BACKUP_RATE_WINDOW), async (_req: Re
     });
 
     const stat = fs.statSync(outputPath);
+    const authReq = _req as AuthRequest;
+    writeAudit({
+      userId: authReq.user.id,
+      action: 'backup.create',
+      resource: filename,
+      ip: getClientIp(_req),
+      details: { size: stat.size },
+    });
     res.json({
       success: true,
       backup: {
@@ -134,7 +147,7 @@ router.get('/download/:filename', (req: Request, res: Response) => {
   res.download(filePath, filename);
 });
 
-async function restoreFromZip(zipPath: string, res: Response) {
+async function restoreFromZip(zipPath: string, res: Response, audit?: RestoreAuditInfo) {
   const extractDir = path.join(dataDir, `restore-${Date.now()}`);
   try {
     await fs.createReadStream(zipPath)
@@ -145,6 +158,34 @@ async function restoreFromZip(zipPath: string, res: Response) {
     if (!fs.existsSync(extractedDb)) {
       fs.rmSync(extractDir, { recursive: true, force: true });
       return res.status(400).json({ error: 'Invalid backup: travel.db not found' });
+    }
+
+    let uploadedDb: InstanceType<typeof Database> | null = null;
+    try {
+      uploadedDb = new Database(extractedDb, { readonly: true });
+
+      const integrityResult = uploadedDb.prepare('PRAGMA integrity_check').get() as { integrity_check: string };
+      if (integrityResult.integrity_check !== 'ok') {
+        fs.rmSync(extractDir, { recursive: true, force: true });
+        return res.status(400).json({ error: `Uploaded database failed integrity check: ${integrityResult.integrity_check}` });
+      }
+
+      const requiredTables = ['users', 'trips', 'trip_members', 'places', 'days'];
+      const existingTables = uploadedDb
+        .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+        .all() as { name: string }[];
+      const tableNames = new Set(existingTables.map(t => t.name));
+      for (const table of requiredTables) {
+        if (!tableNames.has(table)) {
+          fs.rmSync(extractDir, { recursive: true, force: true });
+          return res.status(400).json({ error: `Uploaded database is missing required table: ${table}. This does not appear to be a TREK backup.` });
+        }
+      }
+    } catch (err) {
+      fs.rmSync(extractDir, { recursive: true, force: true });
+      return res.status(400).json({ error: 'Uploaded file is not a valid SQLite database' });
+    } finally {
+      uploadedDb?.close();
     }
 
     closeDb();
@@ -174,6 +215,14 @@ async function restoreFromZip(zipPath: string, res: Response) {
 
     fs.rmSync(extractDir, { recursive: true, force: true });
 
+    if (audit) {
+      writeAudit({
+        userId: audit.userId,
+        action: audit.source,
+        resource: audit.label,
+        ip: audit.ip,
+      });
+    }
     res.json({ success: true });
   } catch (err: unknown) {
     console.error('Restore error:', err);
@@ -191,7 +240,13 @@ router.post('/restore/:filename', async (req: Request, res: Response) => {
   if (!fs.existsSync(zipPath)) {
     return res.status(404).json({ error: 'Backup not found' });
   }
-  await restoreFromZip(zipPath, res);
+  const authReq = req as AuthRequest;
+  await restoreFromZip(zipPath, res, {
+    userId: authReq.user.id,
+    ip: getClientIp(req),
+    source: 'backup.restore',
+    label: filename,
+  });
 });
 
 const uploadTmp = multer({
@@ -206,23 +261,43 @@ const uploadTmp = multer({
 router.post('/upload-restore', uploadTmp.single('backup'), async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const zipPath = req.file.path;
-  await restoreFromZip(zipPath, res);
+  const authReq = req as AuthRequest;
+  const origName = req.file.originalname || 'upload.zip';
+  await restoreFromZip(zipPath, res, {
+    userId: authReq.user.id,
+    ip: getClientIp(req),
+    source: 'backup.upload_restore',
+    label: origName,
+  });
   if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
 });
 
 router.get('/auto-settings', (_req: Request, res: Response) => {
   try {
-    res.json({ settings: scheduler.loadSettings() });
+    const tz = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    res.json({ settings: scheduler.loadSettings(), timezone: tz });
   } catch (err: unknown) {
     console.error('[backup] GET auto-settings:', err);
     res.status(500).json({ error: 'Could not load backup settings' });
   }
 });
 
+function parseIntField(raw: unknown, fallback: number): number {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return Math.floor(raw);
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
 function parseAutoBackupBody(body: Record<string, unknown>): {
   enabled: boolean;
   interval: string;
   keep_days: number;
+  hour: number;
+  day_of_week: number;
+  day_of_month: number;
 } {
   const enabled = body.enabled === true || body.enabled === 'true' || body.enabled === 1;
   const rawInterval = body.interval;
@@ -230,17 +305,11 @@ function parseAutoBackupBody(body: Record<string, unknown>): {
     typeof rawInterval === 'string' && scheduler.VALID_INTERVALS.includes(rawInterval)
       ? rawInterval
       : 'daily';
-  const rawKeep = body.keep_days;
-  let keepNum: number;
-  if (typeof rawKeep === 'number' && Number.isFinite(rawKeep)) {
-    keepNum = Math.floor(rawKeep);
-  } else if (typeof rawKeep === 'string' && rawKeep.trim() !== '') {
-    keepNum = parseInt(rawKeep, 10);
-  } else {
-    keepNum = NaN;
-  }
-  const keep_days = Number.isFinite(keepNum) && keepNum >= 0 ? keepNum : 7;
-  return { enabled, interval, keep_days };
+  const keep_days = Math.max(0, parseIntField(body.keep_days, 7));
+  const hour = Math.min(23, Math.max(0, parseIntField(body.hour, 2)));
+  const day_of_week = Math.min(6, Math.max(0, parseIntField(body.day_of_week, 0)));
+  const day_of_month = Math.min(28, Math.max(1, parseIntField(body.day_of_month, 1)));
+  return { enabled, interval, keep_days, hour, day_of_week, day_of_month };
 }
 
 router.put('/auto-settings', (req: Request, res: Response) => {
@@ -248,6 +317,13 @@ router.put('/auto-settings', (req: Request, res: Response) => {
     const settings = parseAutoBackupBody((req.body || {}) as Record<string, unknown>);
     scheduler.saveSettings(settings);
     scheduler.start();
+    const authReq = req as AuthRequest;
+    writeAudit({
+      userId: authReq.user.id,
+      action: 'backup.auto_settings',
+      ip: getClientIp(req),
+      details: { enabled: settings.enabled, interval: settings.interval, keep_days: settings.keep_days },
+    });
     res.json({ settings });
   } catch (err: unknown) {
     console.error('[backup] PUT auto-settings:', err);
@@ -272,6 +348,13 @@ router.delete('/:filename', (req: Request, res: Response) => {
   }
 
   fs.unlinkSync(filePath);
+  const authReq = req as AuthRequest;
+  writeAudit({
+    userId: authReq.user.id,
+    action: 'backup.delete',
+    resource: filename,
+    ip: getClientIp(req),
+  });
   res.json({ success: true });
 });
 
