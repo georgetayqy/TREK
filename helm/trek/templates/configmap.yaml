@@ -6,3 +6,5 @@ metadata:
 data:
   NODE_ENV: "production"
   PORT: "{{ .Values.config.port }}"
+  ALLOW_INTERNAL_NETWORK: "true"
+  APP_URL: "https:{{ .Values.ingress.hostName }}"
