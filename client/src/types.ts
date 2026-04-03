@@ -104,13 +104,17 @@ export interface BudgetItem {
   id: number
   trip_id: number
   name: string
-  amount: number
-  currency: string
+  total_price: number
+  currency: string | null
+  exchange_rate: number
   category: string | null
   paid_by: number | null
   persons: number
+  days: number | null
+  note: string | null
   members: BudgetMember[]
   expense_date: string | null
+  sort_order: number
 }
 
 export interface BudgetMember {

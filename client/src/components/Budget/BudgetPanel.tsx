@@ -6,7 +6,7 @@ import { useCanDo } from '../../store/permissionsStore'
 import { useTranslation } from '../../i18n'
 import { Plus, Trash2, Calculator, Wallet, Pencil, Users, Check, Info, ChevronDown, ChevronRight, Download } from 'lucide-react'
 import CustomSelect from '../shared/CustomSelect'
-import { budgetApi } from '../../api/client'
+import { budgetApi, fetchExchangeRate } from '../../api/client'
 import { CustomDatePicker } from '../shared/CustomDateTimePicker'
 import type { BudgetItem, BudgetMember } from '../../types'
 import { currencyDecimals } from '../../utils/formatters'
@@ -133,6 +133,7 @@ function AddItemRow({ onAdd, t }: AddItemRowProps) {
         <input value={price} onChange={e => setPrice(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()}
           placeholder="0,00" inputMode="decimal" style={{ ...inp, textAlign: 'center' }} />
       </td>
+      <td className="hidden sm:table-cell" style={{ padding: '4px 6px', textAlign: 'center', color: 'var(--text-faint)', fontSize: 12 }}>—</td>
       <td className="hidden sm:table-cell" style={{ padding: '4px 6px', textAlign: 'center' }}>
         <input value={persons} onChange={e => setPersons(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()}
           placeholder="-" inputMode="numeric" style={{ ...inp, textAlign: 'center', maxWidth: 60, margin: '0 auto' }} />
@@ -429,10 +430,12 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
   const [editingCat, setEditingCat] = useState(null) // { name, value }
   const [settlement, setSettlement] = useState<{ balances: any[]; flows: any[] } | null>(null)
   const [settlementOpen, setSettlementOpen] = useState(false)
-  const currency = trip?.currency || 'EUR'
+  const baseCurrency = trip?.currency || 'EUR'
   const canEdit = can('budget_edit', trip)
+  const [rateLoading, setRateLoading] = useState<number | null>(null)
 
-  const fmt = (v, cur) => fmtNum(v, locale, cur)
+  const fmt = (v, cur?) => fmtNum(v, locale, cur ?? baseCurrency)
+  const itemCurrency = (item) => item.currency || baseCurrency
   const hasMultipleMembers = tripMembers.length > 1
 
   // Load settlement data whenever budget items change
@@ -441,8 +444,41 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
     budgetApi.settlement(tripId).then(setSettlement).catch(() => {})
   }, [tripId, budgetItems, hasMultipleMembers])
 
-  const setCurrency = (cur) => {
-    if (tripId) updateTrip(tripId, { currency: cur })
+  const setBaseCurrency = async (newBase: string) => {
+    if (!tripId || newBase === baseCurrency) return
+    const oldBase = baseCurrency
+    updateTrip(tripId, { currency: newBase })
+
+    const items = budgetItems || []
+    if (items.length === 0) return
+
+    // Fetch one rate per unique source currency (deduplicated)
+    const sourceCurrencies = [...new Set(items.map(i => i.currency || oldBase).filter(c => c !== newBase))]
+    const rateMap: Record<string, number> = {}
+    await Promise.all(sourceCurrencies.map(async (cur) => {
+      rateMap[cur] = await fetchExchangeRate(cur, newBase).catch(() => 1)
+    }))
+
+    await Promise.all(items.map(item => {
+      const effCur = item.currency || oldBase
+      if (effCur === newBase) {
+        // Item is now in the base currency — clear explicit currency
+        return updateBudgetItem(tripId, item.id, { currency: null, exchange_rate: 1 })
+      }
+      // Stamp the explicit source currency so the amount stays traceable, update rate
+      return updateBudgetItem(tripId, item.id, { currency: effCur, exchange_rate: rateMap[effCur] ?? 1 })
+    }))
+  }
+
+  const handleCurrencyChange = async (id: number, newCurrency: string) => {
+    setRateLoading(id)
+    try {
+      const isBase = newCurrency === baseCurrency
+      const rate = isBase ? 1 : await fetchExchangeRate(newCurrency, baseCurrency).catch(() => 1)
+      await updateBudgetItem(tripId, id, { currency: isBase ? null : newCurrency, exchange_rate: rate })
+    } finally {
+      setRateLoading(null)
+    }
   }
 
   useEffect(() => { if (tripId) loadBudgetItems(tripId) }, [tripId])
@@ -455,12 +491,12 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
   }, {}), [budgetItems])
 
   const categoryNames = Object.keys(grouped)
-  const grandTotal = (budgetItems || []).reduce((s, i) => s + (i.total_price || 0), 0)
+  const grandTotal = (budgetItems || []).reduce((s, i) => s + (i.total_price || 0) * (i.exchange_rate || 1), 0)
 
   const pieSegments = useMemo(() =>
     categoryNames.map((cat, i) => ({
       name: cat,
-      value: grouped[cat].reduce((s, x) => s + (x.total_price || 0), 0),
+      value: grouped[cat].reduce((s, x) => s + (x.total_price || 0) * (x.exchange_rate || 1), 0),
       color: PIE_COLORS[i % PIE_COLORS.length],
     })).filter(s => s.value > 0)
   , [grouped, categoryNames])
@@ -486,22 +522,25 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
   const handleExportCsv = () => {
     const sep = ';'
     const esc = (v: any) => { const s = String(v ?? ''); return s.includes(sep) || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g, '""') + '"' : s }
-    const d = currencyDecimals(currency)
-    const fmtPrice = (v: number | null | undefined) => v != null ? v.toFixed(d) : ''
+    const fmtPrice = (v: number | null | undefined, cur?: string) => { if (v == null) return ''; const d = currencyDecimals(cur || baseCurrency); return v.toFixed(d) }
 
     const fmtDate = (iso: string) => { if (!iso) return ''; const d = new Date(iso + 'T00:00:00'); return d.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' }) }
-    const header = ['Category', 'Name', 'Date', 'Total (' + currency + ')', 'Persons', 'Days', 'Per Person', 'Per Day', 'Per Person/Day', 'Note']
+    const header = ['Category', 'Name', 'Date', 'Currency', 'Total', `Total (${baseCurrency})`, 'Exchange Rate', 'Persons', 'Days', 'Per Person', 'Per Day', 'Per Person/Day', 'Note']
     const rows = [header.join(sep)]
 
     for (const cat of categoryNames) {
       for (const item of (grouped[cat] || [])) {
+        const cur = itemCurrency(item)
+        const rate = item.exchange_rate || 1
         const pp = calcPP(item.total_price, item.persons)
         const pd = calcPD(item.total_price, item.days)
         const ppd = calcPPD(item.total_price, item.persons, item.days)
         rows.push([
           esc(item.category), esc(item.name), esc(fmtDate(item.expense_date || '')),
-          fmtPrice(item.total_price), item.persons ?? '', item.days ?? '',
-          fmtPrice(pp), fmtPrice(pd), fmtPrice(ppd),
+          cur, fmtPrice(item.total_price, cur), fmtPrice(item.total_price * rate),
+          cur === baseCurrency ? '1' : rate.toFixed(6),
+          item.persons ?? '', item.days ?? '',
+          fmtPrice(pp, cur), fmtPrice(pd, cur), fmtPrice(ppd, cur),
           esc(item.note || ''),
         ].join(sep))
       }
@@ -564,7 +603,7 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
         <div style={{ flex: 1, minWidth: 0 }}>
           {categoryNames.map((cat, ci) => {
             const items = grouped[cat]
-            const subtotal = items.reduce((s, x) => s + (x.total_price || 0), 0)
+            const subtotal = items.reduce((s, x) => s + (x.total_price || 0) * (x.exchange_rate || 1), 0)
             const color = PIE_COLORS[ci % PIE_COLORS.length]
 
             return (
@@ -595,7 +634,7 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
                     )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, opacity: 0.9 }}>{fmt(subtotal, currency)}</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, opacity: 0.9 }}>{fmt(subtotal)}</span>
                     {canEdit && (
                       <button onClick={() => handleDeleteCategory(cat)} title={t('budget.deleteCategory')}
                         style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer', padding: '3px 6px', display: 'flex', alignItems: 'center', opacity: 0.6 }}
@@ -612,6 +651,7 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
                       <tr>
                         <th style={{ ...th, textAlign: 'left', minWidth: 120 }}>{t('budget.table.name')}</th>
                         <th style={{ ...th, minWidth: 75 }}>{t('budget.table.total')}</th>
+                        <th className="hidden sm:table-cell" style={{ ...th, minWidth: 64 }}>{'CCY'}</th>
                         <th className="hidden sm:table-cell" style={{ ...th, minWidth: 160 }}>{t('budget.table.persons')}</th>
                         <th className="hidden sm:table-cell" style={{ ...th, minWidth: 55 }}>{t('budget.table.days')}</th>
                         <th className="hidden md:table-cell" style={{ ...th, minWidth: 100 }}>{t('budget.table.perPerson')}</th>
@@ -649,7 +689,24 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
                               )}
                             </td>
                             <td style={{ ...td, textAlign: 'center' }}>
-                              <InlineEditCell value={item.total_price} type="number" decimals={currencyDecimals(currency)} onSave={v => handleUpdateField(item.id, 'total_price', v)} style={{ textAlign: 'center' }} placeholder={currencyDecimals(currency) === 0 ? '0' : '0,00'} locale={locale} editTooltip={t('budget.editTooltip')} readOnly={!canEdit} />
+                              <InlineEditCell value={item.total_price} type="number" decimals={currencyDecimals(itemCurrency(item))} onSave={v => handleUpdateField(item.id, 'total_price', v)} style={{ textAlign: 'center' }} placeholder={currencyDecimals(itemCurrency(item)) === 0 ? '0' : '0,00'} locale={locale} editTooltip={t('budget.editTooltip')} readOnly={!canEdit} />
+                            </td>
+                            <td className="hidden sm:table-cell" style={{ ...td, textAlign: 'center' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                                <select
+                                  value={itemCurrency(item)}
+                                  onChange={e => handleCurrencyChange(item.id, e.target.value)}
+                                  disabled={!canEdit || rateLoading === item.id}
+                                  style={{ border: '1px solid var(--border-primary)', borderRadius: 4, padding: '2px 2px', fontSize: 11, background: 'var(--bg-input)', color: 'var(--text-primary)', cursor: canEdit ? 'pointer' : 'default', fontFamily: 'inherit', maxWidth: 58 }}
+                                >
+                                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                {item.currency && item.currency !== baseCurrency && (
+                                  <span style={{ fontSize: 9, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
+                                    {rateLoading === item.id ? '…' : `×${(item.exchange_rate || 1).toPrecision(3)}`}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="hidden sm:table-cell" style={{ ...td, textAlign: 'center', position: 'relative' }}>
                               {hasMultipleMembers ? (
@@ -667,9 +724,9 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
                             <td className="hidden sm:table-cell" style={{ ...td, textAlign: 'center' }}>
                               <InlineEditCell value={item.days} type="number" decimals={0} onSave={v => handleUpdateField(item.id, 'days', v != null ? parseInt(v) || null : null)} style={{ textAlign: 'center' }} placeholder="-" locale={locale} editTooltip={t('budget.editTooltip')} readOnly={!canEdit} />
                             </td>
-                            <td className="hidden md:table-cell" style={{ ...td, textAlign: 'center', color: pp != null ? 'var(--text-secondary)' : 'var(--text-faint)' }}>{pp != null ? fmt(pp, currency) : '-'}</td>
-                            <td className="hidden md:table-cell" style={{ ...td, textAlign: 'center', color: pd != null ? 'var(--text-secondary)' : 'var(--text-faint)' }}>{pd != null ? fmt(pd, currency) : '-'}</td>
-                            <td className="hidden lg:table-cell" style={{ ...td, textAlign: 'center', color: ppd != null ? 'var(--text-secondary)' : 'var(--text-faint)' }}>{ppd != null ? fmt(ppd, currency) : '-'}</td>
+                            <td className="hidden md:table-cell" style={{ ...td, textAlign: 'center', color: pp != null ? 'var(--text-secondary)' : 'var(--text-faint)' }}>{pp != null ? fmt(pp, itemCurrency(item)) : '-'}</td>
+                            <td className="hidden md:table-cell" style={{ ...td, textAlign: 'center', color: pd != null ? 'var(--text-secondary)' : 'var(--text-faint)' }}>{pd != null ? fmt(pd, itemCurrency(item)) : '-'}</td>
+                            <td className="hidden lg:table-cell" style={{ ...td, textAlign: 'center', color: ppd != null ? 'var(--text-secondary)' : 'var(--text-faint)' }}>{ppd != null ? fmt(ppd, itemCurrency(item)) : '-'}</td>
                             <td className="hidden sm:table-cell" style={{ ...td, padding: '2px 6px', width: 90, maxWidth: 90, textAlign: 'center' }}>
                               {canEdit ? (
                                 <div style={{ maxWidth: 90, margin: '0 auto' }}>
@@ -704,8 +761,8 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
         <div className="w-full md:w-[240px]" style={{ flexShrink: 0, position: 'sticky', top: 16, alignSelf: 'flex-start' }}>
           <div style={{ marginBottom: 12 }}>
             <CustomSelect
-              value={currency}
-              onChange={setCurrency}
+              value={baseCurrency}
+              onChange={setBaseCurrency}
               disabled={!canEdit}
               options={CURRENCIES.map(c => ({ value: c, label: `${c} (${SYMBOLS[c] || c})` }))}
               searchable
@@ -742,11 +799,11 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
               </div>
             </div>
             <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1, marginBottom: 4 }}>
-              {Number(grandTotal).toLocaleString(locale, { minimumFractionDigits: currencyDecimals(currency), maximumFractionDigits: currencyDecimals(currency) })}
+              {Number(grandTotal).toLocaleString(locale, { minimumFractionDigits: currencyDecimals(baseCurrency), maximumFractionDigits: currencyDecimals(baseCurrency) })}
             </div>
-            <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', fontWeight: 500 }}>{SYMBOLS[currency] || currency} {currency}</div>
+            <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', fontWeight: 500 }}>{SYMBOLS[baseCurrency] || baseCurrency} {baseCurrency}</div>
             {hasMultipleMembers && (budgetItems || []).some(i => i.members?.length > 0) && (
-              <PerPersonInline tripId={tripId} budgetItems={budgetItems} currency={currency} locale={locale} />
+              <PerPersonInline tripId={tripId} budgetItems={budgetItems} currency={baseCurrency} locale={locale} />
             )}
 
             {/* Settlement dropdown inside the total card */}
@@ -791,7 +848,7 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>→</span>
                           <span style={{ fontSize: 12, fontWeight: 700, color: '#f87171', whiteSpace: 'nowrap' }}>
-                            {fmt(flow.amount, currency)}
+                            {fmt(flow.amount)}
                           </span>
                           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>→</span>
                         </div>
@@ -823,7 +880,7 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
                               fontSize: 11, fontWeight: 600, flexShrink: 0,
                               color: b.balance > 0 ? '#4ade80' : '#f87171',
                             }}>
-                              {b.balance > 0 ? '+' : ''}{fmt(b.balance, currency)}
+                              {b.balance > 0 ? '+' : ''}{fmt(b.balance)}
                             </span>
                           </div>
                         ))}
@@ -853,7 +910,7 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
                     <div key={seg.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ width: 10, height: 10, borderRadius: 3, background: seg.color, flexShrink: 0 }} />
                       <span style={{ flex: 1, fontSize: 12, color: 'var(--text-secondary)', fontWeight: 500 }}>{seg.name}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmt(seg.value, currency)}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmt(seg.value)}</span>
                       <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap', minWidth: 38, textAlign: 'right' }}>{pct}%</span>
                     </div>
                   )

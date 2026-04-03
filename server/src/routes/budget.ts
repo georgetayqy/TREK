@@ -63,8 +63,8 @@ router.get('/summary/per-person', authenticate, (req: Request, res: Response) =>
 
   const summary = db.prepare(`
     SELECT bm.user_id, u.username, u.avatar,
-      SUM(bi.total_price * 1.0 / (SELECT COUNT(*) FROM budget_item_members WHERE budget_item_id = bi.id)) as total_assigned,
-      SUM(CASE WHEN bm.paid = 1 THEN bi.total_price * 1.0 / (SELECT COUNT(*) FROM budget_item_members WHERE budget_item_id = bi.id) ELSE 0 END) as total_paid,
+      SUM(bi.total_price * COALESCE(bi.exchange_rate, 1.0) / (SELECT COUNT(*) FROM budget_item_members WHERE budget_item_id = bi.id)) as total_assigned,
+      SUM(CASE WHEN bm.paid = 1 THEN bi.total_price * COALESCE(bi.exchange_rate, 1.0) / (SELECT COUNT(*) FROM budget_item_members WHERE budget_item_id = bi.id) ELSE 0 END) as total_paid,
       COUNT(bi.id) as items_count
     FROM budget_item_members bm
     JOIN budget_items bi ON bm.budget_item_id = bi.id
@@ -79,7 +79,7 @@ router.get('/summary/per-person', authenticate, (req: Request, res: Response) =>
 router.post('/', authenticate, (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const { tripId } = req.params;
-  const { category, name, total_price, persons, days, note, expense_date } = req.body;
+  const { category, name, total_price, persons, days, note, expense_date, currency, exchange_rate } = req.body;
 
   const trip = verifyTripOwnership(tripId, authReq.user.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
@@ -93,7 +93,7 @@ router.post('/', authenticate, (req: Request, res: Response) => {
   const sortOrder = (maxOrder.max !== null ? maxOrder.max : -1) + 1;
 
   const result = db.prepare(
-    'INSERT INTO budget_items (trip_id, category, name, total_price, persons, days, note, sort_order, expense_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO budget_items (trip_id, category, name, total_price, persons, days, note, sort_order, expense_date, currency, exchange_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(
     tripId,
     category || 'Other',
@@ -103,7 +103,9 @@ router.post('/', authenticate, (req: Request, res: Response) => {
     days !== undefined && days !== null ? days : null,
     note || null,
     sortOrder,
-    expense_date || null
+    expense_date || null,
+    currency || null,
+    exchange_rate != null ? exchange_rate : 1.0
   );
 
   const item = db.prepare('SELECT * FROM budget_items WHERE id = ?').get(result.lastInsertRowid) as BudgetItem & { members?: BudgetItemMember[] };
@@ -115,7 +117,7 @@ router.post('/', authenticate, (req: Request, res: Response) => {
 router.put('/:id', authenticate, (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const { tripId, id } = req.params;
-  const { category, name, total_price, persons, days, note, sort_order, expense_date } = req.body;
+  const { category, name, total_price, persons, days, note, sort_order, expense_date, currency, exchange_rate } = req.body;
 
   const trip = verifyTripOwnership(tripId, authReq.user.id);
   if (!trip) return res.status(404).json({ error: 'Trip not found' });
@@ -135,7 +137,9 @@ router.put('/:id', authenticate, (req: Request, res: Response) => {
       days = CASE WHEN ? THEN ? ELSE days END,
       note = CASE WHEN ? THEN ? ELSE note END,
       sort_order = CASE WHEN ? IS NOT NULL THEN ? ELSE sort_order END,
-      expense_date = CASE WHEN ? THEN ? ELSE expense_date END
+      expense_date = CASE WHEN ? THEN ? ELSE expense_date END,
+      currency = CASE WHEN ? THEN ? ELSE currency END,
+      exchange_rate = CASE WHEN ? IS NOT NULL THEN ? ELSE exchange_rate END
     WHERE id = ?
   `).run(
     category || null,
@@ -146,6 +150,8 @@ router.put('/:id', authenticate, (req: Request, res: Response) => {
     note !== undefined ? 1 : 0, note !== undefined ? note : null,
     sort_order !== undefined ? 1 : null, sort_order !== undefined ? sort_order : 0,
     expense_date !== undefined ? 1 : 0, expense_date !== undefined ? (expense_date || null) : null,
+    currency !== undefined ? 1 : 0, currency !== undefined ? (currency || null) : null,
+    exchange_rate !== undefined ? 1 : null, exchange_rate !== undefined ? exchange_rate : 1.0,
     id
   );
 
@@ -237,8 +243,9 @@ router.get('/settlement', authenticate, (req: Request, res: Response) => {
     const payers = members.filter(m => m.paid);
     if (payers.length === 0) continue; // no one marked as paid
 
-    const sharePerMember = item.total_price / members.length;
-    const paidPerPayer = item.total_price / payers.length;
+    const priceInBase = item.total_price * (item.exchange_rate || 1);
+    const sharePerMember = priceInBase / members.length;
+    const paidPerPayer = priceInBase / payers.length;
 
     for (const m of members) {
       if (!balances[m.user_id]) {

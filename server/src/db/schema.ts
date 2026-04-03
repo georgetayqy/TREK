@@ -206,6 +206,8 @@ function createTables(db: Database.Database): void {
       persons INTEGER DEFAULT NULL,
       days INTEGER DEFAULT NULL,
       note TEXT,
+      currency TEXT DEFAULT NULL,
+      exchange_rate REAL DEFAULT 1.0,
       sort_order INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );

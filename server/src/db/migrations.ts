@@ -491,6 +491,16 @@ function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_trip_album_links_trip ON trip_album_links(trip_id);
       `);
     },
+    () => {
+      // Multicurrency budget: per-item currency and exchange rate to trip base currency
+      try { db.exec('ALTER TABLE budget_items ADD COLUMN currency TEXT DEFAULT NULL'); } catch (err: any) { if (!err.message?.includes('duplicate column name')) throw err; }
+      try { db.exec('ALTER TABLE budget_items ADD COLUMN exchange_rate REAL DEFAULT 1.0'); } catch (err: any) { if (!err.message?.includes('duplicate column name')) throw err; }
+    },
+    () => {
+      // Ensure multicurrency columns exist (re-apply in case of prior migration ordering issue)
+      try { db.exec('ALTER TABLE budget_items ADD COLUMN currency TEXT DEFAULT NULL'); } catch (err: any) { if (!err.message?.includes('duplicate column name')) throw err; }
+      try { db.exec('ALTER TABLE budget_items ADD COLUMN exchange_rate REAL DEFAULT 1.0'); } catch (err: any) { if (!err.message?.includes('duplicate column name')) throw err; }
+    },
   ];
 
   if (currentVersion < migrations.length) {

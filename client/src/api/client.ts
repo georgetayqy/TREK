@@ -210,6 +210,14 @@ export const budgetApi = {
   settlement: (tripId: number | string) => apiClient.get(`/trips/${tripId}/budget/settlement`).then(r => r.data),
 }
 
+export const fetchExchangeRate = async (from: string, to: string): Promise<number> => {
+  if (from === to) return 1;
+  const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${from}`);
+  if (!res.ok) throw new Error('Exchange rate fetch failed');
+  const data = await res.json();
+  return data.rates?.[to] ?? 1;
+}
+
 export const filesApi = {
   list: (tripId: number | string, trash?: boolean) => apiClient.get(`/trips/${tripId}/files`, { params: trash ? { trash: 'true' } : {} }).then(r => r.data),
   upload: (tripId: number | string, formData: FormData) => apiClient.post(`/trips/${tripId}/files`, formData, {
