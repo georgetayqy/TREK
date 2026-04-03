@@ -439,9 +439,25 @@ export default function TripPlannerPage(): React.ReactElement | null {
     return da.map(a => a.place).filter(p => p?.lat && p?.lng)
   }, [selectedDayId, assignments])
 
-  const mapTileUrl = settings.map_tile_url || 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+  const rawTileUrl = settings.map_tile_url || 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+  const [mapTileUrl, setMapTileUrl] = useState(rawTileUrl.startsWith('google:') ? '' : rawTileUrl)
   const defaultCenter = [settings.default_lat || 48.8566, settings.default_lng || 2.3522]
   const defaultZoom = settings.default_zoom || 10
+
+  useEffect(() => {
+    if (!rawTileUrl.startsWith('google:')) {
+      setMapTileUrl(rawTileUrl)
+      return
+    }
+    const mapType = rawTileUrl.split(':')[1] || 'roadmap'
+    mapsApi.createTileSession({ mapType }).then((data: { session?: string }) => {
+      if (data.session) {
+        setMapTileUrl(`/api/maps/tiles/{z}/{x}/{y}?session=${encodeURIComponent(data.session)}`)
+      }
+    }).catch(() => {
+      setMapTileUrl('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png')
+    })
+  }, [rawTileUrl])
 
   const fontStyle = { fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif" }
 

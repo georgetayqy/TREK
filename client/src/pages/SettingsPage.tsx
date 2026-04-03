@@ -34,6 +34,9 @@ const MAP_PRESETS: MapPreset[] = [
   { name: 'CartoDB Light', url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png' },
   { name: 'CartoDB Dark', url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png' },
   { name: 'Stadia Smooth', url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png' },
+  { name: 'Google Maps (Roadmap)', url: 'google:roadmap' },
+  { name: 'Google Maps (Satellite)', url: 'google:satellite' },
+  { name: 'Google Maps (Terrain)', url: 'google:terrain' },
 ]
 
 interface SectionProps {
@@ -438,14 +441,20 @@ export default function SettingsPage(): React.ReactElement {
                 size="sm"
                 style={{ marginBottom: 8 }}
               />
-              <input
-                type="text"
-                value={mapTileUrl}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMapTileUrl(e.target.value)}
-                placeholder="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:border-transparent"
-              />
-              <p className="text-xs text-slate-400 mt-1">{t('settings.mapDefaultHint')}</p>
+              {mapTileUrl.startsWith('google:') ? (
+                <p className="text-xs text-amber-600 mt-1">Requires a Google Maps API key configured in API Keys.</p>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={mapTileUrl}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMapTileUrl(e.target.value)}
+                    placeholder="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">{t('settings.mapDefaultHint')}</p>
+                </>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

@@ -555,4 +555,75 @@ router.post('/resolve-url', authenticate, async (req: Request, res: Response) =>
   }
 });
 
+// Google Maps Tiles proxy - keeps API key server-side
+router.get('/tiles/:z/:x/:y', authenticate, async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { z, x, y } = req.params;
+  const { session } = req.query as { session?: string };
+
+  if (!session) return res.status(400).json({ error: 'Session token required' });
+
+  const apiKey = getMapsKey(authReq.user.id);
+  if (!apiKey) return res.status(400).json({ error: 'Google Maps API key not configured' });
+
+  try {
+    const tileRes = await fetch(
+      `https://tile.googleapis.com/v1/2dtiles/${z}/${x}/${y}?session=${encodeURIComponent(session)}&key=${apiKey}`
+    );
+    if (!tileRes.ok) return res.status(tileRes.status).json({ error: 'Failed to fetch tile' });
+
+    const contentType = tileRes.headers.get('content-type') || 'image/png';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    const buffer = await tileRes.arrayBuffer();
+    res.send(Buffer.from(buffer));
+  } catch (err: unknown) {
+    console.error('Tile proxy error:', err);
+    res.status(500).json({ error: 'Tile fetch error' });
+  }
+});
+
+// Google Maps Tiles API session token creation
+router.post('/tiles/create-session', authenticate, async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const { mapType = 'roadmap', language = 'en-US', region = 'US' } = req.body;
+
+  const apiKey = getMapsKey(authReq.user.id);
+  if (!apiKey) {
+    return res.status(400).json({ error: 'Google Maps API key not configured' });
+  }
+
+  try {
+    const response = await fetch(`https://tile.googleapis.com/v1/createSession?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mapType,
+        language,
+        region,
+      }),
+    });
+
+    const data = await response.json() as { session?: string; error?: { message?: string } };
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: data.error?.message || 'Google Maps Tiles API error'
+      });
+    }
+
+    res.json({
+      session: data.session,
+      mapType,
+      language,
+      region
+    });
+  } catch (err: unknown) {
+    console.error('Google Maps Tiles session creation error:', err);
+    res.status(500).json({ error: 'Error creating tiles session' });
+  }
+});
+
 export default router;
