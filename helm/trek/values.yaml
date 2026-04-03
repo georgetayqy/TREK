@@ -3,8 +3,13 @@ config:
   namespace: trek
   imageName: docker.io/asdfghjklxd/trek
   imageTag: latest
+  imagePullPolicy: Always
   port: 3000
   forceHttps: true
+
+# Optional image pull secrets for private registries
+imagePullSecrets: []
+  # - name: my-registry-secret
 
 app:
   replicas: 1
@@ -34,3 +39,11 @@ secret:
 pvc:
   dataPvcName: trek-data
   uploadPvcName: trek-uploads
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

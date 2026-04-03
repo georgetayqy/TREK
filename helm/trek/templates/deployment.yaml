@@ -16,9 +16,22 @@ spec:
       labels:
         app: {{ .Values.config.name }}
     spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.imagePullSecrets }}
+        - name: {{ .name }}
+        {{- end }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: {{ .Values.config.name }}
           image: "{{ .Values.config.imageName }}:{{ .Values.config.imageTag }}"
+          imagePullPolicy: {{ .Values.config.imagePullPolicy | default "IfNotPresent" }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: {{ .Values.config.port }}
           envFrom:
@@ -33,10 +46,6 @@ spec:
               mountPath: /app/data
             - name: uploads
               mountPath: /app/uploads
-          resources:
-            requests:
-              memory: '256Mi'
-              cpu: '250m'
           livenessProbe:
             httpGet:
               path: /api/health
@@ -52,7 +61,6 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 5
-      restartPolicy: Always
       volumes:
         - name: data
           persistentVolumeClaim:

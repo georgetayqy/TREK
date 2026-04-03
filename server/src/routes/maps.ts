@@ -396,9 +396,10 @@ router.get('/place-photo/:placeId', authenticate, async (req: Request, res: Resp
 
   const apiKey = getMapsKey(authReq.user.id);
   const isCoordLookup = placeId.startsWith('coords:');
+  const isOsmId = placeId.startsWith('node:') || placeId.startsWith('way:') || placeId.startsWith('relation:');
 
-  // No Google key or coordinate-only lookup → try Wikimedia
-  if (!apiKey || isCoordLookup) {
+  // No Google key, coordinate-only lookup, or OSM place → try Wikimedia
+  if (!apiKey || isCoordLookup || isOsmId) {
     if (!isNaN(lat) && !isNaN(lng)) {
       try {
         const wiki = await fetchWikimediaPhoto(lat, lng, req.query.name as string);
