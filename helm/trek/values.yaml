@@ -47,3 +47,29 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
+
+postgresql:
+  enabled: true
+  architecture: replication
+
+  auth:
+    username: "trek"
+    database: "trek"
+    existingSecret: "trek-pg"
+    secretKeys:
+      adminPasswordKey: adminPasswordKey
+      userPasswordKey: replicationPasswordKey
+      replicationPasswordKey: userPasswordKey
+
+  primary:
+    persistence:
+      size: 50Gi
+    networkPolicy:
+      allowExternal: false
+      allowExternalEgress: false
+
+  readReplicas:
+    replicaCount: 1
+    networkPolicy:
+      allowExternal: false
+      allowExternalEgress: false
