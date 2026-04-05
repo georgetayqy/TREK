@@ -1,5 +1,5 @@
 import React from 'react'
-import { Info, Coffee, Heart, ExternalLink } from 'lucide-react'
+import { Info, Coffee, Heart, ExternalLink, Bug, Lightbulb, BookOpen } from 'lucide-react'
 import { useTranslation } from '../../i18n'
 import Section from './Section'
 
@@ -12,12 +12,21 @@ export default function AboutTab({ appVersion }: Props): React.ReactElement {
 
   return (
     <Section title={t('settings.about')} icon={Info}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--bg-tertiary)', borderRadius: 99, padding: '6px 14px' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>TREK</span>
-          <span style={{ fontSize: 13, color: 'var(--text-faint)' }}>v{appVersion}</span>
-        </div>
-      </div>
+      <style>{`
+        @keyframes heartPulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.15); }
+        }
+      `}</style>
+      <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)', marginBottom: 6, marginTop: -4 }}>
+        {t('settings.about.description')}
+      </p>
+      <p style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-faint)', marginBottom: 16 }}>
+        {t('settings.about.madeWith')}{' '}
+        <Heart size={11} fill="#991b1b" stroke="#991b1b" style={{ display: 'inline-block', verticalAlign: '-1px', animation: 'heartPulse 1.5s ease-in-out infinite' }} />
+        {' '}{t('settings.about.madeBy')}{' '}
+        <span style={{ display: 'inline-flex', alignItems: 'center', background: 'var(--bg-tertiary)', borderRadius: 99, padding: '1px 7px', fontSize: 10, fontWeight: 600, color: 'var(--text-faint)', verticalAlign: '1px' }}>v{appVersion}</span>
+      </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <a
@@ -71,6 +80,63 @@ export default function AboutTab({ appVersion }: Props): React.ReactElement {
           <div>
             <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Discord</div>
             <div className="text-xs" style={{ color: 'var(--text-faint)' }}>Join the community</div>
+          </div>
+          <ExternalLink size={14} className="ml-auto flex-shrink-0" style={{ color: 'var(--text-faint)' }} />
+        </a>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+        <a
+          href="https://github.com/mauriceboe/TREK/issues/new?template=bug_report.yml"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-xl border overflow-hidden flex items-center gap-4 px-5 py-4 transition-all"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-primary)', textDecoration: 'none' }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.boxShadow = '0 0 0 1px #ef444422' }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-primary)'; e.currentTarget.style.boxShadow = 'none' }}
+        >
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: '#ef444415', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Bug size={20} style={{ color: '#ef4444' }} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('settings.about.reportBug')}</div>
+            <div className="text-xs" style={{ color: 'var(--text-faint)' }}>{t('settings.about.reportBugHint')}</div>
+          </div>
+          <ExternalLink size={14} className="ml-auto flex-shrink-0" style={{ color: 'var(--text-faint)' }} />
+        </a>
+        <a
+          href="https://github.com/mauriceboe/TREK/discussions/new?category=feature-requests"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-xl border overflow-hidden flex items-center gap-4 px-5 py-4 transition-all"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-primary)', textDecoration: 'none' }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = '#f59e0b'; e.currentTarget.style.boxShadow = '0 0 0 1px #f59e0b22' }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-primary)'; e.currentTarget.style.boxShadow = 'none' }}
+        >
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: '#f59e0b15', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Lightbulb size={20} style={{ color: '#f59e0b' }} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('settings.about.featureRequest')}</div>
+            <div className="text-xs" style={{ color: 'var(--text-faint)' }}>{t('settings.about.featureRequestHint')}</div>
+          </div>
+          <ExternalLink size={14} className="ml-auto flex-shrink-0" style={{ color: 'var(--text-faint)' }} />
+        </a>
+        <a
+          href="https://github.com/mauriceboe/TREK/wiki"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-xl border overflow-hidden flex items-center gap-4 px-5 py-4 transition-all"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-primary)', textDecoration: 'none' }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.boxShadow = '0 0 0 1px #6366f122' }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-primary)'; e.currentTarget.style.boxShadow = 'none' }}
+        >
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: '#6366f115', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <BookOpen size={20} style={{ color: '#6366f1' }} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Wiki</div>
+            <div className="text-xs" style={{ color: 'var(--text-faint)' }}>{t('settings.about.wikiHint')}</div>
           </div>
           <ExternalLink size={14} className="ml-auto flex-shrink-0" style={{ color: 'var(--text-faint)' }} />
         </a>
