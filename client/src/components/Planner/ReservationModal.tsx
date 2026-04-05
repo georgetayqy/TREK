@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import apiClient from '../../api/client'
 import { useTripStore } from '../../store/tripStore'
+import { useAddonStore } from '../../store/addonStore'
 import Modal from '../shared/Modal'
 import CustomSelect from '../shared/CustomSelect'
 import { Plane, Hotel, Utensils, Train, Car, Ship, Ticket, FileText, Users, Paperclip, X, ExternalLink, Link2 } from 'lucide-react'
@@ -71,6 +72,7 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
   const { t, locale } = useTranslation()
   const fileInputRef = useRef(null)
 
+  const isBudgetEnabled = useAddonStore(s => s.isEnabled('budget'))
   const budgetItems = useTripStore(s => s.budgetItems)
   const budgetCategories = useMemo(() => {
     const cats = new Set<string>()
@@ -139,7 +141,7 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
         hotel_start_day: (() => { const acc = accommodations.find(a => a.id == reservation.accommodation_id); return acc?.start_day_id || '' })(),
         hotel_end_day: (() => { const acc = accommodations.find(a => a.id == reservation.accommodation_id); return acc?.end_day_id || '' })(),
         price: meta.price || '',
-        budget_category: meta.budget_category || '',
+        budget_category: (meta.budget_category && budgetItems.some(i => i.category === meta.budget_category)) ? meta.budget_category : '',
       })
     } else {
       setForm({
@@ -196,8 +198,10 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
       if (form.end_date) {
         combinedEndTime = form.reservation_end_time ? `${form.end_date}T${form.reservation_end_time}` : form.end_date
       }
-      if (form.price) metadata.price = form.price
-      if (form.budget_category) metadata.budget_category = form.budget_category
+      if (isBudgetEnabled) {
+        if (form.price) metadata.price = form.price
+        if (form.budget_category) metadata.budget_category = form.budget_category
+      }
       const saveData: Record<string, any> = {
         title: form.title, type: form.type, status: form.status,
         reservation_time: form.reservation_time, reservation_end_time: combinedEndTime,
@@ -208,9 +212,11 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
         metadata: Object.keys(metadata).length > 0 ? metadata : null,
       }
       // Auto-create/update budget entry if price is set, or signal removal if cleared
-      saveData.create_budget_entry = form.price && parseFloat(form.price) > 0
-        ? { total_price: parseFloat(form.price), category: form.budget_category || t(`reservations.type.${form.type}`) || 'Other' }
-        : { total_price: 0 }
+      if (isBudgetEnabled) {
+        saveData.create_budget_entry = form.price && parseFloat(form.price) > 0
+          ? { total_price: parseFloat(form.price), category: form.budget_category || t(`reservations.type.${form.type}`) || 'Other' }
+          : { total_price: 0 }
+      }
       // If hotel with place + days, pass hotel data for auto-creation or update
       if (form.type === 'hotel' && form.hotel_place_id && form.hotel_start_day && form.hotel_end_day) {
         saveData.create_accommodation = {
@@ -643,33 +649,37 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
           </div>
         </div>
 
-        {/* Price + Budget Category */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <label style={labelStyle}>{t('reservations.price')}</label>
-            <input type="text" inputMode="decimal" value={form.price}
-              onChange={e => { const v = e.target.value; if (v === '' || /^\d*\.?\d{0,2}$/.test(v)) set('price', v) }}
-              placeholder="0.00"
-              style={inputStyle} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <label style={labelStyle}>{t('reservations.budgetCategory')}</label>
-            <CustomSelect
-              value={form.budget_category}
-              onChange={v => set('budget_category', v)}
-              options={[
-                { value: '', label: t('reservations.budgetCategoryAuto') },
-                ...budgetCategories.map(c => ({ value: c, label: c })),
-              ]}
-              placeholder={t('reservations.budgetCategoryAuto')}
-              size="sm"
-            />
-          </div>
-        </div>
-        {form.price && parseFloat(form.price) > 0 && (
-          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: -4 }}>
-            {t('reservations.budgetHint')}
-          </div>
+        {/* Price + Budget Category — only shown when budget addon is enabled */}
+        {isBudgetEnabled && (
+          <>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <label style={labelStyle}>{t('reservations.price')}</label>
+                <input type="text" inputMode="decimal" value={form.price}
+                  onChange={e => { const v = e.target.value; if (v === '' || /^\d*\.?\d{0,2}$/.test(v)) set('price', v) }}
+                  placeholder="0.00"
+                  style={inputStyle} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <label style={labelStyle}>{t('reservations.budgetCategory')}</label>
+                <CustomSelect
+                  value={form.budget_category}
+                  onChange={v => set('budget_category', v)}
+                  options={[
+                    { value: '', label: t('reservations.budgetCategoryAuto') },
+                    ...budgetCategories.map(c => ({ value: c, label: c })),
+                  ]}
+                  placeholder={t('reservations.budgetCategoryAuto')}
+                  size="sm"
+                />
+              </div>
+            </div>
+            {form.price && parseFloat(form.price) > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: -4 }}>
+                {t('reservations.budgetHint')}
+              </div>
+            )}
+          </>
         )}
 
         {/* Actions */}

@@ -137,6 +137,14 @@ export default function TripPlannerPage(): React.ReactElement | null {
     return saved || 'plan'
   })
 
+  useEffect(() => {
+    const validTabIds = TRIP_TABS.map(t => t.id)
+    if (!validTabIds.includes(activeTab)) {
+      setActiveTab('plan')
+      sessionStorage.setItem(`trip-tab-${tripId}`, 'plan')
+    }
+  }, [enabledAddons])
+
   const handleTabChange = (tabId: string): void => {
     setActiveTab(tabId)
     sessionStorage.setItem(`trip-tab-${tripId}`, tabId)

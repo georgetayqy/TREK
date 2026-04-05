@@ -178,7 +178,10 @@ export async function pipeAsset(url: string, response: Response, headers?: Recor
             await pipeline(Readable.fromWeb(resp.body as any), response);
         }
     } catch (error) {
-        if (response.headersSent) return;
+        if (response.headersSent) {
+            response.end();
+            return;
+        }
         if (error instanceof SsrfBlockedError) {
             response.status(400).json({ error: error.message });
         } else {
