@@ -58,8 +58,8 @@ postgresql:
     existingSecret: "trek-pg"
     secretKeys:
       adminPasswordKey: adminPasswordKey
-      userPasswordKey: replicationPasswordKey
-      replicationPasswordKey: userPasswordKey
+      userPasswordKey: userPasswordKey
+      replicationPasswordKey: replicationPasswordKey
 
   primary:
     persistence:
