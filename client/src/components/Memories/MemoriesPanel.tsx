@@ -3,7 +3,7 @@ import apiClient, { addonsApi } from '../../api/client'
 import { Camera, Plus, Share2, EyeOff, Eye, X, Check, Search, ArrowUpDown, MapPin, Filter, Link2, RefreshCw, Unlink, FolderOpen, Info, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { useTranslation } from '../../i18n'
-import { getAuthUrl, fetchImageAsBlob, clearImageQueue } from '../../api/authUrl'
+import { fetchImageAsBlob, clearImageQueue } from '../../api/authUrl'
 import { useToast } from '../shared/Toast'
 
 interface PhotoProvider {
@@ -26,6 +26,7 @@ function ProviderImg({ baseUrl, provider, style, loading }: { baseUrl: string; p
   return src ? <img src={src} alt="" loading={loading} style={style} /> : null
 }
 
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface TripPhoto {
@@ -40,10 +41,10 @@ interface TripPhoto {
 
 interface Asset {
   id: string
+  provider: string
   takenAt: string
   city: string | null
   country: string | null
-  provider: string
 }
 
 interface MemoriesPanelProps {
@@ -88,9 +89,41 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
   const [albumLinks, setAlbumLinks] = useState<{ id: number; provider: string; album_id: string; album_name: string; user_id: number; username: string; sync_enabled: number; last_synced_at: string | null }[]>([])
   const [syncing, setSyncing] = useState<number | null>(null)
 
+
+  //helpers for building urls
+  const ADDON_PREFIX = "/integrations/memories"
+  
+  function buildUnifiedUrl(endpoint: string, lastParam?:string,): string {
+    return `${ADDON_PREFIX}/unified/trips/${tripId}/${endpoint}${lastParam ? `/${lastParam}` : ''}`;
+  }
+
+  function buildProviderUrl(provider: string, endpoint: string, item?: string): string {
+    if (endpoint === 'album-link-sync') {
+      endpoint = `trips/${tripId}/album-links/${item?.toString() || ''}/sync`
+    }
+    return `${ADDON_PREFIX}/${provider}/${endpoint}`;
+  }
+
+  function buildProviderAssetUrl(photo: TripPhoto, what: string): string {
+    return `${ADDON_PREFIX}/${photo.provider}/assets/${tripId}/${photo.asset_id}/${photo.user_id}/${what}`
+  }
+
+  function buildProviderAssetUrlFromAsset(asset: Asset, what: string, userId: number): string {
+    const photo: TripPhoto = {
+      asset_id: asset.id,
+      provider: asset.provider,
+      user_id: userId,
+      username: '',
+      shared: 0,
+      added_at: null
+    }
+    return buildProviderAssetUrl(photo, what)
+  }
+
+
   const loadAlbumLinks = async () => {
     try {
-      const res = await apiClient.get(`/integrations/memories/unified/trips/${tripId}/album-links`)
+      const res = await apiClient.get(buildUnifiedUrl('album-links'))
       setAlbumLinks(res.data.links || [])
     } catch { setAlbumLinks([]) }
   }
@@ -99,7 +132,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
     if (!provider) return
     setAlbumsLoading(true)
     try {
-      const res = await apiClient.get(`/integrations/memories/${provider}/albums`)
+      const res = await apiClient.get(buildProviderUrl(provider, 'albums'))
       setAlbums(res.data.albums || [])
     } catch {
       setAlbums([])
@@ -121,7 +154,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
     }
 
     try {
-      await apiClient.post(`/integrations/memories/unified/trips/${tripId}/album-links`, {
+      await apiClient.post(buildUnifiedUrl('album-links'), {
         album_id: albumId,
         album_name: albumName,
         provider: selectedProvider,
@@ -129,7 +162,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
       setShowAlbumPicker(false)
       await loadAlbumLinks()
       // Auto-sync after linking
-      const linksRes = await apiClient.get(`/integrations/memories/unified/trips/${tripId}/album-links`)
+      const linksRes = await apiClient.get(buildUnifiedUrl('album-links'))
       const newLink = (linksRes.data.links || []).find((l: any) => l.album_id === albumId && l.provider === selectedProvider)
       if (newLink) await syncAlbum(newLink.id)
     } catch { toast.error(t('memories.error.linkAlbum')) }
@@ -137,7 +170,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
 
   const unlinkAlbum = async (linkId: number) => {
     try {
-      await apiClient.delete(`/integrations/memories/unified/trips/${tripId}/album-links/${linkId}`)
+      await apiClient.delete(buildUnifiedUrl('album-links', linkId.toString()))
       await loadAlbumLinks()
       await loadPhotos()
     } catch { toast.error(t('memories.error.unlinkAlbum')) }
@@ -148,7 +181,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
     if (!targetProvider) return
     setSyncing(linkId)
     try {
-      await apiClient.post(`/integrations/memories/${targetProvider}/trips/${tripId}/album-links/${linkId}/sync`)
+      await apiClient.post(buildProviderUrl(targetProvider, 'album-link-sync', linkId.toString()))
       await loadAlbumLinks()
       await loadPhotos()
     } catch { toast.error(t('memories.error.syncAlbum')) }
@@ -185,7 +218,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
 
   const loadPhotos = async () => {
     try {
-      const photosRes = await apiClient.get(`/integrations/memories/unified/trips/${tripId}/photos`)
+      const photosRes = await apiClient.get(buildUnifiedUrl('photos'))
       setTripPhotos(photosRes.data.photos || [])
     } catch {
       setTripPhotos([])
@@ -269,7 +302,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
         setPickerPhotos([])
         return
       }
-      const res = await apiClient.post(`/integrations/memories/${provider.id}/search`, {
+      const res = await apiClient.post(buildProviderUrl(provider.id, 'search'), {
         from: useDate && startDate ? startDate : undefined,
         to: useDate && endDate ? endDate : undefined,
       })
@@ -308,7 +341,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
         groupedByProvider.set(provider, list)
       }
 
-      await apiClient.post(`/integrations/memories/unified/trips/${tripId}/photos`, {
+      await apiClient.post(buildUnifiedUrl('photos'), {
         selections: [...groupedByProvider.entries()].map(([provider, asset_ids]) => ({ provider, asset_ids })),
         shared: true,
       })
@@ -322,7 +355,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
 
   const removePhoto = async (photo: TripPhoto) => {
     try {
-      await apiClient.delete(`/integrations/memories/unified/trips/${tripId}/photos`, {
+      await apiClient.delete(buildUnifiedUrl('photos'), {
         data: {
           asset_id: photo.asset_id,
           provider: photo.provider,
@@ -336,7 +369,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
 
   const toggleSharing = async (photo: TripPhoto, shared: boolean) => {
     try {
-      await apiClient.put(`/integrations/memories/unified/trips/${tripId}/photos/sharing`, {
+      await apiClient.put(buildUnifiedUrl('photos', 'sharing'), {
         shared,
         asset_id: photo.asset_id,
         provider: photo.provider,
@@ -349,8 +382,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  const thumbnailBaseUrl = (photo: TripPhoto) =>
-    `/api/integrations/memories/${photo.provider}/assets/${tripId}/${photo.asset_id}/${photo.user_id}/thumbnail`
+  
 
   const makePickerKey = (provider: string, assetId: string): string => `${provider}::${assetId}`
 
@@ -619,7 +651,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
                           outline: isSelected ? '3px solid var(--text-primary)' : 'none',
                           outlineOffset: -3,
                         }}>
-                        <ProviderImg baseUrl={`/api/integrations/memories/${asset.provider}/assets/${tripId}/${asset.id}/${currentUser!.id}/thumbnail`} provider={asset.provider} loading="lazy"
+                        <ProviderImg baseUrl={buildProviderAssetUrlFromAsset(asset, 'thumbnail', currentUser!.id)} provider={asset.provider} loading="lazy"
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         {isSelected && (
                           <div style={{
@@ -796,13 +828,13 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
                     setLightboxId(photo.asset_id); setLightboxUserId(photo.user_id); setLightboxInfo(null)
                     if (lightboxOriginalSrc) URL.revokeObjectURL(lightboxOriginalSrc)
                     setLightboxOriginalSrc('')
-                    fetchImageAsBlob(`/api/integrations/memories/${photo.provider}/assets/${tripId}/${photo.asset_id}/${photo.user_id}/original`).then(setLightboxOriginalSrc)
+                    fetchImageAsBlob('/api' + buildProviderAssetUrl(photo, 'original')).then(setLightboxOriginalSrc)
                     setLightboxInfoLoading(true)
-                    apiClient.get(`/integrations/memories/${photo.provider}/assets/${tripId}/${photo.asset_id}/${photo.user_id}/info`)
+                    apiClient.get(buildProviderAssetUrl(photo, 'info'))
                       .then(r => setLightboxInfo(r.data)).catch(() => {}).finally(() => setLightboxInfoLoading(false))
                   }}>
 
-                  <ProviderImg baseUrl={thumbnailBaseUrl(photo)} provider={photo.provider} loading="lazy"
+                  <ProviderImg baseUrl={buildProviderAssetUrl(photo, 'thumbnail')} provider={photo.provider} loading="lazy"
                     style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 10 }} />
 
                   {/* Other user's avatar */}
@@ -912,7 +944,7 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
           setShowMobileInfo(false)
         }
 
-        const currentIdx = allVisible.findIndex(p => p.immich_asset_id === lightboxId)
+        const currentIdx = allVisible.findIndex(p => p.asset_id === lightboxId)
         const hasPrev = currentIdx > 0
         const hasNext = currentIdx < allVisible.length - 1
         const navigateTo = (idx: number) => {
@@ -920,10 +952,10 @@ export default function MemoriesPanel({ tripId, startDate, endDate }: MemoriesPa
           if (!photo) return
           if (lightboxOriginalSrc) URL.revokeObjectURL(lightboxOriginalSrc)
           setLightboxOriginalSrc('')
-          setLightboxId(photo.immich_asset_id)
+          setLightboxId(photo.asset_id)
           setLightboxUserId(photo.user_id)
           setLightboxInfo(null)
-          fetchImageAsBlob(`/api/integrations/immich/assets/${photo.immich_asset_id}/original?userId=${photo.user_id}`).then(setLightboxOriginalSrc)
+          fetchImageAsBlob('/api' + buildProviderAssetUrl(photo, 'original')).then(setLightboxOriginalSrc)
         }
 
         const exifContent = lightboxInfo ? (
