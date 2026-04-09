@@ -276,7 +276,7 @@ export function getUserByAccessToken(rawToken: string): OAuthTokenInfo | null {
   const hash = hashToken(rawToken);
   const row = db.prepare(`
     SELECT ot.scopes, ot.revoked_at, ot.access_token_expires_at,
-           u.id, u.username, u.email, u.role
+           ot.user_id, u.username, u.email, u.role
     FROM oauth_tokens ot
     JOIN users u ON ot.user_id = u.id
     WHERE ot.access_token_hash = ?
