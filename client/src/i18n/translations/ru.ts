@@ -369,6 +369,7 @@ const ru: Record<string, string> = {
   'login.demoFailed': 'Ошибка демо-входа',
   'login.oidcSignIn': 'Войти через {name}',
   'login.oidcOnly': 'Вход по паролю отключён. Используйте вашего провайдера SSO для входа.',
+  'login.oidcLoggedOut': 'Вы вышли из системы. Войдите снова через вашего провайдера SSO.',
   'login.demoHint': 'Попробуйте демо — регистрация не требуется',
 
   // Register

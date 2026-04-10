@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { SUPPORTED_LANGUAGES, useTranslation } from '../i18n'
@@ -29,10 +29,13 @@ export default function LoginPage(): React.ReactElement {
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null)
   const [inviteToken, setInviteToken] = useState<string>('')
   const [inviteValid, setInviteValid] = useState<boolean>(false)
+  const exchangeInitiated = useRef(false)
 
   const { login, register, demoLogin, completeMfaLogin, loadUser } = useAuthStore()
   const { setLanguageLocal } = useSettingsStore()
   const navigate = useNavigate()
+  const location = useLocation()
+  const noRedirect = !!(location.state as { noRedirect?: boolean } | null)?.noRedirect
 
   const redirectTarget = useMemo(() => {
     const params = new URLSearchParams(window.location.search)
@@ -63,11 +66,13 @@ export default function LoginPage(): React.ReactElement {
     }
 
     if (oidcCode) {
+      if (exchangeInitiated.current) return
+      exchangeInitiated.current = true
       setIsLoading(true)
-      window.history.replaceState({}, '', '/login')
       fetch('/api/auth/oidc/exchange?code=' + encodeURIComponent(oidcCode), { credentials: 'include' })
         .then(r => r.json())
         .then(async data => {
+          window.history.replaceState({}, '', '/login')
           if (data.token) {
             await loadUser()
             navigate('/dashboard', { replace: true })
@@ -75,7 +80,10 @@ export default function LoginPage(): React.ReactElement {
             setError(data.error || 'OIDC login failed')
           }
         })
-        .catch(() => setError('OIDC login failed'))
+        .catch(() => {
+          window.history.replaceState({}, '', '/login')
+          setError('OIDC login failed')
+        })
         .finally(() => setIsLoading(false))
       return
     }
@@ -96,12 +104,12 @@ export default function LoginPage(): React.ReactElement {
       if (config) {
         setAppConfig(config)
         if (!config.has_users) setMode('register')
-        if (config.oidc_only_mode && config.oidc_configured && config.has_users && !invite) {
+        if (config.oidc_only_mode && config.oidc_configured && config.has_users && !invite && !noRedirect) {
           window.location.href = '/api/auth/oidc/login'
         }
       }
     })
-  }, [navigate, t])
+  }, [navigate, t, noRedirect])
 
   const handleDemoLogin = async (): Promise<void> => {
     setError('')
@@ -527,7 +535,7 @@ export default function LoginPage(): React.ReactElement {
             {oidcOnly ? (
               <>
                 <h2 style={{ margin: '0 0 4px', fontSize: 22, fontWeight: 800, color: '#111827' }}>{t('login.title')}</h2>
-                <p style={{ margin: '0 0 24px', fontSize: 13.5, color: '#9ca3af' }}>{t('login.oidcOnly')}</p>
+                <p style={{ margin: '0 0 24px', fontSize: 13.5, color: '#9ca3af' }}>{noRedirect ? t('login.oidcLoggedOut') : t('login.oidcOnly')}</p>
                 {error && (
                   <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, fontSize: 13, color: '#dc2626', marginBottom: 16 }}>
                     {error}

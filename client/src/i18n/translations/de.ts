@@ -362,6 +362,7 @@ const de: Record<string, string | { name: string; category: string }[]> = {
   'login.demoFailed': 'Demo-Login fehlgeschlagen',
   'login.oidcSignIn': 'Anmelden mit {name}',
   'login.oidcOnly': 'Passwort-Authentifizierung ist deaktiviert. Bitte melde dich über deinen SSO-Anbieter an.',
+  'login.oidcLoggedOut': 'Du wurdest abgemeldet. Melde dich erneut über deinen SSO-Anbieter an.',
   'login.demoHint': 'Demo ausprobieren — ohne Registrierung',
   'login.mfaTitle': 'Zwei-Faktor-Authentifizierung',
   'login.mfaSubtitle': 'Gib den 6-stelligen Code aus deiner Authenticator-App ein.',

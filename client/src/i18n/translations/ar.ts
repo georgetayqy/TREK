@@ -367,6 +367,7 @@ const ar: Record<string, string | { name: string; category: string }[]> = {
   'login.demoFailed': 'فشل الدخول إلى العرض التجريبي',
   'login.oidcSignIn': 'تسجيل الدخول عبر {name}',
   'login.oidcOnly': 'تم تعطيل المصادقة بكلمة المرور. يرجى تسجيل الدخول عبر مزود SSO.',
+  'login.oidcLoggedOut': 'تم تسجيل خروجك. سجّل الدخول مجدداً عبر مزود SSO.',
   'login.demoHint': 'جرّب العرض التجريبي دون الحاجة للتسجيل',
   'login.mfaTitle': 'المصادقة الثنائية',
   'login.mfaSubtitle': 'أدخل الرمز المكون من 6 أرقام من تطبيق المصادقة.',

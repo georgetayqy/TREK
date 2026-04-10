@@ -42,6 +42,14 @@ vi.mock('../../src/config', () => ({
   ENCRYPTION_KEY: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6a7b8c9d0e1f2a3b4c5d6a7b8c9d0e1f2',
   updateJwtSecret: () => {},
 }));
+vi.mock('../../src/services/placeService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/placeService')>();
+  return {
+    ...actual,
+    importGoogleList: vi.fn(),
+    searchPlaceImage: vi.fn(),
+  };
+});
 
 import { createApp } from '../../src/app';
 import { createTables } from '../../src/db/schema';
@@ -50,6 +58,8 @@ import { resetTestDb } from '../helpers/test-db';
 import { createUser, createAdmin, createTrip, createPlace, addTripMember } from '../helpers/factories';
 import { authCookie } from '../helpers/auth';
 import { loginAttempts, mfaAttempts } from '../../src/routes/auth';
+import * as placeService from '../../src/services/placeService';
+import { invalidatePermissionsCache } from '../../src/services/permissions';
 
 const app: Application = createApp();
 const GPX_FIXTURE = path.join(__dirname, '../fixtures/test.gpx');
@@ -63,6 +73,7 @@ beforeEach(() => {
   resetTestDb(testDb);
   loginAttempts.clear();
   mfaAttempts.clear();
+  invalidatePermissionsCache();
 });
 
 afterAll(() => {
@@ -601,5 +612,181 @@ describe('GPX Import', () => {
       .post(`/api/trips/${trip.id}/places/import/gpx`)
       .set('Cookie', authCookie(user.id));
     expect(res.status).toBe(400);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GPX import — no waypoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('GPX Import — edge cases', () => {
+  it('PLACE-019c — GPX with no waypoints returns 400', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    // Minimal valid GPX with no waypoints, tracks, or routes
+    const emptyGpx = Buffer.from(
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"></gpx>'
+    );
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/places/import/gpx`)
+      .set('Cookie', authCookie(user.id))
+      .attach('file', emptyGpx, { filename: 'empty.gpx', contentType: 'application/gpx+xml' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/no waypoints/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Google Maps list import
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Google Maps list import', () => {
+  it('PLACE-020 — POST /import/google-list without url returns 400', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/places/import/google-list`)
+      .set('Cookie', authCookie(user.id))
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('PLACE-020b — POST /import/google-list success path returns 201 with places', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    vi.mocked(placeService.importGoogleList).mockResolvedValueOnce({
+      places: [{ id: 1, name: 'Mocked Place' } as any],
+      listName: 'My List',
+    } as any);
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/places/import/google-list`)
+      .set('Cookie', authCookie(user.id))
+      .send({ url: 'https://maps.google.com/maps/list/example' });
+    expect(res.status).toBe(201);
+    expect(res.body.count).toBe(1);
+    expect(res.body.listName).toBe('My List');
+  });
+
+  it('PLACE-020c — POST /import/google-list returns service error status', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    vi.mocked(placeService.importGoogleList).mockResolvedValueOnce({
+      error: 'Invalid list URL',
+      status: 422,
+    } as any);
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/places/import/google-list`)
+      .set('Cookie', authCookie(user.id))
+      .send({ url: 'https://maps.google.com/maps/list/bad' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Invalid list URL');
+  });
+
+  it('PLACE-020d — POST /import/google-list thrown exception returns 400', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    vi.mocked(placeService.importGoogleList).mockRejectedValueOnce(new Error('Network failure'));
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/places/import/google-list`)
+      .set('Cookie', authCookie(user.id))
+      .send({ url: 'https://maps.google.com/maps/list/broken' });
+    expect(res.status).toBe(400);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Place image search
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Place image search', () => {
+  it('PLACE-021 — GET /:id/image returns photos on success', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const place = createPlace(testDb, trip.id, { name: 'Louvre' });
+
+    vi.mocked(placeService.searchPlaceImage).mockResolvedValueOnce({
+      photos: [{ url: 'https://example.com/photo.jpg' }],
+    } as any);
+
+    const res = await request(app)
+      .get(`/api/trips/${trip.id}/places/${place.id}/image`)
+      .set('Cookie', authCookie(user.id));
+    expect(res.status).toBe(200);
+    expect(res.body.photos).toHaveLength(1);
+  });
+
+  it('PLACE-021b — GET /:id/image returns service error status', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const place = createPlace(testDb, trip.id, { name: 'Tower' });
+
+    vi.mocked(placeService.searchPlaceImage).mockResolvedValueOnce({
+      error: 'No images found',
+      status: 404,
+    } as any);
+
+    const res = await request(app)
+      .get(`/api/trips/${trip.id}/places/${place.id}/image`)
+      .set('Cookie', authCookie(user.id));
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('No images found');
+  });
+
+  it('PLACE-021c — GET /:id/image thrown exception returns 500', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const place = createPlace(testDb, trip.id, { name: 'Bridge' });
+
+    vi.mocked(placeService.searchPlaceImage).mockRejectedValueOnce(new Error('Unsplash down'));
+
+    const res = await request(app)
+      .get(`/api/trips/${trip.id}/places/${place.id}/image`)
+      .set('Cookie', authCookie(user.id));
+    expect(res.status).toBe(500);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delete place permission denied
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Delete place — permission edge cases', () => {
+  it('PLACE-022 — DELETE place by non-owner member when place_edit is trip_owner returns 403', async () => {
+    const { user: owner } = createUser(testDb);
+    const { user: member } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    addTripMember(testDb, trip.id, member.id);
+    const place = createPlace(testDb, trip.id, { name: 'Restricted Place' });
+
+    // Restrict place edits to trip owner only
+    testDb.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('perm_place_edit', 'trip_owner')").run();
+    invalidatePermissionsCache();
+
+    const res = await request(app)
+      .delete(`/api/trips/${trip.id}/places/${place.id}`)
+      .set('Cookie', authCookie(member.id));
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('Delete place — not found', () => {
+  it('PLACE-023 — DELETE non-existent place returns 404', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+
+    const res = await request(app)
+      .delete(`/api/trips/${trip.id}/places/99999`)
+      .set('Cookie', authCookie(user.id));
+    expect(res.status).toBe(404);
   });
 });

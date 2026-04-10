@@ -13,6 +13,7 @@ import {
   updateReservation,
   deleteReservation,
 } from '../services/reservationService';
+import { createBudgetItem, updateBudgetItem, deleteBudgetItem } from '../services/budgetService';
 
 const router = express.Router({ mergeParams: true });
 
@@ -53,7 +54,6 @@ router.post('/', authenticate, (req: Request, res: Response) => {
   // Auto-create budget entry if price was provided
   if (create_budget_entry && create_budget_entry.total_price > 0) {
     try {
-      const { createBudgetItem } = require('../services/budgetService');
       const budgetItem = createBudgetItem(tripId, {
         name: title,
         category: create_budget_entry.category || type || 'Other',
@@ -126,7 +126,6 @@ router.put('/:id', authenticate, (req: Request, res: Response) => {
   if (!create_budget_entry || !create_budget_entry.total_price) {
     const linked = db.prepare('SELECT id FROM budget_items WHERE trip_id = ? AND reservation_id = ?').get(tripId, id) as { id: number } | undefined;
     if (linked) {
-      const { deleteBudgetItem } = require('../services/budgetService');
       deleteBudgetItem(linked.id, tripId);
       broadcast(tripId, 'budget:deleted', { id: linked.id }, req.headers['x-socket-id'] as string);
     }
@@ -135,7 +134,6 @@ router.put('/:id', authenticate, (req: Request, res: Response) => {
   // Auto-create or update budget entry if price was provided
   if (create_budget_entry && create_budget_entry.total_price > 0) {
     try {
-      const { createBudgetItem, updateBudgetItem } = require('../services/budgetService');
       const itemName = title || current.title;
       const existing = db.prepare('SELECT id FROM budget_items WHERE trip_id = ? AND reservation_id = ?').get(tripId, id) as { id: number } | undefined;
       if (existing) {

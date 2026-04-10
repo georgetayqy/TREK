@@ -864,6 +864,26 @@ function runMigrations(db: Database.Database): void {
         for (const d of matchingDays) ins.run(r.id, d.id, r.day_plan_position);
       }
     },
+    // Migration: Budget category ordering
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS budget_category_order (
+          trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+          category TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (trip_id, category)
+        );
+      `);
+      // Seed existing categories with alphabetical order
+      const rows = db.prepare('SELECT DISTINCT trip_id, category FROM budget_items ORDER BY trip_id, category').all() as { trip_id: number; category: string }[];
+      const ins = db.prepare('INSERT OR IGNORE INTO budget_category_order (trip_id, category, sort_order) VALUES (?, ?, ?)');
+      let lastTripId = -1;
+      let idx = 0;
+      for (const r of rows) {
+        if (r.trip_id !== lastTripId) { lastTripId = r.trip_id; idx = 0; }
+        ins.run(r.trip_id, r.category, idx++);
+      }
+    },
   ];
 
   if (currentVersion < migrations.length) {

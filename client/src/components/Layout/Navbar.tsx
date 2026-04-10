@@ -53,7 +53,7 @@ export default function Navbar({ tripTitle, tripId, onBack, showBack, onShare }:
 
   const handleLogout = () => {
     logout()
-    navigate('/login')
+    navigate('/login', { state: { noRedirect: true } })
   }
 
   const toggleDarkMode = () => {

@@ -77,6 +77,7 @@ beforeEach(() => {
 
 afterAll(() => {
   testDb.close();
+  fs.rmSync(uploadsDir, { recursive: true, force: true });
 });
 
 // Helper to upload a file and return the file object

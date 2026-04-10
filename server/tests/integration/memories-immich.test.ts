@@ -511,3 +511,214 @@ describe('Immich auth checks', () => {
     expect((await request(app).get(`${IMMICH}/assets/1/asset-x/1/original`)).status).toBe(401);
   });
 });
+
+// ── Album sync ────────────────────────────────────────────────────────────────
+
+describe('Immich syncAlbumAssets', () => {
+  it('IMMICH-080 — POST sync happy path: trip owner with album link saves photos to DB', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    setImmichCredentials(testDb, user.id, 'https://immich.example.com', 'test-api-key');
+    const link = addAlbumLink(testDb, trip.id, user.id, 'immich', 'album-uuid-1', 'Vacation 2024');
+
+    const res = await request(app)
+      .post(`${IMMICH}/trips/${trip.id}/album-links/${link.id}/sync`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(typeof res.body.total).toBe('number');
+    expect(typeof res.body.added).toBe('number');
+
+    // Verify photos were inserted into the DB
+    const photos = testDb.prepare('SELECT * FROM trip_photos WHERE trip_id = ? AND user_id = ?').all(trip.id, user.id) as any[];
+    expect(photos.length).toBeGreaterThan(0);
+    expect(photos[0].provider).toBe('immich');
+  });
+
+  it('IMMICH-081 — POST sync when user is not a trip member returns 404', async () => {
+    const { user: owner } = createUser(testDb);
+    const { user: outsider } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    setImmichCredentials(testDb, owner.id, 'https://immich.example.com', 'test-api-key');
+    const link = addAlbumLink(testDb, trip.id, owner.id, 'immich', 'album-uuid-1', 'Vacation 2024');
+
+    // outsider is not a trip member — getAlbumIdFromLink checks canAccessTrip
+    const res = await request(app)
+      .post(`${IMMICH}/trips/${trip.id}/album-links/${link.id}/sync`)
+      .set('Cookie', authCookie(outsider.id));
+
+    expect(res.status).toBe(404);
+  });
+
+  it('IMMICH-082 — POST sync when Immich is not configured returns 400', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    // No Immich credentials set — but still need a valid album link owned by user
+    const link = addAlbumLink(testDb, trip.id, user.id, 'immich', 'album-uuid-1', 'Vacation 2024');
+
+    const res = await request(app)
+      .post(`${IMMICH}/trips/${trip.id}/album-links/${link.id}/sync`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeDefined();
+  });
+
+  it('IMMICH-083 — POST sync when safeFetch throws returns 502', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    setImmichCredentials(testDb, user.id, 'https://immich.example.com', 'test-api-key');
+    const link = addAlbumLink(testDb, trip.id, user.id, 'immich', 'album-uuid-1', 'Vacation 2024');
+
+    vi.mocked(safeFetch).mockRejectedValueOnce(new Error('network failure during sync'));
+
+    const res = await request(app)
+      .post(`${IMMICH}/trips/${trip.id}/album-links/${link.id}/sync`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBeDefined();
+  });
+
+  it('IMMICH-084 — POST sync when album link does not belong to requesting user returns 404', async () => {
+    const { user: owner } = createUser(testDb);
+    const { user: member } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    addTripMember(testDb, trip.id, member.id);
+    setImmichCredentials(testDb, member.id, 'https://immich.example.com', 'test-api-key');
+    // Album link is owned by owner, not member
+    const link = addAlbumLink(testDb, trip.id, owner.id, 'immich', 'album-uuid-1', 'Vacation 2024');
+
+    // member is a trip member but the album link belongs to owner — getAlbumIdFromLink checks user_id
+    const res = await request(app)
+      .post(`${IMMICH}/trips/${trip.id}/album-links/${link.id}/sync`)
+      .set('Cookie', authCookie(member.id));
+
+    expect(res.status).toBe(404);
+  });
+
+  it('IMMICH-085 — POST sync without auth returns 401', async () => {
+    expect((await request(app).post(`${IMMICH}/trips/1/album-links/1/sync`)).status).toBe(401);
+  });
+});
+
+// ── searchPhotos pagination safety ────────────────────────────────────────────
+
+describe('Immich searchPhotos pagination safety', () => {
+  it('IMMICH-090 — searchPhotos stops at page 20 when hasMore is always true', async () => {
+    const { user } = createUser(testDb);
+    setImmichCredentials(testDb, user.id, 'https://immich.example.com', 'test-api-key');
+
+    // Return a full page of 1000 items on every call, so the loop would
+    // run indefinitely without the page > 20 safety check.
+    const fullPageResponse = {
+      ok: true, status: 200,
+      headers: { get: () => null },
+      json: () => Promise.resolve({
+        assets: {
+          items: Array.from({ length: 1000 }, (_, i) => ({
+            id: `asset-${i}`,
+            fileCreatedAt: '2024-06-01T10:00:00.000Z',
+            exifInfo: { city: 'Paris', country: 'France' },
+          })),
+        },
+      }),
+      body: null,
+    } as any;
+
+    // Clear previous call history so the count only reflects this test
+    vi.mocked(safeFetch).mockClear();
+    vi.mocked(safeFetch).mockResolvedValue(fullPageResponse);
+
+    const res = await request(app)
+      .post(`${IMMICH}/search`)
+      .set('Cookie', authCookie(user.id))
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.assets)).toBe(true);
+    // 20 pages × 1000 items = 20000 assets total (safety limit)
+    expect(res.body.assets.length).toBe(20000);
+    // safeFetch should have been called exactly 20 times (the safety limit)
+    expect(vi.mocked(safeFetch)).toHaveBeenCalledTimes(20);
+  });
+});
+
+// ── saveImmichSettings clearing credentials ───────────────────────────────────
+
+describe('Immich saveImmichSettings clearing URL', () => {
+  it('IMMICH-095 — PUT /settings with no URL clears immich_url but preserves (updates) api key', async () => {
+    const { user } = createUser(testDb);
+    setImmichCredentials(testDb, user.id, 'https://immich.example.com', 'old-key');
+
+    // Send without immich_url to trigger the else branch (clear URL path)
+    const res = await request(app)
+      .put(`${IMMICH}/settings`)
+      .set('Cookie', authCookie(user.id))
+      .send({ immich_api_key: 'new-key' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const row = testDb.prepare('SELECT immich_url FROM users WHERE id = ?').get(user.id) as any;
+    expect(row.immich_url).toBeNull();
+  });
+
+  it('IMMICH-096 — PUT /settings with empty string URL clears immich_url', async () => {
+    const { user } = createUser(testDb);
+    setImmichCredentials(testDb, user.id, 'https://immich.example.com', 'old-key');
+
+    const res = await request(app)
+      .put(`${IMMICH}/settings`)
+      .set('Cookie', authCookie(user.id))
+      .send({ immich_url: '', immich_api_key: 'old-key' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const row = testDb.prepare('SELECT immich_url FROM users WHERE id = ?').get(user.id) as any;
+    expect(row.immich_url).toBeNull();
+  });
+});
+
+// ── testConnection canonical URL detection ────────────────────────────────────
+
+describe('Immich testConnection canonical URL detection', () => {
+  it('IMMICH-100 — POST /test with http URL that gets upgraded to https returns canonicalUrl', async () => {
+    const { user } = createUser(testDb);
+
+    // Mock safeFetch so the response.url reflects https upgrade
+    vi.mocked(safeFetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      url: 'https://immich.example.com/api/users/me',
+      headers: { get: (h: string) => h === 'content-type' ? 'application/json' : null } as any,
+      json: async () => ({ name: 'Redirect User', email: 'redirect@immich.local' }),
+      body: null,
+    } as any);
+
+    const res = await request(app)
+      .post(`${IMMICH}/test`)
+      .set('Cookie', authCookie(user.id))
+      .send({ immich_url: 'http://immich.example.com', immich_api_key: 'valid-key' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.connected).toBe(true);
+    expect(res.body.canonicalUrl).toBe('https://immich.example.com');
+  });
+
+  it('IMMICH-101 — POST /test with https URL that stays https does not return canonicalUrl', async () => {
+    const { user } = createUser(testDb);
+
+    // The default mock returns a response without .url property — no upgrade
+    const res = await request(app)
+      .post(`${IMMICH}/test`)
+      .set('Cookie', authCookie(user.id))
+      .send({ immich_url: 'https://immich.example.com', immich_api_key: 'valid-key' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.connected).toBe(true);
+    expect(res.body.canonicalUrl).toBeUndefined();
+  });
+});

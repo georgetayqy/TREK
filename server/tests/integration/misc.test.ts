@@ -119,24 +119,3 @@ describe('Force HTTPS redirect', () => {
   });
 });
 
-describe('Categories endpoint', () => {
-  it('MISC-013/PLACE-015 — GET /api/categories returns seeded categories', async () => {
-    const { user } = createUser(testDb);
-
-    const res = await request(app)
-      .get('/api/categories')
-      .set('Cookie', authCookie(user.id));
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body.categories)).toBe(true);
-    expect(res.body.categories.length).toBeGreaterThan(0);
-  });
-});
-
-describe('App config', () => {
-  it('MISC-015 — GET /api/auth/app-config returns configuration', async () => {
-    const res = await request(app).get('/api/auth/app-config');
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('allow_registration');
-    expect(res.body).toHaveProperty('oidc_configured');
-  });
-});

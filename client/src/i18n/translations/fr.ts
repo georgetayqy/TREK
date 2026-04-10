@@ -369,6 +369,7 @@ const fr: Record<string, string> = {
   'login.demoFailed': 'Échec de la connexion démo',
   'login.oidcSignIn': 'Se connecter avec {name}',
   'login.oidcOnly': 'L\'authentification par mot de passe est désactivée. Veuillez vous connecter via votre fournisseur SSO.',
+  'login.oidcLoggedOut': 'Vous avez été déconnecté. Reconnectez-vous via votre fournisseur SSO.',
   'login.demoHint': 'Essayez la démo — aucune inscription nécessaire',
 
   // Register

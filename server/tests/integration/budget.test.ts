@@ -209,6 +209,35 @@ describe('Budget item members', () => {
       .send({ user_ids: [user.id, member.id] });
     expect(res.status).toBe(200);
     expect(res.body.members).toBeDefined();
+
+    // After assigning members, list items should include them (covers loadBudgetItems member loop)
+    const listRes = await request(app)
+      .get(`/api/trips/${trip.id}/budget`)
+      .set('Cookie', authCookie(user.id));
+    expect(listRes.status).toBe(200);
+    const foundItem = (listRes.body.items as any[]).find((i: any) => i.id === item.id);
+    expect(foundItem).toBeDefined();
+    expect(foundItem.members).toHaveLength(2);
+  });
+
+  it('BUDGET-005b — PUT /members with empty user_ids clears members', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const item = createBudgetItem(testDb, trip.id);
+
+    // First assign a member
+    await request(app)
+      .put(`/api/trips/${trip.id}/budget/${item.id}/members`)
+      .set('Cookie', authCookie(user.id))
+      .send({ user_ids: [user.id] });
+
+    // Then clear members with empty array
+    const res = await request(app)
+      .put(`/api/trips/${trip.id}/budget/${item.id}/members`)
+      .set('Cookie', authCookie(user.id))
+      .send({ user_ids: [] });
+    expect(res.status).toBe(200);
+    expect(res.body.members).toHaveLength(0);
   });
 
   it('BUDGET-005 — PUT /members with non-array user_ids returns 400', async () => {
@@ -234,12 +263,22 @@ describe('Budget item members', () => {
       .set('Cookie', authCookie(user.id))
       .send({ user_ids: [user.id] });
 
+    // Toggle to paid=true
     const res = await request(app)
       .put(`/api/trips/${trip.id}/budget/${item.id}/members/${user.id}/paid`)
       .set('Cookie', authCookie(user.id))
       .send({ paid: true });
     expect(res.status).toBe(200);
     expect(res.body.member).toBeDefined();
+    expect(res.body.member.paid).toBe(1); // SQLite stores as integer
+
+    // Toggle back to paid=false
+    const res2 = await request(app)
+      .put(`/api/trips/${trip.id}/budget/${item.id}/members/${user.id}/paid`)
+      .set('Cookie', authCookie(user.id))
+      .send({ paid: false });
+    expect(res2.status).toBe(200);
+    expect(res2.body.member.paid).toBe(0);
   });
 });
 
@@ -251,36 +290,72 @@ describe('Budget summary and settlement', () => {
   it('BUDGET-007 — GET /summary/per-person returns per-person breakdown', async () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
-    createBudgetItem(testDb, trip.id, { name: 'Dinner', total_price: 60 });
+    const item = createBudgetItem(testDb, trip.id, { name: 'Dinner', total_price: 60 });
+
+    await request(app)
+      .put(`/api/trips/${trip.id}/budget/${item.id}/members`)
+      .set('Cookie', authCookie(user.id))
+      .send({ user_ids: [user.id] });
+    await request(app)
+      .put(`/api/trips/${trip.id}/budget/${item.id}/members/${user.id}/paid`)
+      .set('Cookie', authCookie(user.id))
+      .send({ paid: true });
 
     const res = await request(app)
       .get(`/api/trips/${trip.id}/budget/summary/per-person`)
       .set('Cookie', authCookie(user.id));
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body.summary)).toBe(true);
+    expect(res.body.summary).toHaveLength(1);
+    const entry = res.body.summary[0];
+    expect(entry.user_id).toBe(user.id);
+    expect(typeof entry.total_paid).toBe('number');
+    expect(entry.total_paid).toBeGreaterThan(0);
   });
 
   it('BUDGET-008 — GET /settlement returns settlement transactions', async () => {
     const { user } = createUser(testDb);
+    const { user: user2 } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
+    addTripMember(testDb, trip.id, user2.id);
+    const item = createBudgetItem(testDb, trip.id, { name: 'Dinner', total_price: 60 });
+
+    await request(app)
+      .put(`/api/trips/${trip.id}/budget/${item.id}/members`)
+      .set('Cookie', authCookie(user.id))
+      .send({ user_ids: [user.id, user2.id] });
+    await request(app)
+      .put(`/api/trips/${trip.id}/budget/${item.id}/members/${user.id}/paid`)
+      .set('Cookie', authCookie(user.id))
+      .send({ paid: true });
 
     const res = await request(app)
       .get(`/api/trips/${trip.id}/budget/settlement`)
       .set('Cookie', authCookie(user.id));
     expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('balances');
-    expect(res.body).toHaveProperty('flows');
+    expect(Array.isArray(res.body.balances)).toBe(true);
+    expect(Array.isArray(res.body.flows)).toBe(true);
+
+    const payerBalance = res.body.balances.find((b: any) => b.user_id === user.id);
+    const nonPayerBalance = res.body.balances.find((b: any) => b.user_id === user2.id);
+    expect(payerBalance.balance).toBeCloseTo(30);
+    expect(nonPayerBalance.balance).toBeCloseTo(-30);
+
+    expect(res.body.flows).toHaveLength(1);
+    expect(res.body.flows[0].from.user_id).toBe(user2.id);
+    expect(res.body.flows[0].to.user_id).toBe(user.id);
+    expect(res.body.flows[0].amount).toBeCloseTo(30);
   });
 
   it('BUDGET-009 — settlement with no payers returns empty transactions', async () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id);
-    // Item with no members/payers assigned
     createBudgetItem(testDb, trip.id, { name: 'Train', total_price: 40 });
 
     const res = await request(app)
       .get(`/api/trips/${trip.id}/budget/settlement`)
       .set('Cookie', authCookie(user.id));
     expect(res.status).toBe(200);
+    expect(res.body.balances).toEqual([]);
+    expect(res.body.flows).toEqual([]);
   });
 });

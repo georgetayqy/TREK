@@ -434,6 +434,46 @@ describe('Accommodations', () => {
     expect(reservation.confirmation_number).toBe('CONF-XYZ');
   });
 
+  it('ACCOM-004 — PUT /api/trips/:tripId/accommodations/:id updates the accommodation', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Hotel Trip' });
+    const day1 = createDay(testDb, trip.id, { date: '2026-10-20' });
+    const day2 = createDay(testDb, trip.id, { date: '2026-10-22' });
+    const day3 = createDay(testDb, trip.id, { date: '2026-10-25' });
+    const place = createPlace(testDb, trip.id, { name: 'City Inn' });
+
+    const createRes = await request(app)
+      .post(`/api/trips/${trip.id}/accommodations`)
+      .set('Cookie', authCookie(user.id))
+      .send({ place_id: place.id, start_day_id: day1.id, end_day_id: day2.id, notes: 'Original' });
+
+    expect(createRes.status).toBe(201);
+    const accommodationId = createRes.body.accommodation.id;
+
+    const updateRes = await request(app)
+      .put(`/api/trips/${trip.id}/accommodations/${accommodationId}`)
+      .set('Cookie', authCookie(user.id))
+      .send({ place_id: place.id, start_day_id: day1.id, end_day_id: day3.id, notes: 'Extended stay' });
+
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.accommodation).toBeDefined();
+    expect(updateRes.body.accommodation.end_day_id).toBe(day3.id);
+    expect(updateRes.body.accommodation.notes).toBe('Extended stay');
+  });
+
+  it('ACCOM-004 — PUT non-existent accommodation returns 404', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Trip' });
+
+    const res = await request(app)
+      .put(`/api/trips/${trip.id}/accommodations/999999`)
+      .set('Cookie', authCookie(user.id))
+      .send({ notes: 'Ghost update' });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/not found/i);
+  });
+
   it('ACCOM-003 — Deleting accommodation also removes the linked reservation', async () => {
     const { user } = createUser(testDb);
     const trip = createTrip(testDb, user.id, { title: 'Hotel Trip' });

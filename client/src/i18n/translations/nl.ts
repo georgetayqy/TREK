@@ -369,6 +369,7 @@ const nl: Record<string, string> = {
   'login.demoFailed': 'Demo-login mislukt',
   'login.oidcSignIn': 'Inloggen met {name}',
   'login.oidcOnly': 'Wachtwoordauthenticatie is uitgeschakeld. Log in via je SSO-provider.',
+  'login.oidcLoggedOut': 'Je bent uitgelogd. Log opnieuw in via je SSO-provider.',
   'login.demoHint': 'Probeer de demo — geen registratie nodig',
 
   // Register

@@ -369,6 +369,7 @@ const zh: Record<string, string> = {
   'login.demoFailed': '演示登录失败',
   'login.oidcSignIn': '通过 {name} 登录',
   'login.oidcOnly': '密码登录已关闭。请通过 SSO 提供商登录。',
+  'login.oidcLoggedOut': '您已退出登录。请重新通过 SSO 提供商登录。',
   'login.demoHint': '试用演示——无需注册',
 
   // Register

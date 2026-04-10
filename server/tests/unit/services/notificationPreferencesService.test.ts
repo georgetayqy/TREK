@@ -44,6 +44,7 @@ import {
   getAdminGlobalPref,
   getActiveChannels,
   getAvailableChannels,
+  isWebhookConfigured,
 } from '../../../src/services/notificationPreferencesService';
 
 beforeAll(() => {
@@ -314,5 +315,21 @@ describe('setAdminPreferences', () => {
     expect(getAdminGlobalPref('version_available', 'email')).toBe(true);
     const row = testDb.prepare("SELECT value FROM app_settings WHERE key = ?").get('admin_notif_pref_version_available_email') as { value: string } | undefined;
     expect(row?.value).toBe('1');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// isWebhookConfigured
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('isWebhookConfigured', () => {
+  it('NPREF-026 — returns false when webhook is not in active channels', () => {
+    // No notification_channels configured → defaults don't include webhook
+    expect(isWebhookConfigured()).toBe(false);
+  });
+
+  it('NPREF-027 — returns true when webhook is in active channels', () => {
+    setNotificationChannels(testDb, 'webhook');
+    expect(isWebhookConfigured()).toBe(true);
   });
 });

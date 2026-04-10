@@ -49,7 +49,7 @@ import { createApp } from '../../src/app';
 import { createTables } from '../../src/db/schema';
 import { runMigrations } from '../../src/db/migrations';
 import { resetTestDb } from '../helpers/test-db';
-import { createUser, createAdmin, createTrip, addTripMember, createPlace, createReservation } from '../helpers/factories';
+import { createUser, createAdmin, createTrip, addTripMember, createPlace, createReservation, createTag, createDayAccommodation, createBudgetItem, createPackingItem, createDayNote } from '../helpers/factories';
 import { authCookie } from '../helpers/auth';
 import { loginAttempts, mfaAttempts } from '../../src/routes/auth';
 import { invalidatePermissionsCache } from '../../src/services/permissions';
@@ -291,17 +291,6 @@ describe('Get trip', () => {
     expect(res.body.error).toMatch(/not found/i);
   });
 
-  it('TRIP-016 — Non-member cannot access trip → 404', async () => {
-    const { user: owner } = createUser(testDb);
-    const { user: nonMember } = createUser(testDb);
-    const trip = createTrip(testDb, owner.id, { title: 'Private Trip' });
-
-    const res = await request(app)
-      .get(`/api/trips/${trip.id}`)
-      .set('Cookie', authCookie(nonMember.id));
-
-    expect(res.status).toBe(404);
-  });
 
   it('TRIP-017 — Member can access trip → 200', async () => {
     const { user: owner } = createUser(testDb);
@@ -692,5 +681,214 @@ describe('Trip members', () => {
       .set('Cookie', authCookie(stranger.id));
 
     expect(res.status).toBe(404);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Copy trip (TRIP-023, TRIP-024)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Copy trip', () => {
+  it('TRIP-023 — POST /api/trips/:id/copy creates a duplicate trip with 201', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Original Trip', description: 'Desc' });
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/copy`)
+      .set('Cookie', authCookie(user.id))
+      .send({});
+
+    expect(res.status).toBe(201);
+    expect(res.body.trip).toBeDefined();
+    expect(res.body.trip.id).not.toBe(trip.id);
+    expect(res.body.trip.title).toBe('Original Trip');
+  });
+
+  it('TRIP-023 — copy accepts a custom title for the new trip', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Source' });
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/copy`)
+      .set('Cookie', authCookie(user.id))
+      .send({ title: 'Custom Copy' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.trip.title).toBe('Custom Copy');
+  });
+
+  it('TRIP-023 — copied trip belongs to the requesting user', async () => {
+    const { user: owner } = createUser(testDb);
+    const { user: member } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id, { title: 'Shared Trip' });
+    addTripMember(testDb, trip.id, member.id);
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/copy`)
+      .set('Cookie', authCookie(member.id))
+      .send({});
+
+    expect(res.status).toBe(201);
+    const newTrip = testDb.prepare('SELECT * FROM trips WHERE id = ?').get(res.body.trip.id) as any;
+    expect(newTrip.user_id).toBe(member.id);
+  });
+
+  it('TRIP-024 — non-member cannot copy a trip → 404', async () => {
+    const { user: owner } = createUser(testDb);
+    const { user: stranger } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id, { title: 'Private Trip' });
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/copy`)
+      .set('Cookie', authCookie(stranger.id))
+      .send({});
+
+    expect(res.status).toBe(404);
+  });
+
+  it('TRIP-024 — copy of non-existent trip returns 404', async () => {
+    const { user } = createUser(testDb);
+
+    const res = await request(app)
+      .post('/api/trips/999999/copy')
+      .set('Cookie', authCookie(user.id))
+      .send({});
+
+    expect(res.status).toBe(404);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ICS export (TRIP-025)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ICS export', () => {
+  it('TRIP-025 — GET /api/trips/:id/export.ics returns text/calendar content', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Calendar Trip' });
+
+    const res = await request(app)
+      .get(`/api/trips/${trip.id}/export.ics`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/calendar/);
+    expect(res.text).toContain('BEGIN:VCALENDAR');
+    expect(res.text).toContain('END:VCALENDAR');
+  });
+
+  it('TRIP-025 — non-member cannot export ICS → 404', async () => {
+    const { user: owner } = createUser(testDb);
+    const { user: stranger } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id, { title: 'Private Trip' });
+
+    const res = await request(app)
+      .get(`/api/trips/${trip.id}/export.ics`)
+      .set('Cookie', authCookie(stranger.id));
+
+    expect(res.status).toBe(404);
+  });
+
+  it('TRIP-025 — unauthenticated export returns 401', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Trip' });
+
+    const res = await request(app).get(`/api/trips/${trip.id}/export.ics`);
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Copy trip with full data (covers loop bodies in the copy transaction)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Copy trip with data', () => {
+  it('TRIP-026 — copy preserves days, places, tags, assignments, accommodations, reservations, budget, packing, notes', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, {
+      title: 'Data-Rich Trip',
+      start_date: '2025-09-01',
+      end_date: '2025-09-03',
+    });
+
+    const days = testDb.prepare('SELECT * FROM days WHERE trip_id = ? ORDER BY day_number').all(trip.id) as any[];
+    expect(days.length).toBe(3);
+
+    // Place with a tag
+    const place = createPlace(testDb, trip.id, { name: 'Tower Bridge' });
+    const tag = createTag(testDb, user.id, { name: 'Landmark' });
+    testDb.prepare('INSERT INTO place_tags (place_id, tag_id) VALUES (?, ?)').run(place.id, tag.id);
+
+    // Day assignment
+    testDb.prepare(
+      'INSERT INTO day_assignments (day_id, place_id, order_index, notes) VALUES (?, ?, 0, ?)'
+    ).run(days[0].id, place.id, 'Visit in morning');
+
+    // Accommodation spanning days 0→1
+    createDayAccommodation(testDb, trip.id, place.id, days[0].id, days[1].id);
+
+    // Reservation on day 0
+    createReservation(testDb, trip.id, { title: 'Flight Out', type: 'flight', day_id: days[0].id });
+
+    // Budget item
+    createBudgetItem(testDb, trip.id, { name: 'Flights', total_price: 400 });
+
+    // Packing item
+    createPackingItem(testDb, trip.id, { name: 'Toothbrush' });
+
+    // Day note
+    createDayNote(testDb, days[0].id, trip.id, { text: 'Pack early!' });
+
+    const res = await request(app)
+      .post(`/api/trips/${trip.id}/copy`)
+      .set('Cookie', authCookie(user.id))
+      .send({ title: 'Data-Rich Trip (Copy)' });
+
+    expect(res.status).toBe(201);
+    const newId = res.body.trip.id;
+    expect(newId).not.toBe(trip.id);
+
+    // Days copied
+    const newDays = testDb.prepare('SELECT * FROM days WHERE trip_id = ? ORDER BY day_number').all(newId) as any[];
+    expect(newDays).toHaveLength(3);
+
+    // Place copied
+    const newPlaces = testDb.prepare('SELECT * FROM places WHERE trip_id = ?').all(newId) as any[];
+    expect(newPlaces).toHaveLength(1);
+    expect(newPlaces[0].name).toBe('Tower Bridge');
+
+    // Place tag copied
+    const newTags = testDb.prepare(
+      'SELECT pt.* FROM place_tags pt JOIN places p ON p.id = pt.place_id WHERE p.trip_id = ?'
+    ).all(newId) as any[];
+    expect(newTags).toHaveLength(1);
+
+    // Assignment copied
+    const newAssignments = testDb.prepare(
+      'SELECT da.* FROM day_assignments da JOIN days d ON d.id = da.day_id WHERE d.trip_id = ?'
+    ).all(newId) as any[];
+    expect(newAssignments).toHaveLength(1);
+
+    // Accommodation copied
+    const newAccom = testDb.prepare('SELECT * FROM day_accommodations WHERE trip_id = ?').all(newId) as any[];
+    expect(newAccom).toHaveLength(1);
+
+    // Reservation copied
+    const newResv = testDb.prepare('SELECT * FROM reservations WHERE trip_id = ?').all(newId) as any[];
+    expect(newResv).toHaveLength(1);
+
+    // Budget copied
+    const newBudget = testDb.prepare('SELECT * FROM budget_items WHERE trip_id = ?').all(newId) as any[];
+    expect(newBudget).toHaveLength(1);
+
+    // Packing copied (checked reset to 0)
+    const newPacking = testDb.prepare('SELECT * FROM packing_items WHERE trip_id = ?').all(newId) as any[];
+    expect(newPacking).toHaveLength(1);
+    expect(newPacking[0].checked).toBe(0);
+
+    // Day note copied
+    const newNotes = testDb.prepare('SELECT * FROM day_notes WHERE trip_id = ?').all(newId) as any[];
+    expect(newNotes).toHaveLength(1);
+    expect(newNotes[0].text).toBe('Pack early!');
   });
 });

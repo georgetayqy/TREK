@@ -362,6 +362,7 @@ const cs: Record<string, string | { name: string; category: string }[]> = {
   'login.demoFailed': 'Přihlášení do dema se nezdařilo',
   'login.oidcSignIn': 'Přihlásit se přes {name}',
   'login.oidcOnly': 'Ověřování heslem je zakázáno. Přihlaste se prosím přes SSO poskytovatele.',
+  'login.oidcLoggedOut': 'Byl jste odhlášen. Přihlaste se znovu přes SSO poskytovatele.',
   'login.demoHint': 'Vyzkoušejte demo – registrace není nutná',
   'login.mfaTitle': 'Dvoufaktorové ověření',
   'login.mfaSubtitle': 'Zadejte 6místný kód z vaší autentizační aplikace.',

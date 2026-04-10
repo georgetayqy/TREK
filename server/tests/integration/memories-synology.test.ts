@@ -543,3 +543,322 @@ describe('Synology auth checks', () => {
     expect((await request(app).get(`${SYNO}/assets/1/photo-x/1/thumbnail`)).status).toBe(401);
   });
 });
+
+// ── Album sync ────────────────────────────────────────────────────────────────
+
+import { addAlbumLink } from '../helpers/factories';
+
+describe('Synology syncSynologyAlbumLink', () => {
+  it('SYNO-050 — POST sync happy path: trip owner with album link saves photos to DB', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    setSynologyCredentials(testDb, user.id, 'https://synology.example.com', 'admin', 'pass');
+    // The migration inserts synologyphotos with enabled=0; ensure it is enabled for this test.
+    testDb.prepare("UPDATE photo_providers SET enabled = 1 WHERE id = 'synologyphotos'").run();
+    // album_id must be a numeric string so getAlbumIdFromLink returns it and
+    // syncSynologyAlbumLink passes Number(album_id) to the API.
+    const link = addAlbumLink(testDb, trip.id, user.id, 'synologyphotos', '1', 'Summer Trip');
+
+    const res = await request(app)
+      .post(`${SYNO}/trips/${trip.id}/album-links/${link.id}/sync`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(typeof res.body.added).toBe('number');
+    expect(typeof res.body.total).toBe('number');
+
+    // Verify photos were inserted into the DB
+    const photos = testDb.prepare('SELECT * FROM trip_photos WHERE trip_id = ? AND user_id = ?').all(trip.id, user.id) as any[];
+    expect(photos.length).toBeGreaterThan(0);
+    expect(photos[0].provider).toBe('synologyphotos');
+  });
+
+  it('SYNO-051 — POST sync when user is not a trip member returns 404', async () => {
+    const { user: owner } = createUser(testDb);
+    const { user: outsider } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    setSynologyCredentials(testDb, owner.id, 'https://synology.example.com', 'admin', 'pass');
+    const link = addAlbumLink(testDb, trip.id, owner.id, 'synologyphotos', '1', 'Summer Trip');
+
+    const res = await request(app)
+      .post(`${SYNO}/trips/${trip.id}/album-links/${link.id}/sync`)
+      .set('Cookie', authCookie(outsider.id));
+
+    expect(res.status).toBe(404);
+  });
+
+  it('SYNO-052 — POST sync when Synology is not configured returns 400', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    // No credentials — album link still exists for the user
+    const link = addAlbumLink(testDb, trip.id, user.id, 'synologyphotos', '1', 'Summer Trip');
+
+    const res = await request(app)
+      .post(`${SYNO}/trips/${trip.id}/album-links/${link.id}/sync`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeDefined();
+  });
+
+  it('SYNO-053 — POST sync without auth returns 401', async () => {
+    expect((await request(app).post(`${SYNO}/trips/1/album-links/1/sync`)).status).toBe(401);
+  });
+});
+
+// ── Session retry logic ───────────────────────────────────────────────────────
+
+describe('Synology session retry on error codes 106/107/119', () => {
+  it('SYNO-060 — request retries with fresh session when API returns error code 119', async () => {
+    const { user } = createUser(testDb);
+    setSynologyCredentials(testDb, user.id, 'https://synology.example.com', 'admin', 'pass');
+
+    // Clear previous call history so the count only reflects this test's calls
+    vi.mocked(safeFetch).mockClear();
+
+    // Call sequence:
+    //   1. Auth login (fresh session — no cached SID) → success with sid
+    //   2. SYNO.Foto.Browse.Album call → returns { success: false, error: { code: 119 } }
+    //   3. Auth login again (retry session after clearing SID) → success with new sid
+    //   4. SYNO.Foto.Browse.Album retry call → success
+    vi.mocked(safeFetch)
+      .mockResolvedValueOnce({
+        // call 1: initial login
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: true, data: { sid: 'first-sid' } }),
+        body: null,
+      } as any)
+      .mockResolvedValueOnce({
+        // call 2: album list → session expired (119)
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: false, error: { code: 119 } }),
+        body: null,
+      } as any)
+      .mockResolvedValueOnce({
+        // call 3: retry login after clearing SID
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: true, data: { sid: 'second-sid' } }),
+        body: null,
+      } as any)
+      .mockResolvedValueOnce({
+        // call 4: retry album list → success
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({
+          success: true,
+          data: {
+            list: [{ id: 99, name: 'Retry Album', item_count: 5 }],
+          },
+        }),
+        body: null,
+      } as any);
+
+    const res = await request(app)
+      .get(`${SYNO}/albums`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.albums)).toBe(true);
+    expect(res.body.albums[0]).toMatchObject({ albumName: 'Retry Album' });
+    // Four safeFetch calls: login, failed album list, re-login, successful album list
+    expect(vi.mocked(safeFetch)).toHaveBeenCalledTimes(4);
+  });
+
+  it('SYNO-061 — request retries with fresh session when API returns error code 106', async () => {
+    const { user } = createUser(testDb);
+    setSynologyCredentials(testDb, user.id, 'https://synology.example.com', 'admin', 'pass');
+
+    vi.mocked(safeFetch).mockClear();
+    vi.mocked(safeFetch)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: true, data: { sid: 'sid-one' } }),
+        body: null,
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: false, error: { code: 106 } }),
+        body: null,
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: true, data: { sid: 'sid-two' } }),
+        body: null,
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({
+          success: true,
+          data: { list: [{ id: 3, name: 'Timeout Album', item_count: 2 }] },
+        }),
+        body: null,
+      } as any);
+
+    const res = await request(app)
+      .get(`${SYNO}/albums`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(res.body.albums[0]).toMatchObject({ albumName: 'Timeout Album' });
+    expect(vi.mocked(safeFetch)).toHaveBeenCalledTimes(4);
+  });
+});
+
+// ── Date range search ─────────────────────────────────────────────────────────
+
+describe('Synology searchSynologyPhotos date range', () => {
+  it('SYNO-070 — POST /search with from/to passes start_time and end_time to Synology API', async () => {
+    const { user } = createUser(testDb);
+    setSynologyCredentials(testDb, user.id, 'https://synology.example.com', 'admin', 'pass');
+
+    // Capture the body sent on the search call (second safeFetch call after auth)
+    let capturedBody: URLSearchParams | null = null;
+    vi.mocked(safeFetch)
+      .mockResolvedValueOnce({
+        // login
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: true, data: { sid: 'fake-sid' } }),
+        body: null,
+      } as any)
+      .mockImplementationOnce((_url: string, init?: any) => {
+        capturedBody = init?.body instanceof URLSearchParams
+          ? init.body
+          : new URLSearchParams(String(init?.body ?? ''));
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: { get: () => 'application/json' },
+          json: async () => ({
+            success: true,
+            data: {
+              list: [
+                {
+                  id: 201,
+                  filename: 'dated.jpg',
+                  filesize: 512000,
+                  time: 1717228800,
+                  additional: {
+                    thumbnail: { cache_key: '201_abc' },
+                    address: { city: 'Kyoto', country: 'Japan', state: 'Kyoto' },
+                    exif: {},
+                    gps: {},
+                    resolution: { width: 4000, height: 3000 },
+                    orientation: 1,
+                    description: null,
+                  },
+                },
+              ],
+            },
+          }),
+          body: null,
+        } as any);
+      });
+
+    const res = await request(app)
+      .post(`${SYNO}/search`)
+      .set('Cookie', authCookie(user.id))
+      .send({ from: '2024-06-01', to: '2024-06-30' });
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.assets)).toBe(true);
+
+    // Verify date parameters were forwarded in the Synology API request body
+    expect(capturedBody).not.toBeNull();
+    const startTime = capturedBody!.get('start_time');
+    const endTime = capturedBody!.get('end_time');
+    expect(startTime).toBeDefined();
+    expect(Number(startTime)).toBeGreaterThan(0);
+    expect(endTime).toBeDefined();
+    expect(Number(endTime)).toBeGreaterThan(Number(startTime));
+  });
+
+  it('SYNO-071 — POST /search without date range omits start_time and end_time', async () => {
+    const { user } = createUser(testDb);
+    setSynologyCredentials(testDb, user.id, 'https://synology.example.com', 'admin', 'pass');
+
+    let capturedBody: URLSearchParams | null = null;
+    vi.mocked(safeFetch)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: true, data: { sid: 'fake-sid' } }),
+        body: null,
+      } as any)
+      .mockImplementationOnce((_url: string, init?: any) => {
+        capturedBody = init?.body instanceof URLSearchParams
+          ? init.body
+          : new URLSearchParams(String(init?.body ?? ''));
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: { get: () => 'application/json' },
+          json: async () => ({ success: true, data: { list: [] } }),
+          body: null,
+        } as any);
+      });
+
+    const res = await request(app)
+      .post(`${SYNO}/search`)
+      .set('Cookie', authCookie(user.id))
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(capturedBody).not.toBeNull();
+    expect(capturedBody!.get('start_time')).toBeNull();
+    expect(capturedBody!.get('end_time')).toBeNull();
+  });
+});
+
+// ── SSRF catch branch in _fetchSynologyJson ────────────────────────────────────
+
+describe('Synology SSRF blocked error handling', () => {
+  it('SYNO-080 — safeFetch throwing SsrfBlockedError for private IP URL returns connected: false', async () => {
+    const { user } = createUser(testDb);
+    setSynologyCredentials(testDb, user.id, 'http://192.168.1.200', 'admin', 'pass');
+
+    const { SsrfBlockedError: SsrfErr } = await import('../../src/utils/ssrfGuard');
+
+    // Make safeFetch throw SsrfBlockedError — simulating the SSRF guard blocking the private IP.
+    // _fetchSynologyJson catches SsrfBlockedError and returns fail(message, 400).
+    // getSynologyStatus receives the failure from _getSynologySession and returns { connected: false }.
+    vi.mocked(safeFetch).mockRejectedValueOnce(new SsrfErr('Private IP not allowed'));
+
+    const res = await request(app)
+      .get(`${SYNO}/status`)
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(res.body.connected).toBe(false);
+  });
+
+  it('SYNO-081 — safeFetch throwing SsrfBlockedError during album list returns 400', async () => {
+    const { user } = createUser(testDb);
+    setSynologyCredentials(testDb, user.id, 'https://synology.example.com', 'admin', 'pass');
+
+    const { SsrfBlockedError: SsrfErr } = await import('../../src/utils/ssrfGuard');
+
+    // Auth succeeds, but the album-list call throws SsrfBlockedError
+    vi.mocked(safeFetch)
+      .mockResolvedValueOnce({
+        ok: true, status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ success: true, data: { sid: 'sid-x' } }),
+        body: null,
+      } as any)
+      .mockRejectedValueOnce(new SsrfErr('Private IP detected'));
+
+    const res = await request(app)
+      .get(`${SYNO}/albums`)
+      .set('Cookie', authCookie(user.id));
+
+    // _fetchSynologyJson catches SsrfBlockedError and returns fail(message, 400)
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeDefined();
+  });
+});

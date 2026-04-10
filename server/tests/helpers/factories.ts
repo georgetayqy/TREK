@@ -11,6 +11,8 @@ import { encrypt_api_key } from '../../src/services/apiKeyCrypto';
 
 let _userSeq = 0;
 let _tripSeq = 0;
+let _categorySeq = 0;
+let _tagSeq = 0;
 
 // ---------------------------------------------------------------------------
 // Users
@@ -320,6 +322,32 @@ export function createCollabNote(
 }
 
 // ---------------------------------------------------------------------------
+// Todo Items
+// ---------------------------------------------------------------------------
+
+export interface TestTodoItem {
+  id: number;
+  trip_id: number;
+  name: string;
+  checked: number;
+  category: string | null;
+  sort_order: number;
+}
+
+export function createTodoItem(
+  db: Database.Database,
+  tripId: number,
+  overrides: Partial<{ name: string; category: string; checked: number }> = {}
+): TestTodoItem {
+  const maxOrder = db.prepare('SELECT MAX(sort_order) as max FROM todo_items WHERE trip_id = ?').get(tripId) as { max: number | null };
+  const sortOrder = (maxOrder.max !== null ? maxOrder.max : -1) + 1;
+  const result = db.prepare(
+    'INSERT INTO todo_items (trip_id, name, checked, category, sort_order) VALUES (?, ?, ?, ?, ?)'
+  ).run(tripId, overrides.name ?? 'Test Todo', overrides.checked ?? 0, overrides.category ?? null, sortOrder);
+  return db.prepare('SELECT * FROM todo_items WHERE id = ?').get(result.lastInsertRowid) as TestTodoItem;
+}
+
+// ---------------------------------------------------------------------------
 // Day Assignments
 // ---------------------------------------------------------------------------
 
@@ -578,4 +606,35 @@ export function setSynologyCredentials(
 ): void {
   db.prepare('UPDATE users SET synology_url = ?, synology_username = ?, synology_password = ? WHERE id = ?')
     .run(url, username, encrypt_api_key(password), userId);
+}
+
+// ---------------------------------------------------------------------------
+// Categories
+// ---------------------------------------------------------------------------
+
+export function createCategory(
+  db: Database.Database,
+  overrides: { name?: string; color?: string; icon?: string; user_id?: number | null } = {}
+) {
+  const name = overrides.name ?? `Test Category ${++_categorySeq}`;
+  const color = overrides.color ?? '#6366f1';
+  const icon = overrides.icon ?? '📍';
+  const userId = overrides.user_id ?? null;
+  const result = db.prepare('INSERT INTO categories (name, color, icon, user_id) VALUES (?, ?, ?, ?)').run(name, color, icon, userId);
+  return db.prepare('SELECT * FROM categories WHERE id = ?').get(result.lastInsertRowid) as { id: number; name: string; color: string; icon: string; user_id: number | null };
+}
+
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+
+export function createTag(
+  db: Database.Database,
+  userId: number,
+  overrides: { name?: string; color?: string } = {}
+) {
+  const name = overrides.name ?? `Test Tag ${++_tagSeq}`;
+  const color = overrides.color ?? '#10b981';
+  const result = db.prepare('INSERT INTO tags (user_id, name, color) VALUES (?, ?, ?)').run(userId, name, color);
+  return db.prepare('SELECT * FROM tags WHERE id = ?').get(result.lastInsertRowid) as { id: number; user_id: number; name: string; color: string };
 }

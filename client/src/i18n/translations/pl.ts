@@ -329,6 +329,7 @@ const pl: Record<string, string | { name: string; category: string }[]> = {
   'login.demoFailed': 'Nie udało się zalogować do wersji demonstracyjnej',
   'login.oidcSignIn': 'Zaloguj się z {name}',
   'login.oidcOnly': 'Uwierzytelnianie hasłem jest wyłączone. Zaloguj się za pomocą swojego dostawcy SSO.',
+  'login.oidcLoggedOut': 'Zostałeś wylogowany. Zaloguj się ponownie za pomocą swojego dostawcy SSO.',
   'login.demoHint': 'Wypróbuj demo — nie wymaga rejestracji',
   'login.mfaTitle': 'Uwierzytelnianie dwuskładnikowe',
   'login.mfaSubtitle': 'Wprowadź 6-cyfrowy kod z aplikacji uwierzytelniającej.',

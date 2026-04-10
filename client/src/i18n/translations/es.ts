@@ -1494,6 +1494,7 @@ const es: Record<string, string> = {
   'admin.oidcOnlyMode': 'Desactivar autenticación por contraseña',
   'admin.oidcOnlyModeHint': 'Si está activado, solo se permite el inicio de sesión con SSO. El inicio de sesión y registro con contraseña se bloquean.',
   'login.oidcOnly': 'La autenticación por contraseña está desactivada. Por favor, inicia sesión con tu proveedor SSO.',
+  'login.oidcLoggedOut': 'Has cerrado sesión. Vuelve a iniciar sesión con tu proveedor SSO.',
 
   // Settings (2.6.2)
   'settings.currentPasswordRequired': 'La contraseña actual es obligatoria',

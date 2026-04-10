@@ -1,6 +1,6 @@
 /**
  * Authentication integration tests.
- * Covers AUTH-001 to AUTH-022, AUTH-028 to AUTH-030.
+ * Covers AUTH-001 to AUTH-022, AUTH-028 to AUTH-033.
  * OIDC scenarios (AUTH-023 to AUTH-027) require a real IdP and are excluded.
  * Rate limiting scenarios (AUTH-004, AUTH-018) are at the end of this file.
  */
@@ -449,6 +449,67 @@ describe('Short-lived tokens', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Extended scenarios (AUTH-031 to AUTH-033)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Extended auth scenarios', () => {
+  it('AUTH-031 — login succeeds with uppercased email (case-insensitive lookup)', async () => {
+    const { user, password } = createUser(testDb, { email: 'alice@example.com' });
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'ALICE@EXAMPLE.COM', password });
+    expect(res.status).toBe(200);
+    expect(res.body.user).toBeDefined();
+  });
+
+  it('AUTH-032 — registration with duplicate username returns 409', async () => {
+    createUser(testDb, { username: 'alice' });
+
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ username: 'alice', email: 'alice2@example.com', password: 'Str0ng!Pass' });
+    expect(res.status).toBe(409);
+  });
+
+  it('AUTH-033 — MFA backup code login succeeds and invalidates the used code', async () => {
+    const { hashBackupCode, generateBackupCodes } = await import('../../src/services/authService');
+    const { user, password } = createUserWithMfa(testDb);
+
+    // Generate and store backup codes on the MFA-enabled user
+    const backupCodes = generateBackupCodes();
+    const backupHashes = backupCodes.map(hashBackupCode);
+    testDb.prepare('UPDATE users SET mfa_backup_codes = ? WHERE id = ?')
+      .run(JSON.stringify(backupHashes), user.id);
+
+    // Step 1: login to get mfa_token
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: user.email, password });
+    expect(loginRes.body.mfa_required).toBe(true);
+    const { mfa_token } = loginRes.body;
+
+    // Step 2: verify with a backup code
+    const res = await request(app)
+      .post('/api/auth/mfa/verify-login')
+      .send({ mfa_token, code: backupCodes[0] });
+    expect(res.status).toBe(200);
+    expect(res.body.user).toBeDefined();
+
+    // Step 3: same backup code is now consumed — second login attempt fails
+    const loginRes2 = await request(app)
+      .post('/api/auth/login')
+      .send({ email: user.email, password });
+    const { mfa_token: mfa_token2 } = loginRes2.body;
+
+    const res2 = await request(app)
+      .post('/api/auth/mfa/verify-login')
+      .send({ mfa_token: mfa_token2, code: backupCodes[0] });
+    expect(res2.status).toBe(401);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Rate limiting (AUTH-004, AUTH-018) — placed last
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -476,5 +537,74 @@ describe('Rate limiting', () => {
       if (lastStatus === 429) break;
     }
     expect(lastStatus).toBe(429);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP token management (AUTH-034 to AUTH-039)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('MCP token management', () => {
+  it('AUTH-034 — GET /auth/mcp-tokens returns empty list initially', async () => {
+    const { user } = createUser(testDb);
+    const res = await request(app)
+      .get('/api/auth/mcp-tokens')
+      .set('Cookie', authCookie(user.id));
+    expect(res.status).toBe(200);
+    expect(res.body.tokens).toEqual([]);
+  });
+
+  it('AUTH-035 — POST /auth/mcp-tokens creates a token', async () => {
+    const { user } = createUser(testDb);
+    const res = await request(app)
+      .post('/api/auth/mcp-tokens')
+      .set('Cookie', authCookie(user.id))
+      .send({ name: 'my-token' });
+    expect(res.status).toBe(201);
+    expect(res.body.token).toBeDefined();
+    expect(typeof res.body.token.raw_token).toBe('string');
+  });
+
+  it('AUTH-036 — POST /auth/mcp-tokens without name returns 400', async () => {
+    const { user } = createUser(testDb);
+    const res = await request(app)
+      .post('/api/auth/mcp-tokens')
+      .set('Cookie', authCookie(user.id))
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('AUTH-037 — DELETE /auth/mcp-tokens/:id deletes the token', async () => {
+    const { user } = createUser(testDb);
+    const createRes = await request(app)
+      .post('/api/auth/mcp-tokens')
+      .set('Cookie', authCookie(user.id))
+      .send({ name: 'to-delete' });
+    expect(createRes.status).toBe(201);
+    const tokenId = createRes.body.token.id;
+
+    const delRes = await request(app)
+      .delete(`/api/auth/mcp-tokens/${tokenId}`)
+      .set('Cookie', authCookie(user.id));
+    expect(delRes.status).toBe(200);
+    expect(delRes.body.success).toBe(true);
+
+    const listRes = await request(app)
+      .get('/api/auth/mcp-tokens')
+      .set('Cookie', authCookie(user.id));
+    expect(listRes.body.tokens).toEqual([]);
+  });
+
+  it('AUTH-038 — DELETE /auth/mcp-tokens/:id returns 404 for non-existent', async () => {
+    const { user } = createUser(testDb);
+    const res = await request(app)
+      .delete('/api/auth/mcp-tokens/99999')
+      .set('Cookie', authCookie(user.id));
+    expect(res.status).toBe(404);
+  });
+
+  it('AUTH-039 — unauthenticated GET /auth/mcp-tokens returns 401', async () => {
+    const res = await request(app).get('/api/auth/mcp-tokens');
+    expect(res.status).toBe(401);
   });
 });

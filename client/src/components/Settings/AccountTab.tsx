@@ -575,7 +575,7 @@ export default function AccountTab(): React.ReactElement {
                   try {
                     await authApi.deleteOwnAccount()
                     logout()
-                    navigate('/login')
+                    navigate('/login', { state: { noRedirect: true } })
                   } catch (err: unknown) {
                     toast.error(getApiErrorMessage(err, t('common.error')))
                     setShowDeleteConfirm(false)

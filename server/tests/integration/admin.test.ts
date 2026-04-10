@@ -96,7 +96,7 @@ describe('Admin user management', () => {
       .get('/api/admin/users')
       .set('Cookie', authCookie(admin.id));
     expect(res.status).toBe(200);
-    expect(res.body.users.length).toBeGreaterThanOrEqual(3);
+    expect(res.body.users).toHaveLength(3);
   });
 
   it('ADMIN-002 — POST /admin/users creates a user', async () => {
@@ -142,6 +142,10 @@ describe('Admin user management', () => {
       .set('Cookie', authCookie(admin.id));
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+
+    // Verify the row is actually gone from the DB
+    const deleted = testDb.prepare('SELECT id FROM users WHERE id = ?').get(user.id);
+    expect(deleted).toBeUndefined();
   });
 
   it('ADMIN-006 — admin cannot delete their own account', async () => {
@@ -187,19 +191,25 @@ describe('Permissions management', () => {
     expect(Array.isArray(res.body.permissions)).toBe(true);
   });
 
-  it('ADMIN-008 — PUT /admin/permissions updates permissions', async () => {
+  it('ADMIN-008 — PUT /admin/permissions updates permissions and change persists', async () => {
     const { user: admin } = createAdmin(testDb);
 
-    const getRes = await request(app)
-      .get('/api/admin/permissions')
-      .set('Cookie', authCookie(admin.id));
-    const currentPerms = getRes.body;
-
+    // Change trip_create from its default ('everybody') to 'admin'
     const res = await request(app)
       .put('/api/admin/permissions')
       .set('Cookie', authCookie(admin.id))
-      .send({ permissions: currentPerms });
+      .send({ permissions: { trip_create: 'admin' } });
     expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    // Re-fetch and verify the change persisted
+    const getRes = await request(app)
+      .get('/api/admin/permissions')
+      .set('Cookie', authCookie(admin.id));
+    expect(getRes.status).toBe(200);
+    const tripCreatePerm = getRes.body.permissions.find((p: any) => p.key === 'trip_create');
+    expect(tripCreatePerm).toBeDefined();
+    expect(tripCreatePerm.level).toBe('admin');
   });
 
   it('ADMIN-008 — PUT /admin/permissions without object returns 400', async () => {
@@ -349,5 +359,173 @@ describe('JWT rotation', () => {
       .set('Cookie', authCookie(admin.id));
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Packing template CRUD (full)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Packing template CRUD (full)', () => {
+  async function makeTemplate(admin: any) {
+    const res = await request(app)
+      .post('/api/admin/packing-templates')
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Test Template' });
+    return res.body.template;
+  }
+
+  it('ADMIN-019 — GET /admin/packing-templates/:id returns template', async () => {
+    const { user: admin } = createAdmin(testDb);
+    const template = await makeTemplate(admin);
+
+    const res = await request(app)
+      .get(`/api/admin/packing-templates/${template.id}`)
+      .set('Cookie', authCookie(admin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.template.id).toBe(template.id);
+    expect(res.body.template.name).toBe('Test Template');
+  });
+
+  it('ADMIN-019b — GET /admin/packing-templates/:id returns 404 for missing', async () => {
+    const { user: admin } = createAdmin(testDb);
+
+    const res = await request(app)
+      .get('/api/admin/packing-templates/99999')
+      .set('Cookie', authCookie(admin.id));
+    expect(res.status).toBe(404);
+  });
+
+  it('ADMIN-020 — PUT /admin/packing-templates/:id updates name', async () => {
+    const { user: admin } = createAdmin(testDb);
+    const template = await makeTemplate(admin);
+
+    const res = await request(app)
+      .put(`/api/admin/packing-templates/${template.id}`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Updated Name' });
+    expect(res.status).toBe(200);
+    expect(res.body.template.name).toBe('Updated Name');
+  });
+
+  it('ADMIN-021 — POST /admin/packing-templates/:id/categories adds a category', async () => {
+    const { user: admin } = createAdmin(testDb);
+    const template = await makeTemplate(admin);
+
+    const res = await request(app)
+      .post(`/api/admin/packing-templates/${template.id}/categories`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Clothing' });
+    expect(res.status).toBe(201);
+    expect(res.body.category.name).toBe('Clothing');
+  });
+
+  it('ADMIN-021b — PUT /admin/packing-templates/:templateId/categories/:catId updates category', async () => {
+    const { user: admin } = createAdmin(testDb);
+    const template = await makeTemplate(admin);
+    const catRes = await request(app)
+      .post(`/api/admin/packing-templates/${template.id}/categories`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Clothing' });
+    const catId = catRes.body.category.id;
+
+    const res = await request(app)
+      .put(`/api/admin/packing-templates/${template.id}/categories/${catId}`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Apparel' });
+    expect(res.status).toBe(200);
+    expect(res.body.category.name).toBe('Apparel');
+  });
+
+  it('ADMIN-021c — DELETE /admin/packing-templates/:templateId/categories/:catId removes category', async () => {
+    const { user: admin } = createAdmin(testDb);
+    const template = await makeTemplate(admin);
+    const catRes = await request(app)
+      .post(`/api/admin/packing-templates/${template.id}/categories`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Toiletries' });
+    const catId = catRes.body.category.id;
+
+    const res = await request(app)
+      .delete(`/api/admin/packing-templates/${template.id}/categories/${catId}`)
+      .set('Cookie', authCookie(admin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('ADMIN-021d — POST .../categories/:catId/items adds an item to category', async () => {
+    const { user: admin } = createAdmin(testDb);
+    const template = await makeTemplate(admin);
+    const catRes = await request(app)
+      .post(`/api/admin/packing-templates/${template.id}/categories`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Clothing' });
+    const catId = catRes.body.category.id;
+
+    const res = await request(app)
+      .post(`/api/admin/packing-templates/${template.id}/categories/${catId}/items`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'T-Shirt' });
+    expect(res.status).toBe(201);
+    expect(res.body.item.name).toBe('T-Shirt');
+  });
+
+  it('ADMIN-021e — PUT /admin/packing-templates/:templateId/items/:itemId updates item', async () => {
+    const { user: admin } = createAdmin(testDb);
+    const template = await makeTemplate(admin);
+    const catRes = await request(app)
+      .post(`/api/admin/packing-templates/${template.id}/categories`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Clothing' });
+    const catId = catRes.body.category.id;
+    const itemRes = await request(app)
+      .post(`/api/admin/packing-templates/${template.id}/categories/${catId}/items`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'T-Shirt' });
+    const itemId = itemRes.body.item.id;
+
+    const res = await request(app)
+      .put(`/api/admin/packing-templates/${template.id}/items/${itemId}`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Polo Shirt' });
+    expect(res.status).toBe(200);
+    expect(res.body.item.name).toBe('Polo Shirt');
+  });
+
+  it('ADMIN-021f — DELETE /admin/packing-templates/:templateId/items/:itemId removes item', async () => {
+    const { user: admin } = createAdmin(testDb);
+    const template = await makeTemplate(admin);
+    const catRes = await request(app)
+      .post(`/api/admin/packing-templates/${template.id}/categories`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'Clothing' });
+    const catId = catRes.body.category.id;
+    const itemRes = await request(app)
+      .post(`/api/admin/packing-templates/${template.id}/categories/${catId}/items`)
+      .set('Cookie', authCookie(admin.id))
+      .send({ name: 'T-Shirt' });
+    const itemId = itemRes.body.item.id;
+
+    const res = await request(app)
+      .delete(`/api/admin/packing-templates/${template.id}/items/${itemId}`)
+      .set('Cookie', authCookie(admin.id));
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP token management
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('MCP token management', () => {
+  it('ADMIN-023 — GET /admin/mcp-tokens returns list', async () => {
+    const { user: admin } = createAdmin(testDb);
+
+    const res = await request(app)
+      .get('/api/admin/mcp-tokens')
+      .set('Cookie', authCookie(admin.id));
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.tokens)).toBe(true);
   });
 });

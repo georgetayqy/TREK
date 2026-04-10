@@ -362,6 +362,7 @@ const it: Record<string, string | { name: string; category: string }[]> = {
   'login.demoFailed': 'Accesso demo fallito',
   'login.oidcSignIn': 'Accedi con {name}',
   'login.oidcOnly': 'L\'autenticazione tramite password è disabilitata. Accedi utilizzando il tuo provider SSO.',
+  'login.oidcLoggedOut': 'Sei stato disconnesso. Accedi nuovamente tramite il tuo provider SSO.',
   'login.demoHint': 'Prova la demo — nessuna registrazione necessaria',
   'login.mfaTitle': 'Autenticazione a due fattori',
   'login.mfaSubtitle': 'Inserisci il codice a 6 cifre dalla tua app authenticator.',

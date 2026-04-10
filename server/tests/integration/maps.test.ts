@@ -40,6 +40,18 @@ vi.mock('../../src/config', () => ({
   updateJwtSecret: () => {},
 }));
 
+// Default mock: resolveGoogleMapsUrl rejects with 400 (SSRF-like behaviour for
+// URLs that look internal); individual tests override with mockResolvedValueOnce.
+vi.mock('../../src/services/mapsService', () => ({
+  searchPlaces: vi.fn(),
+  getPlaceDetails: vi.fn(),
+  getPlacePhoto: vi.fn(),
+  reverseGeocode: vi.fn(),
+  resolveGoogleMapsUrl: vi.fn().mockRejectedValue(
+    Object.assign(new Error('SSRF or invalid URL'), { status: 400 })
+  ),
+}));
+
 import { createApp } from '../../src/app';
 import { createTables } from '../../src/db/schema';
 import { runMigrations } from '../../src/db/migrations';
@@ -47,6 +59,7 @@ import { resetTestDb } from '../helpers/test-db';
 import { createUser } from '../helpers/factories';
 import { authCookie } from '../helpers/auth';
 import { loginAttempts, mfaAttempts } from '../../src/routes/auth';
+import * as mapsService from '../../src/services/mapsService';
 
 const app: Application = createApp();
 
@@ -131,5 +144,137 @@ describe('Maps SSRF protection', () => {
       .set('Cookie', authCookie(user.id))
       .send({ url: 'http://127.0.0.1/secret' });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('Maps happy paths (mocked service)', () => {
+  it('MAPS-002 — POST /maps/search returns results from service', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(mapsService.searchPlaces).mockResolvedValueOnce({
+      results: [{ address: 'Paris, France', source: 'nominatim' }],
+    } as any);
+
+    const res = await request(app)
+      .post('/api/maps/search')
+      .set('Cookie', authCookie(user.id))
+      .send({ query: 'Paris' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toHaveLength(1);
+    expect(res.body.results[0].address).toBe('Paris, France');
+  });
+
+  it('MAPS-003 — GET /maps/details/:placeId returns place details', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(mapsService.getPlaceDetails).mockResolvedValueOnce({
+      name: 'Eiffel Tower',
+      address: 'Champ de Mars, Paris',
+    } as any);
+
+    const res = await request(app)
+      .get('/api/maps/details/ChIJLU7jZClu5kcR4PcOOO6p3I0')
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('Eiffel Tower');
+  });
+
+  it('MAPS-004 — GET /maps/place-photo/:placeId returns photo url', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(mapsService.getPlacePhoto).mockResolvedValueOnce({
+      url: 'https://example.com/photo.jpg',
+      source: 'wikimedia',
+    } as any);
+
+    const res = await request(app)
+      .get('/api/maps/place-photo/ChIJLU7jZClu5kcR4PcOOO6p3I0?lat=48.8584&lng=2.2945')
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(res.body.url).toBe('https://example.com/photo.jpg');
+  });
+
+  it('MAPS-005 — GET /maps/reverse returns geocoded location', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(mapsService.reverseGeocode).mockResolvedValueOnce({
+      name: 'Eiffel Tower',
+      address: 'Champ de Mars, Paris',
+    } as any);
+
+    const res = await request(app)
+      .get('/api/maps/reverse?lat=48.8584&lng=2.2945')
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('Eiffel Tower');
+  });
+
+  it('MAPS-008 — POST /maps/resolve-url returns extracted coordinates', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(mapsService.resolveGoogleMapsUrl).mockResolvedValueOnce({
+      lat: 48.8584,
+      lng: 2.2945,
+    } as any);
+
+    const res = await request(app)
+      .post('/api/maps/resolve-url')
+      .set('Cookie', authCookie(user.id))
+      .send({ url: 'https://maps.google.com/place/eiffel-tower' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.lat).toBe(48.8584);
+    expect(res.body.lng).toBe(2.2945);
+  });
+
+  it('MAPS-002 — search service error propagates correct status', async () => {
+    const { user } = createUser(testDb);
+    const err = Object.assign(new Error('No API key'), { status: 503 });
+    vi.mocked(mapsService.searchPlaces).mockRejectedValueOnce(err);
+
+    const res = await request(app)
+      .post('/api/maps/search')
+      .set('Cookie', authCookie(user.id))
+      .send({ query: 'Anywhere' });
+
+    expect(res.status).toBe(503);
+  });
+
+  it('MAPS-003 — getPlaceDetails error returns 500', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(mapsService.getPlaceDetails).mockRejectedValueOnce(new Error('External API failure'));
+
+    const res = await request(app)
+      .get('/api/maps/details/some-place-id')
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(500);
+    expect(res.body).toHaveProperty('error');
+  });
+
+  it('MAPS-004 — getPlacePhoto error with status returns that status', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(mapsService.getPlacePhoto).mockRejectedValueOnce(
+      Object.assign(new Error('Photo not found'), { status: 404 })
+    );
+
+    const res = await request(app)
+      .get('/api/maps/place-photo/some-place-id?lat=48.8&lng=2.3')
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(404);
+    expect(res.body).toHaveProperty('error');
+  });
+
+  it('MAPS-005 — reverseGeocode error returns null values', async () => {
+    const { user } = createUser(testDb);
+    vi.mocked(mapsService.reverseGeocode).mockRejectedValueOnce(new Error('Geocode failed'));
+
+    const res = await request(app)
+      .get('/api/maps/reverse?lat=48.8584&lng=2.2945')
+      .set('Cookie', authCookie(user.id));
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBeNull();
+    expect(res.body.address).toBeNull();
   });
 });

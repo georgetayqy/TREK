@@ -20,48 +20,73 @@ import Database from 'better-sqlite3';
 import { createTables } from '../../src/db/schema';
 import { runMigrations } from '../../src/db/migrations';
 
-// Tables to clear on reset, ordered to avoid FK violations
+// Tables to clear on reset, child-before-parent to be safe (FK checks are OFF during reset).
+// Keep in sync with schema.ts + migrations.ts. Intentionally excluded: categories, addons,
+// photo_providers, photo_provider_fields, schema_version (seed/config data, not user data).
 const RESET_TABLES = [
+  // Collab
   'file_links',
+  'collab_message_reactions',
   'collab_poll_votes',
   'collab_messages',
-  'collab_poll_options',
   'collab_polls',
   'collab_notes',
+  // Day content
   'day_notes',
+  'todo_category_assignees',
+  'todo_items',
   'assignment_participants',
   'day_assignments',
+  // Places
+  'place_regions',
+  'place_tags',
+  'places',
+  // Packing
   'packing_category_assignees',
+  'packing_bag_members',
   'packing_bags',
+  'packing_template_items',
+  'packing_template_categories',
+  'packing_templates',
   'packing_items',
+  // Budget
   'budget_item_members',
   'budget_items',
+  // Photos & files
   'trip_photos',
   'trip_album_links',
   'trip_files',
-  'share_tokens',
   'photos',
+  // Reservations
+  'reservation_day_positions',
   'reservations',
+  // Accommodations & days
   'day_accommodations',
-  'place_tags',
-  'places',
   'days',
+  // Trip
+  'share_tokens',
   'trip_members',
   'trips',
+  // Vacay
   'vacay_entries',
   'vacay_company_holidays',
   'vacay_holiday_calendars',
   'vacay_plan_members',
+  'vacay_user_colors',
+  'vacay_user_years',
   'vacay_years',
   'vacay_plans',
-  'atlas_visited_countries',
-  'atlas_bucket_list',
+  // Atlas
+  'visited_regions',
+  'visited_countries',
+  'bucket_list',
+  // Notifications & audit
   'notification_channel_preferences',
   'notifications',
   'audit_log',
-  'user_settings',
+  // User data
+  'settings',
   'mcp_tokens',
-  'mcp_sessions',
   'invite_tokens',
   'tags',
   'app_settings',
@@ -130,8 +155,13 @@ export function createTestDb(): Database.Database {
  */
 export function resetTestDb(db: Database.Database): void {
   db.exec('PRAGMA foreign_keys = OFF');
+  const existingTables = new Set(
+    (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map(r => r.name)
+  );
   for (const table of RESET_TABLES) {
-    try { db.exec(`DELETE FROM "${table}"`); } catch { /* table may not exist in older schemas */ }
+    if (existingTables.has(table)) {
+      db.exec(`DELETE FROM "${table}"`);
+    }
   }
   db.exec('PRAGMA foreign_keys = ON');
   seedDefaults(db);
