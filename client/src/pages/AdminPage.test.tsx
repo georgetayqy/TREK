@@ -359,13 +359,13 @@ describe('AdminPage', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /settings/i }));
 
-      const heading = await screen.findByRole('heading', { name: /allow registration/i });
+      const heading = await screen.findByRole('heading', { name: /authentication methods/i });
       const card = heading.closest('.bg-white');
-      const toggle = within(card!).getByRole('button');
-      fireEvent.click(toggle);
+      const toggles = within(card!).getAllByRole('button');
+      fireEvent.click(toggles[0]); // First toggle = password_login
 
       await waitFor(() => {
-        expect(capturedBody).toEqual(expect.objectContaining({ allow_registration: false }));
+        expect(capturedBody).toEqual(expect.objectContaining({ password_login: false }));
       });
     });
   });
@@ -1327,15 +1327,6 @@ describe('AdminPage', () => {
       const clientSecretLabel = within(oidcCard!).getByText('Client Secret');
       const clientSecretInput = clientSecretLabel.closest('div')!.querySelector('input')!;
       fireEvent.change(clientSecretInput, { target: { value: 'my-client-secret' } });
-
-      // OIDC-only toggle — button within the OIDC card for oidc_only toggle
-      // admin.oidcOnlyMode = 'Disable password authentication'
-      const oidcOnlyText = within(oidcCard!).getByText('Disable password authentication');
-      const oidcOnlySection = oidcOnlyText.closest('.flex');
-      const oidcOnlyToggle = oidcOnlySection?.querySelector('button');
-      if (oidcOnlyToggle) {
-        fireEvent.click(oidcOnlyToggle);
-      }
 
       // Verify the inputs updated
       expect((issuerInput as HTMLInputElement).value).toBe('https://accounts.google.com');
