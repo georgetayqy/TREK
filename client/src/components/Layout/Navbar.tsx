@@ -27,14 +27,13 @@ interface Addon {
 }
 
 export default function Navbar({ tripTitle, tripId, onBack, showBack, onShare }: NavbarProps): React.ReactElement {
-  const { user, logout, isPrerelease } = useAuthStore()
+  const { user, logout, isPrerelease, appVersion } = useAuthStore()
   const { settings, updateSetting } = useSettingsStore()
   const { addons: allAddons, loadAddons } = useAddonStore()
   const { t, locale } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const [userMenuOpen, setUserMenuOpen] = useState<boolean>(false)
-  const [appVersion, setAppVersion] = useState<string | null>(null)
   const darkMode = settings.dark_mode
   const dark = darkMode === true || darkMode === 'dark' || (darkMode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
 
@@ -44,12 +43,6 @@ export default function Navbar({ tripTitle, tripId, onBack, showBack, onShare }:
   useEffect(() => {
     if (user) loadAddons()
   }, [user, location.pathname])
-
-  useEffect(() => {
-    import('../../api/client').then(({ authApi }) => {
-      authApi.getAppConfig?.().then(c => setAppVersion(c?.version)).catch(() => {})
-    })
-  }, [])
 
   const handleLogout = () => {
     logout()

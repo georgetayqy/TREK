@@ -24,7 +24,8 @@ export function compareVersions(a: string, b: string): number {
   const parse = (v: string) => {
     const [base, pre] = v.split('-pre.');
     const parts = base.split('.').map(Number);
-    const preN = pre !== undefined ? parseInt(pre, 10) : null;
+    const n = pre !== undefined ? parseInt(pre, 10) : null;
+    const preN = n !== null && Number.isFinite(n) ? n : null;
     return { parts, preN };
   };
   const pa = parse(a), pb = parse(b);
@@ -315,59 +316,63 @@ export async function getGithubReleases(perPage: string = '10', page: string = '
   }
 }
 
-const VERSION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-let _versionCache: { data: object; expiresAt: number } | null = null;
+interface VersionInfo {
+  current: string;
+  latest: string;
+  update_available: boolean;
+  release_url?: string;
+  is_docker: boolean;
+  is_prerelease: boolean;
+}
 
-export async function checkVersion() {
+const VERSION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+let _versionCache: { data: VersionInfo; expiresAt: number } | null = null;
+
+export async function checkVersion(): Promise<VersionInfo> {
   if (_versionCache && Date.now() < _versionCache.expiresAt) {
     return _versionCache.data;
   }
 
   const currentVersion: string = process.env.APP_VERSION || require('../../package.json').version;
   const isPrerelease = currentVersion.includes('-pre.');
-  const fallback = { current: currentVersion, latest: currentVersion, update_available: false, is_docker: isDocker, is_prerelease: isPrerelease };
-  let result: object = fallback;
+  const fallback: VersionInfo = { current: currentVersion, latest: currentVersion, update_available: false, is_docker: isDocker, is_prerelease: isPrerelease };
+  let result: VersionInfo;
   try {
     if (isPrerelease) {
       // Fetch release list and find the newest prerelease
       const resp = await fetch(
-        'https://api.github.com/repos/mauriceboe/TREK/releases?per_page=20',
+        'https://api.github.com/repos/mauriceboe/TREK/releases?per_page=100',
         { headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'TREK-Server' } }
       );
       if (!resp.ok) {
-        result = fallback;
-      } else {
-        const data = await resp.json() as Array<{ tag_name?: string; html_url?: string; prerelease?: boolean }>;
-        const prereleases = Array.isArray(data) ? data.filter(r => r.prerelease) : [];
-        if (!prereleases.length) {
-          result = fallback;
-        } else {
-          // Sort by version descending and pick highest
-          const sorted = prereleases.sort((a, b) => compareVersions(
-            (b.tag_name || '').replace(/^v/, ''),
-            (a.tag_name || '').replace(/^v/, '')
-          ));
-          const latest = (sorted[0].tag_name || '').replace(/^v/, '');
-          const update_available = !!latest && latest !== currentVersion && compareVersions(latest, currentVersion) > 0;
-          result = { current: currentVersion, latest, update_available, release_url: sorted[0].html_url || '', is_docker: isDocker, is_prerelease: true };
-        }
+        return fallback;
       }
+      const data = await resp.json() as Array<{ tag_name?: string; html_url?: string; prerelease?: boolean }>;
+      const prereleases = Array.isArray(data) ? data.filter(r => r.prerelease) : [];
+      if (!prereleases.length) {
+        return fallback;
+      }
+      // Pre-compute stripped versions, then sort descending
+      const tagged = prereleases.map(r => ({ r, v: (r.tag_name || '').replace(/^v/, '') }));
+      tagged.sort((a, b) => compareVersions(b.v, a.v));
+      const latest = tagged[0].v;
+      const update_available = !!latest && latest !== currentVersion && compareVersions(latest, currentVersion) > 0;
+      result = { current: currentVersion, latest, update_available, release_url: tagged[0].r.html_url || '', is_docker: isDocker, is_prerelease: true };
     } else {
       const resp = await fetch(
         'https://api.github.com/repos/mauriceboe/TREK/releases/latest',
         { headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'TREK-Server' } }
       );
       if (!resp.ok) {
-        result = fallback;
-      } else {
-        const data = await resp.json() as { tag_name?: string; html_url?: string };
-        const latest = (data.tag_name || '').replace(/^v/, '');
-        const update_available = !!latest && latest !== currentVersion && compareVersions(latest, currentVersion) > 0;
-        result = { current: currentVersion, latest, update_available, release_url: data.html_url || '', is_docker: isDocker, is_prerelease: false };
+        return fallback;
       }
+      const data = await resp.json() as { tag_name?: string; html_url?: string };
+      const latest = (data.tag_name || '').replace(/^v/, '');
+      const update_available = !!latest && latest !== currentVersion && compareVersions(latest, currentVersion) > 0;
+      result = { current: currentVersion, latest, update_available, release_url: data.html_url || '', is_docker: isDocker, is_prerelease: false };
     }
   } catch {
-    result = fallback;
+    return fallback;
   }
 
   _versionCache = { data: result, expiresAt: Date.now() + VERSION_CACHE_TTL };
@@ -389,7 +394,7 @@ export async function checkAndNotifyVersion(): Promise<void> {
       actorId: null,
       scope: 'admin',
       targetId: 0,
-      params: { version: result.latest as string },
+      params: { version: result.latest },
     });
   } catch {
     // Silently ignore — version check is non-critical

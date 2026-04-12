@@ -88,7 +88,7 @@ function RootRedirect() {
 }
 
 export default function App() {
-  const { loadUser, isAuthenticated, demoMode, setDemoMode, setDevMode, setIsPrerelease, setHasMapsKey, setServerTimezone, setAppRequireMfa, setTripRemindersEnabled } = useAuthStore()
+  const { loadUser, isAuthenticated, demoMode, setDemoMode, setDevMode, setIsPrerelease, setAppVersion, setHasMapsKey, setServerTimezone, setAppRequireMfa, setTripRemindersEnabled } = useAuthStore()
   const { loadSettings } = useSettingsStore()
 
   useEffect(() => {
@@ -99,6 +99,7 @@ export default function App() {
       if (config?.demo_mode) setDemoMode(true)
       if (config?.dev_mode) setDevMode(true)
       if (config?.is_prerelease !== undefined) setIsPrerelease(config.is_prerelease)
+      if (config?.version) setAppVersion(config.version)
       if (config?.has_maps_key !== undefined) setHasMapsKey(config.has_maps_key)
       if (config?.timezone) setServerTimezone(config.timezone)
       if (config?.require_mfa !== undefined) setAppRequireMfa(!!config.require_mfa)

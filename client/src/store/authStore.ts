@@ -23,6 +23,7 @@ interface AuthState {
   demoMode: boolean
   devMode: boolean
   isPrerelease: boolean
+  appVersion: string
   hasMapsKey: boolean
   serverTimezone: string
   /** Server policy: all users must enable MFA */
@@ -43,6 +44,7 @@ interface AuthState {
   setDemoMode: (val: boolean) => void
   setDevMode: (val: boolean) => void
   setIsPrerelease: (val: boolean) => void
+  setAppVersion: (val: string) => void
   setHasMapsKey: (val: boolean) => void
   setServerTimezone: (tz: string) => void
   setAppRequireMfa: (val: boolean) => void
@@ -61,6 +63,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   demoMode: localStorage.getItem('demo_mode') === 'true',
   devMode: false,
   isPrerelease: false,
+  appVersion: '',
   hasMapsKey: false,
   serverTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   appRequireMfa: false,
@@ -226,6 +229,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setDevMode: (val: boolean) => set({ devMode: val }),
   setIsPrerelease: (val: boolean) => set({ isPrerelease: val }),
+  setAppVersion: (val: string) => set({ appVersion: val }),
   setHasMapsKey: (val: boolean) => set({ hasMapsKey: val }),
   setServerTimezone: (tz: string) => set({ serverTimezone: tz }),
   setAppRequireMfa: (val: boolean) => set({ appRequireMfa: val }),
