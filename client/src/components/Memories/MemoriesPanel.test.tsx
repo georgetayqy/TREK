@@ -233,8 +233,8 @@ describe('MemoriesPanel', () => {
       http.get('/api/integrations/memories/unified/trips/:tripId/photos', () =>
         HttpResponse.json({
           photos: [
-            { asset_id: 'photo1', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-01T10:00:00Z' },
-            { asset_id: 'photo2', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-10T10:00:00Z' },
+            { photo_id: 1, asset_id: 'photo1', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-01T10:00:00Z' },
+            { photo_id: 2, asset_id: 'photo2', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-10T10:00:00Z' },
           ],
         })
       ),
@@ -501,8 +501,8 @@ describe('MemoriesPanel', () => {
       http.get('/api/integrations/memories/unified/trips/:tripId/photos', () =>
         HttpResponse.json({
           photos: [
-            { asset_id: 'p1', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-01T00:00:00Z', city: 'Paris' },
-            { asset_id: 'p2', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-05T00:00:00Z', city: 'Lyon' },
+            { photo_id: 10, asset_id: 'p1', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-01T00:00:00Z', city: 'Paris' },
+            { photo_id: 11, asset_id: 'p2', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-05T00:00:00Z', city: 'Lyon' },
           ],
         })
       ),
@@ -676,8 +676,8 @@ describe('MemoriesPanel', () => {
       http.get('/api/integrations/memories/unified/trips/:tripId/photos', () =>
         HttpResponse.json({
           photos: [
-            { asset_id: 'p1', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-01T00:00:00Z', city: 'Paris' },
-            { asset_id: 'p2', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-05T00:00:00Z', city: 'Lyon' },
+            { photo_id: 10, asset_id: 'p1', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-01T00:00:00Z', city: 'Paris' },
+            { photo_id: 11, asset_id: 'p2', provider: 'immich', user_id: 1, username: 'me', shared: 1, added_at: '2025-03-05T00:00:00Z', city: 'Lyon' },
           ],
         })
       ),

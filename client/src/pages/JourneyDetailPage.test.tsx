@@ -113,6 +113,7 @@ const mockJourneyDetail = {
         {
           id: 100,
           entry_id: 10,
+          photo_id: 100,
           provider: 'local',
           file_path: 'photos/test.jpg',
           asset_id: null,
@@ -547,17 +548,17 @@ describe('JourneyDetailPage', () => {
         ...mockJourneyDetail.entries[0],
         photos: [
           {
-            id: 100, entry_id: 10, provider: 'local' as const, file_path: 'photos/a.jpg',
+            id: 100, entry_id: 10, photo_id: 100, provider: 'local' as const, file_path: 'photos/a.jpg',
             asset_id: null, owner_id: null, thumbnail_path: null,
             caption: null, sort_order: 0, width: 800, height: 600, shared: 1, created_at: now,
           },
           {
-            id: 101, entry_id: 10, provider: 'local' as const, file_path: 'photos/b.jpg',
+            id: 101, entry_id: 10, photo_id: 101, provider: 'local' as const, file_path: 'photos/b.jpg',
             asset_id: null, owner_id: null, thumbnail_path: null,
             caption: null, sort_order: 1, width: 800, height: 600, shared: 1, created_at: now,
           },
           {
-            id: 102, entry_id: 10, provider: 'local' as const, file_path: 'photos/c.jpg',
+            id: 102, entry_id: 10, photo_id: 102, provider: 'local' as const, file_path: 'photos/c.jpg',
             asset_id: null, owner_id: null, thumbnail_path: null,
             caption: null, sort_order: 2, width: 800, height: 600, shared: 1, created_at: now,
           },
@@ -1991,7 +1992,7 @@ describe('JourneyDetailPage', () => {
       const immichEntry = {
         ...mockJourneyDetail.entries[0],
         photos: [{
-          id: 200, entry_id: 10, provider: 'immich', file_path: null,
+          id: 200, entry_id: 10, photo_id: 200, provider: 'immich', file_path: null,
           asset_id: 'asset-123', owner_id: 1, thumbnail_path: null,
           caption: null, sort_order: 0, width: 800, height: 600, shared: 1, created_at: now,
         }],
@@ -2025,7 +2026,7 @@ describe('JourneyDetailPage', () => {
       const synologyEntry = {
         ...mockJourneyDetail.entries[0],
         photos: [{
-          id: 201, entry_id: 10, provider: 'synology', file_path: null,
+          id: 201, entry_id: 10, photo_id: 201, provider: 'synology', file_path: null,
           asset_id: 'syn-456', owner_id: 1, thumbnail_path: null,
           caption: null, sort_order: 0, width: 800, height: 600, shared: 1, created_at: now,
         }],
@@ -2617,11 +2618,11 @@ describe('JourneyDetailPage', () => {
       const multiPhotoEntry = {
         ...mockJourneyDetail.entries[0],
         photos: [
-          { id: 100, entry_id: 10, provider: 'local', file_path: 'photos/a.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 800, height: 600, shared: 1, created_at: now },
-          { id: 101, entry_id: 10, provider: 'local', file_path: 'photos/b.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 1, width: 800, height: 600, shared: 1, created_at: now },
-          { id: 102, entry_id: 10, provider: 'local', file_path: 'photos/c.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 2, width: 800, height: 600, shared: 1, created_at: now },
-          { id: 103, entry_id: 10, provider: 'local', file_path: 'photos/d.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 3, width: 800, height: 600, shared: 1, created_at: now },
-          { id: 104, entry_id: 10, provider: 'local', file_path: 'photos/e.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 4, width: 800, height: 600, shared: 1, created_at: now },
+          { id: 100, entry_id: 10, photo_id: 100, provider: 'local', file_path: 'photos/a.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 800, height: 600, shared: 1, created_at: now },
+          { id: 101, entry_id: 10, photo_id: 101, provider: 'local', file_path: 'photos/b.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 1, width: 800, height: 600, shared: 1, created_at: now },
+          { id: 102, entry_id: 10, photo_id: 102, provider: 'local', file_path: 'photos/c.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 2, width: 800, height: 600, shared: 1, created_at: now },
+          { id: 103, entry_id: 10, photo_id: 103, provider: 'local', file_path: 'photos/d.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 3, width: 800, height: 600, shared: 1, created_at: now },
+          { id: 104, entry_id: 10, photo_id: 104, provider: 'local', file_path: 'photos/e.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 4, width: 800, height: 600, shared: 1, created_at: now },
         ],
       };
       setupDefaultHandlers({
@@ -2645,8 +2646,8 @@ describe('JourneyDetailPage', () => {
       const twoPhotoEntry = {
         ...mockJourneyDetail.entries[0],
         photos: [
-          { id: 100, entry_id: 10, provider: 'local', file_path: 'photos/a.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 800, height: 600, shared: 1, created_at: now },
-          { id: 101, entry_id: 10, provider: 'local', file_path: 'photos/b.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 1, width: 800, height: 600, shared: 1, created_at: now },
+          { id: 100, entry_id: 10, photo_id: 100, provider: 'local', file_path: 'photos/a.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 800, height: 600, shared: 1, created_at: now },
+          { id: 101, entry_id: 10, photo_id: 101, provider: 'local', file_path: 'photos/b.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 1, width: 800, height: 600, shared: 1, created_at: now },
         ],
       };
       setupDefaultHandlers({
@@ -3344,7 +3345,7 @@ describe('JourneyDetailPage', () => {
         }),
         http.post('/api/journeys/entries/88/photos', () => {
           uploadCalled = true;
-          return HttpResponse.json([{ id: 999, entry_id: 88, provider: 'local', file_path: 'photos/new.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 100, height: 100, shared: 1, created_at: now }]);
+          return HttpResponse.json([{ id: 999, entry_id: 88, photo_id: 999, provider: 'local', file_path: 'photos/new.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 100, height: 100, shared: 1, created_at: now }]);
         }),
       );
 
@@ -3510,8 +3511,8 @@ describe('JourneyDetailPage', () => {
       const entryWithMultiPhotos = {
         ...mockJourneyDetail.entries[0],
         photos: [
-          { id: 100, entry_id: 10, provider: 'local', file_path: 'photos/a.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 800, height: 600, shared: 1, created_at: now },
-          { id: 101, entry_id: 10, provider: 'local', file_path: 'photos/b.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 1, width: 800, height: 600, shared: 1, created_at: now },
+          { id: 100, entry_id: 10, photo_id: 100, provider: 'local', file_path: 'photos/a.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 800, height: 600, shared: 1, created_at: now },
+          { id: 101, entry_id: 10, photo_id: 101, provider: 'local', file_path: 'photos/b.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 1, width: 800, height: 600, shared: 1, created_at: now },
         ],
       };
       setupDefaultHandlers({
@@ -3564,7 +3565,7 @@ describe('JourneyDetailPage', () => {
         }),
         http.post('/api/journeys/entries/11/photos', () => {
           uploadCalled = true;
-          return HttpResponse.json([{ id: 300, entry_id: 11, provider: 'local', file_path: 'photos/new.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 100, height: 100, shared: 1, created_at: now }]);
+          return HttpResponse.json([{ id: 300, entry_id: 11, photo_id: 300, provider: 'local', file_path: 'photos/new.jpg', asset_id: null, owner_id: null, thumbnail_path: null, caption: null, sort_order: 0, width: 100, height: 100, shared: 1, created_at: now }]);
         }),
       );
 

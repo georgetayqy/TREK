@@ -42,17 +42,19 @@ export interface JourneyEntry {
 export interface JourneyPhoto {
   id: number
   entry_id: number
-  provider: 'local' | 'immich' | 'synologyphotos'
+  photo_id: number
+  caption?: string | null
+  sort_order: number
+  shared: number
+  created_at: number
+  // Joined from trek_photos for display
+  provider?: string
   asset_id?: string | null
   owner_id?: number | null
   file_path?: string | null
   thumbnail_path?: string | null
-  caption?: string | null
-  sort_order: number
   width?: number | null
   height?: number | null
-  shared: number
-  created_at: number
 }
 
 export interface JourneyTrip {

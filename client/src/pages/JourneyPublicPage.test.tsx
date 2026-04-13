@@ -97,7 +97,7 @@ const mockJourneyData = {
       weather: 'cloudy',
       pros_cons: null,
       photos: [
-        { id: 100, entry_id: 11, provider: 'local', asset_id: null, owner_id: null, file_path: 'journey/temple.jpg', caption: 'Temple entrance' },
+        { id: 100, entry_id: 11, photo_id: 100, provider: 'local', asset_id: null, owner_id: null, file_path: 'journey/temple.jpg', caption: 'Temple entrance' },
       ],
     },
   ],
@@ -348,9 +348,9 @@ describe('JourneyPublicPage', () => {
           entry_time: null, location_name: null, location_lat: null, location_lng: null,
           mood: null, weather: null, pros_cons: null,
           photos: [
-            { id: 200, entry_id: 20, provider: 'local', asset_id: null, owner_id: null, file_path: 'journey/a.jpg', caption: 'Photo A' },
-            { id: 201, entry_id: 20, provider: 'local', asset_id: null, owner_id: null, file_path: 'journey/b.jpg', caption: 'Photo B' },
-            { id: 202, entry_id: 20, provider: 'local', asset_id: null, owner_id: null, file_path: 'journey/c.jpg', caption: 'Photo C' },
+            { id: 200, entry_id: 20, photo_id: 200, provider: 'local', asset_id: null, owner_id: null, file_path: 'journey/a.jpg', caption: 'Photo A' },
+            { id: 201, entry_id: 20, photo_id: 201, provider: 'local', asset_id: null, owner_id: null, file_path: 'journey/b.jpg', caption: 'Photo B' },
+            { id: 202, entry_id: 20, photo_id: 202, provider: 'local', asset_id: null, owner_id: null, file_path: 'journey/c.jpg', caption: 'Photo C' },
           ],
         },
       ],

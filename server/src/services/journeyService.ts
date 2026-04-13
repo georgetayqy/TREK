@@ -1,10 +1,18 @@
 import { db } from '../db/database';
 import { broadcastToUser } from '../websocket';
 import type { Journey, JourneyEntry, JourneyPhoto, JourneyContributor } from '../types';
+import { getOrCreateTrekPhoto, getOrCreateLocalTrekPhoto, setTrekPhotoProvider } from './memories/photoResolverService';
 
 function ts(): number {
   return Date.now();
 }
+
+// Joined SELECT for journey_photos + trek_photos — returns fields matching JourneyPhoto interface
+const JP_SELECT = `
+  jp.id, jp.entry_id, jp.photo_id, jp.caption, jp.sort_order, jp.shared, jp.created_at,
+  tkp.provider, tkp.asset_id, tkp.owner_id, tkp.file_path, tkp.thumbnail_path, tkp.width, tkp.height
+`;
+const JP_JOIN = 'journey_photos jp JOIN trek_photos tkp ON tkp.id = jp.photo_id';
 
 function broadcastJourneyEvent(journeyId: number, event: string, data: Record<string, unknown>, excludeUserId?: number) {
   const contributors = db.prepare(
@@ -105,7 +113,7 @@ export function getJourneyFull(journeyId: number, userId: number) {
   ).all(journeyId) as JourneyEntry[];
 
   const photos = db.prepare(
-    'SELECT * FROM journey_photos WHERE entry_id IN (SELECT id FROM journey_entries WHERE journey_id = ?) ORDER BY sort_order ASC'
+    `SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.entry_id IN (SELECT id FROM journey_entries WHERE journey_id = ?) ORDER BY jp.sort_order ASC`
   ).all(journeyId) as JourneyPhoto[];
 
   // group photos by entry
@@ -272,8 +280,8 @@ export function syncTripPlaces(journeyId: number, tripId: number, authorId: numb
 // import trip_photos into journey when a trip is linked
 function syncTripPhotos(journeyId: number, tripId: number) {
   const tripPhotos = db.prepare(
-    'SELECT * FROM trip_photos WHERE trip_id = ?'
-  ).all(tripId) as { id: number; trip_id: number; user_id: number; asset_id: string; provider: string; shared: number }[];
+    'SELECT tp.photo_id, tp.user_id, tp.shared FROM trip_photos tp WHERE tp.trip_id = ?'
+  ).all(tripId) as { photo_id: number; user_id: number; shared: number }[];
   if (!tripPhotos.length) return;
 
   const now = ts();
@@ -285,7 +293,6 @@ function syncTripPhotos(journeyId: number, tripId: number) {
   `).get(journeyId, tripId) as { id: number } | undefined;
 
   if (!photoEntry) {
-    // get trip date for the entry
     const trip = db.prepare('SELECT start_date FROM trips WHERE id = ?').get(tripId) as { start_date: string } | undefined;
     const entryDate = trip?.start_date || new Date().toISOString().split('T')[0];
     const owner = db.prepare('SELECT user_id FROM journeys WHERE id = ?').get(journeyId) as { user_id: number };
@@ -297,19 +304,19 @@ function syncTripPhotos(journeyId: number, tripId: number) {
     photoEntry = { id: Number(res.lastInsertRowid) };
   }
 
-  // import each trip photo, skip duplicates
+  // import each trip photo, skip duplicates (by photo_id)
   for (const tp of tripPhotos) {
     const exists = db.prepare(
-      'SELECT 1 FROM journey_photos WHERE entry_id = ? AND provider = ? AND asset_id = ?'
-    ).get(photoEntry.id, tp.provider, tp.asset_id);
+      'SELECT 1 FROM journey_photos WHERE entry_id = ? AND photo_id = ?'
+    ).get(photoEntry.id, tp.photo_id);
     if (exists) continue;
 
     const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM journey_photos WHERE entry_id = ?').get(photoEntry.id) as { m: number | null };
 
     db.prepare(`
-      INSERT INTO journey_photos (entry_id, provider, asset_id, owner_id, shared, sort_order, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(photoEntry.id, tp.provider, tp.asset_id, tp.user_id, tp.shared, (maxOrder?.m ?? -1) + 1, now);
+      INSERT INTO journey_photos (entry_id, photo_id, shared, sort_order, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(photoEntry.id, tp.photo_id, tp.shared, (maxOrder?.m ?? -1) + 1, now);
   }
 }
 
@@ -424,7 +431,7 @@ export function listEntries(journeyId: number, userId: number) {
   ).all(journeyId) as JourneyEntry[];
 
   const photos = db.prepare(
-    'SELECT * FROM journey_photos WHERE entry_id IN (SELECT id FROM journey_entries WHERE journey_id = ?) ORDER BY sort_order ASC'
+    `SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.entry_id IN (SELECT id FROM journey_entries WHERE journey_id = ?) ORDER BY jp.sort_order ASC`
   ).all(journeyId) as JourneyPhoto[];
 
   const photosByEntry: Record<number, JourneyPhoto[]> = {};
@@ -579,15 +586,16 @@ export function addPhoto(entryId: number, userId: number, filePath: string, thum
   if (!entry) return null;
   if (!canEdit(entry.journey_id, userId)) return null;
 
+  const trekPhotoId = getOrCreateLocalTrekPhoto(filePath, thumbnailPath);
   const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM journey_photos WHERE entry_id = ?').get(entryId) as { m: number | null };
   const now = ts();
 
   const res = db.prepare(`
-    INSERT INTO journey_photos (entry_id, provider, file_path, thumbnail_path, caption, sort_order, created_at)
-    VALUES (?, 'local', ?, ?, ?, ?, ?)
-  `).run(entryId, filePath, thumbnailPath || null, caption || null, (maxOrder?.m ?? -1) + 1, now);
+    INSERT INTO journey_photos (entry_id, photo_id, caption, sort_order, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(entryId, trekPhotoId, caption || null, (maxOrder?.m ?? -1) + 1, now);
 
-  return db.prepare('SELECT * FROM journey_photos WHERE id = ?').get(Number(res.lastInsertRowid)) as JourneyPhoto;
+  return db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(Number(res.lastInsertRowid)) as JourneyPhoto;
 }
 
 export function addProviderPhoto(entryId: number, userId: number, provider: string, assetId: string, caption?: string): JourneyPhoto | null {
@@ -595,19 +603,21 @@ export function addProviderPhoto(entryId: number, userId: number, provider: stri
   if (!entry) return null;
   if (!canEdit(entry.journey_id, userId)) return null;
 
+  const trekPhotoId = getOrCreateTrekPhoto(provider, assetId, userId);
+
   // skip if already added
-  const exists = db.prepare('SELECT 1 FROM journey_photos WHERE entry_id = ? AND provider = ? AND asset_id = ?').get(entryId, provider, assetId);
+  const exists = db.prepare('SELECT 1 FROM journey_photos WHERE entry_id = ? AND photo_id = ?').get(entryId, trekPhotoId);
   if (exists) return null;
 
   const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM journey_photos WHERE entry_id = ?').get(entryId) as { m: number | null };
   const now = ts();
 
   const res = db.prepare(`
-    INSERT INTO journey_photos (entry_id, provider, asset_id, owner_id, caption, sort_order, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(entryId, provider, assetId, userId, caption || null, (maxOrder?.m ?? -1) + 1, now);
+    INSERT INTO journey_photos (entry_id, photo_id, caption, sort_order, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(entryId, trekPhotoId, caption || null, (maxOrder?.m ?? -1) + 1, now);
 
-  return db.prepare('SELECT * FROM journey_photos WHERE id = ?').get(Number(res.lastInsertRowid)) as JourneyPhoto;
+  return db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(Number(res.lastInsertRowid)) as JourneyPhoto;
 }
 
 export function linkPhotoToEntry(entryId: number, photoId: number, userId: number): JourneyPhoto | null {
@@ -615,7 +625,7 @@ export function linkPhotoToEntry(entryId: number, photoId: number, userId: numbe
   if (!entry) return null;
   if (!canEdit(entry.journey_id, userId)) return null;
 
-  const source = db.prepare('SELECT * FROM journey_photos WHERE id = ?').get(photoId) as JourneyPhoto | undefined;
+  const source = db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(photoId) as JourneyPhoto | undefined;
   if (!source) return null;
 
   if (source.entry_id === entryId) return source;
@@ -634,16 +644,19 @@ export function linkPhotoToEntry(entryId: number, photoId: number, userId: numbe
     }
   }
 
-  return db.prepare('SELECT * FROM journey_photos WHERE id = ?').get(photoId) as JourneyPhoto;
+  return db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(photoId) as JourneyPhoto;
 }
 
 export function setPhotoProvider(photoId: number, provider: string, assetId: string, ownerId: number) {
-  db.prepare('UPDATE journey_photos SET provider = ?, asset_id = ?, owner_id = ? WHERE id = ?').run(provider, assetId, ownerId, photoId);
+  // Get the trek_photo_id from the journey_photo, then update the central registry
+  const jp = db.prepare('SELECT photo_id FROM journey_photos WHERE id = ?').get(photoId) as { photo_id: number } | undefined;
+  if (!jp) return;
+  setTrekPhotoProvider(jp.photo_id, provider, assetId, ownerId);
 }
 
 export function updatePhoto(photoId: number, userId: number, data: { caption?: string; sort_order?: number }): JourneyPhoto | null {
   const photo = db.prepare(`
-    SELECT jp.*, je.journey_id FROM journey_photos jp
+    SELECT ${JP_SELECT}, je.journey_id FROM ${JP_JOIN}
     JOIN journey_entries je ON jp.entry_id = je.id
     WHERE jp.id = ?
   `).get(photoId) as (JourneyPhoto & { journey_id: number }) | undefined;
@@ -658,12 +671,12 @@ export function updatePhoto(photoId: number, userId: number, data: { caption?: s
 
   values.push(photoId);
   db.prepare(`UPDATE journey_photos SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-  return db.prepare('SELECT * FROM journey_photos WHERE id = ?').get(photoId) as JourneyPhoto;
+  return db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(photoId) as JourneyPhoto;
 }
 
 export function deletePhoto(photoId: number, userId: number): (JourneyPhoto & { journey_id: number }) | null {
   const photo = db.prepare(`
-    SELECT jp.*, je.journey_id FROM journey_photos jp
+    SELECT ${JP_SELECT}, je.journey_id FROM ${JP_JOIN}
     JOIN journey_entries je ON jp.entry_id = je.id
     WHERE jp.id = ?
   `).get(photoId) as (JourneyPhoto & { journey_id: number }) | undefined;

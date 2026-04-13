@@ -8,6 +8,7 @@ import {
   mapDbError,
   Selection,
 } from './helpersService';
+import { getOrCreateTrekPhoto } from './photoResolverService';
 
 
 function _providers(): Array<{id: string; enabled: boolean}> {
@@ -45,13 +46,14 @@ export function listTripPhotos(tripId: string, userId: number): ServiceResult<an
     }
 
     const photos = db.prepare(`
-      SELECT tp.asset_id, tp.provider, tp.user_id, tp.shared, tp.added_at,
+      SELECT tp.photo_id, tkp.asset_id, tkp.provider, tp.user_id, tp.shared, tp.added_at,
              u.username, u.avatar
       FROM trip_photos tp
+      JOIN trek_photos tkp ON tkp.id = tp.photo_id
       JOIN users u ON tp.user_id = u.id
       WHERE tp.trip_id = ?
         AND (tp.user_id = ? OR tp.shared = 1)
-        AND tp.provider IN (${enabledProviders.map(() => '?').join(',')})
+        AND tkp.provider IN (${enabledProviders.map(() => '?').join(',')})
       ORDER BY tp.added_at ASC
     `).all(tripId, userId, ...enabledProviders);
 
@@ -108,9 +110,10 @@ function _addTripPhoto(tripId: string, userId: number, provider: string, assetId
     return providerResult as ServiceResult<boolean>;
   }
   try {
+    const photoId = getOrCreateTrekPhoto(provider, assetId, userId);
     const result = db.prepare(
-      'INSERT OR IGNORE INTO trip_photos (trip_id, user_id, asset_id, provider, shared, album_link_id) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(tripId, userId, assetId, provider, shared ? 1 : 0, albumLinkId || null);
+      'INSERT OR IGNORE INTO trip_photos (trip_id, user_id, photo_id, shared, album_link_id) VALUES (?, ?, ?, ?, ?)'
+    ).run(tripId, userId, photoId, shared ? 1 : 0, albumLinkId || null);
     return success(result.changes > 0);
   }
   catch (error) {
@@ -163,8 +166,7 @@ export async function addTripPhotos(
 export async function setTripPhotoSharing(
   tripId: string,
   userId: number,
-  provider: string,
-  assetId: string,
+  photoId: number,
   shared: boolean,
   sid?: string,
 ): Promise<ServiceResult<true>> {
@@ -179,9 +181,8 @@ export async function setTripPhotoSharing(
       SET shared = ?
       WHERE trip_id = ?
         AND user_id = ?
-        AND asset_id = ?
-        AND provider = ?
-    `).run(shared ? 1 : 0, tripId, userId, assetId, provider);
+        AND photo_id = ?
+    `).run(shared ? 1 : 0, tripId, userId, photoId);
 
     await _notifySharedTripPhotos(tripId, userId, 1);
     broadcast(tripId, 'memories:updated', { userId }, sid);
@@ -194,8 +195,7 @@ export async function setTripPhotoSharing(
 export function removeTripPhoto(
   tripId: string,
   userId: number,
-  provider: string,
-  assetId: string,
+  photoId: number,
   sid?: string,
 ): ServiceResult<true> {
   const access = canAccessTrip(tripId, userId);
@@ -208,9 +208,8 @@ export function removeTripPhoto(
       DELETE FROM trip_photos
       WHERE trip_id = ?
         AND user_id = ?
-        AND asset_id = ?
-        AND provider = ?
-    `).run(tripId, userId, assetId, provider);
+        AND photo_id = ?
+    `).run(tripId, userId, photoId);
 
     broadcast(tripId, 'memories:updated', { userId }, sid);
 

@@ -19,8 +19,7 @@ function abs(url: string | null | undefined): string {
 }
 
 function pSrc(p: JourneyPhoto): string {
-  if (p.provider === 'local') return abs(`/uploads/${p.file_path}`)
-  return abs(`/api/integrations/memories/${p.provider}/assets/0/${p.asset_id}/${p.owner_id}/original`)
+  return abs(`/api/photos/${p.photo_id}/original`)
 }
 
 function fmtDate(d: string): string {

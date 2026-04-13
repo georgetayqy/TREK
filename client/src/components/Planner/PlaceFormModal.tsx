@@ -286,7 +286,7 @@ export default function PlaceFormModal({
             onChange={e => handleChange('description', e.target.value)}
             rows={2}
             placeholder={t('places.formDescriptionPlaceholder')}
-            className="form-input" style={{ resize: 'none' }}
+            className="form-input" style={{ resize: 'vertical' }}
           />
         </div>
 

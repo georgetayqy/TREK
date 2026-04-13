@@ -1539,6 +1539,40 @@ const ar: Record<string, string | { name: string; category: string }[]> = {
   'journey.entries.deleteTitle': 'حذف الإدخال',
   'journey.photosUploaded': 'تم رفع {count} صورة',
   'journey.photosAdded': 'تمت إضافة {count} صورة',
+  'journey.picker.tripPeriod': 'فترة الرحلة',
+  'journey.picker.dateRange': 'نطاق التاريخ',
+  'journey.picker.allPhotos': 'كل الصور',
+  'journey.picker.albums': 'ألبومات',
+  'journey.picker.selected': 'محدد',
+  'journey.picker.addTo': 'إضافة إلى',
+  'journey.picker.newGallery': 'معرض جديد',
+  'journey.picker.noAlbums': 'لم يتم العثور على ألبومات',
+  'journey.picker.selectDate': 'اختر تاريخ',
+  'journey.picker.search': 'بحث',
+
+  // Journey Detail
+  'journey.detail.photos': 'صور',
+  'journey.detail.backToJourney': 'العودة للمجلة',
+  'journey.detail.day': 'اليوم {number}',
+  'journey.detail.places': 'أماكن',
+
+  // Journey — Invite
+  'journey.invite.role': 'الدور',
+  'journey.invite.viewer': 'مشاهد',
+  'journey.invite.editor': 'محرر',
+  'journey.invite.invite': 'دعوة',
+  'journey.invite.inviting': 'جارٍ الدعوة...',
+
+  // Journey Entry Editor
+  'journey.editor.uploadPhotos': 'رفع صور',
+  'journey.editor.fromGallery': 'من المعرض',
+  'journey.editor.addAnother': 'إضافة آخر',
+  'journey.editor.makeFirst': 'جعله الأول',
+  'journey.editor.searching': 'جارٍ البحث...',
+
+  // Journey — Share
+  'journey.share.copy': 'نسخ',
+  'journey.share.copied': 'تم النسخ!',
 
   // Collab Addon
   'collab.tabs.chat': 'الدردشة',

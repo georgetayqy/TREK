@@ -59,7 +59,9 @@ export function validateShareTokenForPhoto(token: string, photoId: number): { jo
   const row = db.prepare('SELECT journey_id FROM journey_share_tokens WHERE token = ?').get(token) as any;
   if (!row) return null;
   const photo = db.prepare(`
-    SELECT jp.*, je.journey_id FROM journey_photos jp
+    SELECT jp.photo_id, tkp.owner_id, je.journey_id
+    FROM journey_photos jp
+    JOIN trek_photos tkp ON tkp.id = jp.photo_id
     JOIN journey_entries je ON jp.entry_id = je.id
     WHERE jp.id = ? AND je.journey_id = ?
   `).get(photoId, row.journey_id) as any;
@@ -71,14 +73,13 @@ export function validateShareTokenForPhoto(token: string, photoId: number): { jo
 export function validateShareTokenForAsset(token: string, assetId: string): { ownerId: number } | null {
   const row = db.prepare('SELECT journey_id FROM journey_share_tokens WHERE token = ?').get(token) as any;
   if (!row) return null;
-  // Check if this asset belongs to any photo in the shared journey
   const photo = db.prepare(`
-    SELECT jp.owner_id FROM journey_photos jp
+    SELECT tkp.owner_id FROM journey_photos jp
+    JOIN trek_photos tkp ON tkp.id = jp.photo_id
     JOIN journey_entries je ON jp.entry_id = je.id
-    WHERE jp.asset_id = ? AND je.journey_id = ?
+    WHERE tkp.asset_id = ? AND je.journey_id = ?
   `).get(assetId, row.journey_id) as any;
   if (!photo) {
-    // Fallback: get journey owner
     const journey = db.prepare('SELECT user_id FROM journeys WHERE id = ?').get(row.journey_id) as any;
     return journey ? { ownerId: journey.user_id } : null;
   }
@@ -100,7 +101,10 @@ export function getPublicJourney(token: string) {
   `).all(row.journey_id) as any[];
 
   const photos = db.prepare(`
-    SELECT jp.* FROM journey_photos jp
+    SELECT jp.id, jp.entry_id, jp.photo_id, jp.caption, jp.sort_order, jp.shared, jp.created_at,
+           tkp.provider, tkp.asset_id, tkp.owner_id, tkp.file_path, tkp.thumbnail_path, tkp.width, tkp.height
+    FROM journey_photos jp
+    JOIN trek_photos tkp ON tkp.id = jp.photo_id
     JOIN journey_entries je ON jp.entry_id = je.id
     WHERE je.journey_id = ?
     ORDER BY jp.sort_order

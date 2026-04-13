@@ -36,6 +36,7 @@ import { oauthPublicRouter, oauthApiRouter } from './routes/oauth';
 import vacayRoutes from './routes/vacay';
 import atlasRoutes from './routes/atlas';
 import memoriesRoutes from './routes/memories/unified';
+import photoRoutes from './routes/photos';
 import notificationRoutes from './routes/notifications';
 import shareRoutes from './routes/share';
 import journeyRoutes from './routes/journey';
@@ -265,6 +266,7 @@ export function createApp(): express.Application {
   app.use('/api/journeys', journeyRoutes);
   app.use('/api/public/journey', journeyPublicRoutes);
   app.use('/api/integrations/memories', memoriesRoutes);
+  app.use('/api/photos', photoRoutes);
   app.use('/api/maps', mapsRoutes);
   app.use('/api/weather', weatherRoutes);
   app.use('/api/settings', settingsRoutes);

@@ -64,20 +64,14 @@ function groupByDate(entries: JourneyEntry[]): Map<string, JourneyEntry[]> {
 function formatDate(d: string): { weekday: string; month: string; day: number } {
   const date = new Date(d + 'T00:00:00')
   return {
-    weekday: date.toLocaleDateString('en', { weekday: 'long' }),
-    month: date.toLocaleDateString('en', { month: 'long' }),
+    weekday: date.toLocaleDateString(undefined, { weekday: 'long' }),
+    month: date.toLocaleDateString(undefined, { month: 'long' }),
     day: date.getDate(),
   }
 }
 
 function photoUrl(p: JourneyPhoto, size: 'thumbnail' | 'original' = 'thumbnail'): string {
-  if (p.provider === 'local') {
-    return `/uploads/${p.file_path}`
-  }
-  // Immich / Synology — stream through the existing memories proxy
-  // tripId=0 is a placeholder, the proxy uses owner_id to find credentials
-  const kind = size === 'thumbnail' ? 'thumbnail' : 'original'
-  return `/api/integrations/memories/${p.provider}/assets/0/${p.asset_id}/${p.owner_id}/${kind}`
+  return `/api/photos/${p.photo_id}/${size}`
 }
 
 export default function JourneyDetailPage() {
@@ -195,7 +189,7 @@ export default function JourneyDetailPage() {
           {/* Back link — desktop */}
           <button onClick={() => navigate('/journey')} className="hidden md:inline-flex items-center gap-1.5 text-[12px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 mb-4 mx-0">
             <ArrowLeft size={14} />
-            Back to Journey
+            {t('journey.detail.backToJourney')}
           </button>
 
           {/* Hero card — full width */}
@@ -220,7 +214,7 @@ export default function JourneyDetailPage() {
                     )}
                     <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white/[0.12] backdrop-blur border border-white/15 rounded-full text-[11px] font-medium">
                       <RefreshCw size={11} />
-                      Synced with Trips
+                      {t('journey.detail.syncedWithTrips')}
                     </div>
                   </div>
                   {/* Mobile: back button on the left */}
@@ -326,7 +320,7 @@ export default function JourneyDetailPage() {
                               {dayIdx + 1}
                             </div>
                             <div>
-                              <h3 className="text-[14px] font-semibold text-zinc-900 dark:text-white">{fd.weekday}, {fd.month} {fd.day}</h3>
+                              <h3 className="text-[14px] font-semibold text-zinc-900 dark:text-white">{new Date(date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
                             </div>
                           </div>
                           <div className="flex items-center gap-3 text-[11px] text-zinc-500">
@@ -405,17 +399,17 @@ export default function JourneyDetailPage() {
 
               {/* Stats panel */}
               <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl p-4">
-                <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-zinc-500 mb-3.5">{t('journey.detail.journeyStats')}</div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="text-[10px] font-semibold tracking-[0.1em] uppercase text-zinc-500 mb-3">{t('journey.detail.journeyStats')}</div>
+                <div className="grid grid-cols-2 gap-2">
                   {[
-                    { value: `${sortedDates.length}`, label: t('journey.stats.days') },
-                    { value: `${current.stats.entries}`, label: t('journey.stats.entries') },
-                    { value: `${current.stats.photos}`, label: t('journey.stats.photos') },
-                    { value: `${current.stats.cities}`, label: t('journey.stats.cities') },
+                    { value: sortedDates.length, label: t('journey.stats.days') },
+                    { value: current.stats.entries, label: t('journey.stats.entries') },
+                    { value: current.stats.photos, label: t('journey.stats.photos') },
+                    { value: current.stats.cities, label: t('journey.stats.cities') },
                   ].map(s => (
-                    <div key={s.label}>
-                      <div className="text-[20px] font-bold tracking-[-0.02em] text-zinc-900 dark:text-white">{s.value}</div>
-                      <div className="text-[10px] uppercase tracking-[0.08em] text-zinc-500 font-medium">{s.label}</div>
+                    <div key={s.label} className="rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-100 dark:border-zinc-700/50 px-3 py-2.5">
+                      <div className="text-[18px] font-bold tracking-[-0.02em] text-zinc-900 dark:text-white leading-none mb-0.5">{s.value}</div>
+                      <div className="text-[9px] uppercase tracking-[0.1em] text-zinc-400 dark:text-zinc-500 font-semibold">{s.label}</div>
                     </div>
                   ))}
                 </div>
@@ -440,7 +434,7 @@ export default function JourneyDetailPage() {
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-medium text-zinc-900 dark:text-white truncate">{trip.title}</div>
                         <div className="text-[10px] text-zinc-500 flex items-center gap-1.5">
-                          {trip.place_count || 0} places
+                          {trip.place_count || 0} {t('journey.detail.places')}
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-px rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9px] font-medium"><span className="w-1 h-1 rounded-full bg-emerald-500" />{t('journey.synced.synced')}</span>
                         </div>
                       </div>
@@ -674,7 +668,7 @@ function MapView({ entries, mapEntries, sortedDates, activeLocationId, fullMapRe
               <div key={date}>
                 {/* Day separator */}
                 <div className="flex items-center gap-2.5 py-3">
-                  <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 tracking-[0.12em] uppercase">Day {dayIdx + 1}</span>
+                  <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 tracking-[0.12em] uppercase">{t('journey.detail.day', { number: dayIdx + 1 })}</span>
                   <span className="text-[10px] text-zinc-400 font-medium">{fd.month} {fd.day}</span>
                   <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-700" />
                 </div>
@@ -834,14 +828,16 @@ function GalleryView({ entries, journeyId, userId, trips, onPhotoClick, onRefres
 
       {/* Header */}
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <span className="text-[11px] text-zinc-500">{allPhotos.length} photos</span>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-[10px] font-medium text-zinc-500 dark:text-zinc-400">
+          <Camera size={10} /> {allPhotos.length} {t('journey.detail.photos')}
+        </span>
         <div className="flex items-center gap-2">
           <button
             onClick={() => galleryFileRef.current?.click()}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[11px] font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100"
           >
             <Plus size={12} />
-            Upload
+            {t('common.upload')}
           </button>
           {availableProviders.map(p => (
             <button
@@ -873,7 +869,7 @@ function GalleryView({ entries, journeyId, userId, trips, onPhotoClick, onRefres
               onClick={() => onPhotoClick(entry.photos, entry.photos.indexOf(photo))}
             >
               <img
-                src={photo.provider !== 'local' ? photoUrl(photo, 'original') : photoUrl(photo)}
+                src={photoUrl(photo, 'original')}
                 alt={photo.caption || ''}
                 className="w-full h-full object-cover transition-transform group-hover:scale-105"
                 loading="lazy"
@@ -901,7 +897,7 @@ function GalleryView({ entries, journeyId, userId, trips, onPhotoClick, onRefres
               )}
               <div className="absolute bottom-1.5 left-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-black/50 backdrop-blur text-white">
-                  {entry.entry_date}
+                  {new Date(entry.entry_date + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
                 </span>
               </div>
             </div>
@@ -1272,7 +1268,7 @@ function CheckinCard({ entry, onClick }: { entry: JourneyEntry; onClick: () => v
 }
 
 function PhotoImg({ photo, className, style, onClick }: { photo: JourneyPhoto; className?: string; style?: React.CSSProperties; onClick?: () => void }) {
-  const src = photo.provider !== 'local' ? photoUrl(photo, 'original') : photoUrl(photo)
+  const src = photoUrl(photo, 'original')
   return (
     <img
       src={src}
@@ -1368,7 +1364,7 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
   onAdd: (assetIds: string[], entryId: number | null) => Promise<void>
 }) {
   const { t } = useTranslation()
-  const [filter, setFilter] = useState<'trip' | 'custom' | 'album'>('trip')
+  const [filter, setFilter] = useState<'trip' | 'custom' | 'all' | 'album'>('trip')
   const [photos, setPhotos] = useState<any[]>([])
   const [albums, setAlbums] = useState<any[]>([])
   const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null)
@@ -1413,6 +1409,8 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
   useEffect(() => {
     if (filter === 'trip' && tripRange.from && tripRange.to) {
       searchPhotos(tripRange.from, tripRange.to)
+    } else if (filter === 'all') {
+      searchPhotos('', '')
     } else if (filter === 'album' && albums.length === 0) {
       loadAlbums()
     }
@@ -1432,7 +1430,7 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
 
   const targetLabel = targetEntryId
     ? entries.find(e => e.id === targetEntryId)?.title || entries.find(e => e.id === targetEntryId)?.entry_date || t('journey.stats.entries')
-    : 'Gallery'
+    : t('journey.picker.newGallery')
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-5" style={{ background: 'rgba(9,9,11,0.6)', backdropFilter: 'blur(6px)' }}>
@@ -1453,9 +1451,10 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
           {/* Tabs */}
           <div className="flex gap-1.5 mb-3">
             {[
-              { id: 'trip' as const, label: t('journey.trips.link') },
-              { id: 'custom' as const, label: t('common.edit') },
-              { id: 'album' as const, label: t('journey.share.gallery') },
+              { id: 'trip' as const, label: t('journey.picker.tripPeriod') },
+              { id: 'custom' as const, label: t('journey.picker.dateRange') },
+              { id: 'all' as const, label: t('journey.picker.allPhotos') },
+              { id: 'album' as const, label: t('journey.picker.albums') },
             ].map(f => (
               <button
                 key={f.id}
@@ -1479,11 +1478,11 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
                   <>
                     <Calendar size={13} className="text-zinc-400" />
                     <span className="font-medium text-zinc-900 dark:text-white">
-                      {new Date(tripRange.from + 'T00:00:00').toLocaleDateString('en', { month: 'short', day: 'numeric' })}
+                      {new Date(tripRange.from + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                     </span>
                     <span className="text-zinc-400">&mdash;</span>
                     <span className="font-medium text-zinc-900 dark:text-white">
-                      {new Date(tripRange.to + 'T00:00:00').toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {new Date(tripRange.to + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
                     <span className="ml-1 text-zinc-400">
                       ({Math.ceil((new Date(tripRange.to).getTime() - new Date(tripRange.from).getTime()) / 86400000) + 1} days)
@@ -1502,7 +1501,7 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
                 <div className="flex-1"><DatePicker value={customTo} onChange={setCustomTo} /></div>
                 <button onClick={handleCustomSearch}
                   className="px-3 py-1.5 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[12px] font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 flex-shrink-0">
-                  Search
+                  {t('journey.picker.search')}
                 </button>
               </div>
             )}
@@ -1522,16 +1521,16 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
                     {a.albumName || a.name || 'Album'}{a.assetCount != null ? ` (${a.assetCount})` : ''}
                   </button>
                 ))}
-                {albums.length === 0 && !loading && <span className="text-[12px] text-zinc-400">No albums found</span>}
+                {albums.length === 0 && !loading && <span className="text-[12px] text-zinc-400">{t('journey.picker.noAlbums')}</span>}
               </div>
             )}
           </div>
         </div>
 
-        {/* Add-to */}
+        {/* Add-to entry selector */}
         <div className="px-6 py-2.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50">
           <div className="relative flex items-center gap-2">
-            <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-zinc-500">Add to</span>
+            <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-zinc-500">{t('journey.picker.addTo')}</span>
             <button
               onClick={() => setAddToOpen(!addToOpen)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-[12px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
@@ -1552,10 +1551,12 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
                     }`}
                   >
                     <Camera size={12} />
-                    Gallery
+                    {t('journey.picker.newGallery')}
                   </button>
-                  <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
-                  {entries.map(e => (
+                  {entries.filter(e => e.type !== 'skeleton' && e.title !== 'Gallery' && e.title !== '[Trip Photos]').length > 0 && (
+                    <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
+                  )}
+                  {entries.filter(e => e.type !== 'skeleton' && e.title !== 'Gallery' && e.title !== '[Trip Photos]').map(e => (
                     <button
                       key={e.id}
                       onClick={() => { setTargetEntryId(e.id); setAddToOpen(false) }}
@@ -1565,7 +1566,7 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
                           : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700'
                       }`}
                     >
-                      {e.title || e.location_name || e.entry_date}
+                      {e.title || e.location_name || new Date(e.entry_date + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
                     </button>
                   ))}
                 </div>
@@ -1638,19 +1639,20 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50">
-          <span className="text-[12px] text-zinc-500">
-            <strong className="text-zinc-900 dark:text-white">{selected.size}</strong> selected
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-200/60 dark:bg-zinc-700/60 text-[11px] leading-none text-zinc-500 dark:text-zinc-400">
+            <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[10px] leading-none font-bold">{selected.size}</span>
+            <span className="leading-[18px]">{t('journey.picker.selected')}</span>
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-zinc-600 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               onClick={() => onAdd([...selected], targetEntryId)}
               disabled={selected.size === 0}
               className="px-3.5 py-2 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[13px] font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Add {selected.size > 0 ? `(${selected.size})` : ''}
+              {t('common.add')} {selected.size > 0 ? `(${selected.size})` : ''}
             </button>
           </div>
         </div>
@@ -1666,6 +1668,7 @@ function DatePicker({ value, onChange, tripDates }: {
   onChange: (date: string) => void
   tripDates?: Set<string>
 }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [viewMonth, setViewMonth] = useState(() => {
     const d = value ? new Date(value + 'T00:00:00') : new Date()
@@ -1674,7 +1677,7 @@ function DatePicker({ value, onChange, tripDates }: {
 
   const daysInMonth = new Date(viewMonth.year, viewMonth.month + 1, 0).getDate()
   const firstDow = new Date(viewMonth.year, viewMonth.month, 1).getDay()
-  const monthName = new Date(viewMonth.year, viewMonth.month).toLocaleDateString('en', { month: 'long', year: 'numeric' })
+  const monthName = new Date(viewMonth.year, viewMonth.month).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 
   const prevMonth = () => {
     setViewMonth(p => p.month === 0 ? { year: p.year - 1, month: 11 } : { ...p, month: p.month - 1 })
@@ -1689,7 +1692,7 @@ function DatePicker({ value, onChange, tripDates }: {
   for (let i = 0; i < firstDow; i++) cells.push(null)
   for (let d = 1; d <= daysInMonth; d++) cells.push(d)
 
-  const formatted = value ? new Date(value + 'T00:00:00').toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Select date'
+  const formatted = value ? new Date(value + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : t('journey.picker.selectDate')
 
   return (
     <div className="relative">
@@ -1719,8 +1722,8 @@ function DatePicker({ value, onChange, tripDates }: {
 
             {/* Weekday headers */}
             <div className="grid grid-cols-7 mb-1">
-              {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
-                <div key={d} className="text-center text-[10px] font-medium text-zinc-400 py-1">{d}</div>
+              {Array.from({ length: 7 }, (_, i) => new Date(2024, 0, i).toLocaleDateString(undefined, { weekday: 'narrow' })).map((d, i) => (
+                <div key={i} className="text-center text-[10px] font-medium text-zinc-400 py-1">{d}</div>
               ))}
             </div>
 
@@ -1870,7 +1873,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
                 onClick={() => fileRef.current?.click()}
                 className="flex-1 border border-dashed border-zinc-200 dark:border-zinc-700 rounded-lg py-4 text-[12px] text-zinc-500 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center justify-center gap-1.5"
               >
-                <Plus size={13} /> Upload photos
+                <Plus size={13} /> {t('journey.editor.uploadPhotos')}
               </button>
               {galleryPhotos.length > 0 && (
                 <button
@@ -1881,7 +1884,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
                       : 'border-dashed border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800'
                   }`}
                 >
-                  <Image size={13} /> From Gallery
+                  <Image size={13} /> {t('journey.editor.fromGallery')}
                 </button>
               )}
             </div>
@@ -1906,7 +1909,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
                       }}
                       className="aspect-square rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-zinc-900 dark:hover:ring-white hover:ring-offset-1 dark:hover:ring-offset-zinc-900 transition-all"
                     >
-                      <img src={photoUrl(gp)} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { if (gp.provider !== 'local') { const img = e.currentTarget; const orig = photoUrl(gp, 'original'); if (!img.src.includes('/original')) img.src = orig } }} />
+                      <img src={photoUrl(gp)} alt="" className="w-full h-full object-cover" loading="lazy" onError={e => { const img = e.currentTarget; const orig = photoUrl(gp, 'original'); if (!img.src.includes('/original')) img.src = orig }} />
                     </div>
                   ))}
                   {galleryPhotos.filter(gp => !photos.some(p => p.id === gp.id)).length === 0 && (
@@ -1920,7 +1923,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
                 <div className="flex flex-wrap gap-2">
                   {photos.map((p, idx) => (
                     <div key={p.id} className={`w-20 h-20 rounded-lg overflow-hidden relative group ${idx === 0 && photos.length > 1 ? 'ring-2 ring-zinc-900 dark:ring-white ring-offset-1 dark:ring-offset-zinc-900' : ''}`}>
-                      <img src={photoUrl(p)} className="w-full h-full object-cover" alt="" onError={e => { if (p.provider !== 'local') { const img = e.currentTarget; const orig = photoUrl(p, 'original'); if (!img.src.includes('/original')) img.src = orig } }} />
+                      <img src={photoUrl(p)} className="w-full h-full object-cover" alt="" onError={e => { const img = e.currentTarget; const orig = photoUrl(p, 'original'); if (!img.src.includes('/original')) img.src = orig }} />
                       {idx === 0 && photos.length > 1 && (
                         <span className="absolute bottom-0.5 left-0.5 px-1 py-px rounded text-[8px] font-bold bg-zinc-900/70 text-white">{t('journey.editor.photoFirst')}</span>
                       )}
@@ -1938,7 +1941,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
                           }}
                           className="absolute bottom-0.5 left-0.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[8px] font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
                         >
-                          Make 1st
+                          {t('journey.editor.makeFirst')}
                         </button>
                       )}
                       <button
@@ -2017,7 +2020,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
                     onClick={() => setPros([...pros, ''])}
                     className="flex items-center justify-center gap-1.5 h-9 w-full border border-dashed border-green-200 dark:border-green-800/40 rounded-[10px] text-[12px] font-medium text-green-700 dark:text-green-400 hover:border-green-300 dark:hover:border-green-700 transition-colors"
                   >
-                    <Plus size={13} strokeWidth={2.5} /> Add another
+                    <Plus size={13} strokeWidth={2.5} /> {t('journey.editor.addAnother')}
                   </button>
                 </div>
               </div>
@@ -2051,7 +2054,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
                     onClick={() => setCons([...cons, ''])}
                     className="flex items-center justify-center gap-1.5 h-9 w-full border border-dashed border-red-200 dark:border-red-800/40 rounded-[10px] text-[12px] font-medium text-red-700 dark:text-red-400 hover:border-red-300 dark:hover:border-red-700 transition-colors"
                   >
-                    <Plus size={13} strokeWidth={2.5} /> Add another
+                    <Plus size={13} strokeWidth={2.5} /> {t('journey.editor.addAnother')}
                   </button>
                 </div>
               </div>
@@ -2129,7 +2132,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
               )}
               {locationSearching && (
                 <div className="absolute left-0 right-0 top-full mt-1 z-[100] bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg px-3 py-3 text-center text-[12px] text-zinc-400">
-                  Searching...
+                  {t('journey.editor.searching')}
                 </div>
               )}
             </div>
@@ -2268,7 +2271,7 @@ function AddTripDialog({ journeyId, existingTripIds, onClose, onAdded }: {
                   disabled={adding === t.id}
                   className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 hover:bg-zinc-700 dark:hover:bg-zinc-200 disabled:opacity-50"
                 >
-                  {adding === t.id ? '...' : 'Link'}
+                  {adding === t.id ? '...' : t('journey.trips.link')}
                 </button>
               </div>
             ))}
@@ -2376,19 +2379,19 @@ function ContributorInviteDialog({ journeyId, existingUserIds, onClose, onInvite
 
           {/* Role selector */}
           <div>
-            <label className="text-[10px] font-semibold tracking-[0.12em] uppercase text-zinc-500 block mb-2">Role</label>
+            <label className="text-[10px] font-semibold tracking-[0.12em] uppercase text-zinc-500 block mb-2">{t('journey.invite.role')}</label>
             <div className="flex gap-2">
               {(['viewer', 'editor'] as const).map(r => (
                 <button
                   key={r}
                   onClick={() => setRole(r)}
-                  className={`flex-1 py-2 rounded-lg text-[12px] font-medium border transition-all capitalize ${
+                  className={`flex-1 py-2 rounded-lg text-[12px] font-medium border transition-all ${
                     role === r
                       ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white'
                       : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-zinc-400'
                   }`}
                 >
-                  {r}
+                  {t(`journey.invite.${r}`)}
                 </button>
               ))}
             </div>
@@ -2397,14 +2400,14 @@ function ContributorInviteDialog({ journeyId, existingUserIds, onClose, onInvite
 
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50">
           <button onClick={onClose} className="px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-zinc-600 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             onClick={handleInvite}
             disabled={!selectedUserId || sending}
             className="px-3.5 py-2 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[13px] font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {sending ? 'Inviting...' : 'Invite'}
+            {sending ? t('journey.invite.inviting') : t('journey.invite.invite')}
           </button>
         </div>
       </div>
@@ -2471,7 +2474,7 @@ function JourneyShareSection({ journeyId }: { journeyId: number }) {
           onClick={createLink}
           className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-600 text-[12px] font-medium text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:hover:border-zinc-500 dark:hover:text-zinc-300 transition-colors"
         >
-          <Link size={14} /> Create share link
+          <Link size={14} /> {t('journey.share.createLink')}
         </button>
       ) : (
         <div className="flex flex-col gap-3">
@@ -2483,7 +2486,7 @@ function JourneyShareSection({ journeyId }: { journeyId: number }) {
               onClick={copyLink}
               className="flex-shrink-0 px-2.5 py-1 rounded-md bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[11px] font-medium hover:bg-zinc-700 dark:hover:bg-zinc-200"
             >
-              {copied ? 'Copied!' : 'Copy'}
+              {copied ? t('journey.share.copied') : t('journey.share.copy')}
             </button>
           </div>
 

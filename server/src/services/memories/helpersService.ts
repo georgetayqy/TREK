@@ -129,15 +129,15 @@ export function canAccessUserPhoto(requestingUserId: number, ownerUserId: number
         const journeyPhoto = db.prepare(`
             SELECT jp.entry_id, je.journey_id
             FROM journey_photos jp
+            JOIN trek_photos tkp ON tkp.id = jp.photo_id
             JOIN journey_entries je ON je.id = jp.entry_id
-            WHERE jp.asset_id = ?
-              AND jp.provider = ?
-              AND jp.owner_id = ?
+            WHERE tkp.asset_id = ?
+              AND tkp.provider = ?
+              AND tkp.owner_id = ?
             LIMIT 1
         `).get(assetId, provider, ownerUserId) as { entry_id: number; journey_id: number } | undefined;
         if (!journeyPhoto) return false;
 
-        // Check if requesting user is the journey owner or a contributor
         const access = db.prepare(`
             SELECT 1 FROM journeys WHERE id = ? AND user_id = ?
             UNION ALL
@@ -147,15 +147,16 @@ export function canAccessUserPhoto(requestingUserId: number, ownerUserId: number
         return !!access;
     }
 
-    // Regular trip photos
+    // Regular trip photos — join through trek_photos
     const sharedAsset = db.prepare(`
     SELECT 1
-    FROM trip_photos
-    WHERE user_id = ?
-      AND asset_id = ?
-      AND provider = ?
-      AND trip_id = ?
-      AND shared = 1
+    FROM trip_photos tp
+    JOIN trek_photos tkp ON tkp.id = tp.photo_id
+    WHERE tp.user_id = ?
+      AND tkp.asset_id = ?
+      AND tkp.provider = ?
+      AND tp.trip_id = ?
+      AND tp.shared = 1
     LIMIT 1
     `).get(ownerUserId, assetId, provider, tripId);
 
@@ -163,6 +164,52 @@ export function canAccessUserPhoto(requestingUserId: number, ownerUserId: number
         return false;
     }
     return !!canAccessTrip(tripId, requestingUserId);
+}
+
+
+// ── Unified photo access check (trek_photos based) ──────────────────────
+
+export function canAccessTrekPhoto(requestingUserId: number, trekPhotoId: number): boolean {
+    const photo = db.prepare('SELECT * FROM trek_photos WHERE id = ?').get(trekPhotoId) as { id: number; provider: string; owner_id: number | null } | undefined;
+    if (!photo) return false;
+
+    // Owner always has access
+    if (photo.owner_id === requestingUserId) return true;
+
+    // Check trip_photos — is this photo shared in a trip the user has access to?
+    const tripAccess = db.prepare(`
+        SELECT 1 FROM trip_photos tp
+        WHERE tp.photo_id = ?
+          AND tp.shared = 1
+          AND EXISTS (
+            SELECT 1 FROM trip_members tm WHERE tm.trip_id = tp.trip_id AND tm.user_id = ?
+            UNION ALL
+            SELECT 1 FROM trips t WHERE t.id = tp.trip_id AND t.user_id = ?
+          )
+        LIMIT 1
+    `).get(trekPhotoId, requestingUserId, requestingUserId);
+    if (tripAccess) return true;
+
+    // Check journey_photos — is this photo in a journey the user can access?
+    const journeyAccess = db.prepare(`
+        SELECT 1 FROM journey_photos jp
+        JOIN journey_entries je ON je.id = jp.entry_id
+        WHERE jp.photo_id = ?
+          AND EXISTS (
+            SELECT 1 FROM journeys j WHERE j.id = je.journey_id AND j.user_id = ?
+            UNION ALL
+            SELECT 1 FROM journey_contributors jc WHERE jc.journey_id = je.journey_id AND jc.user_id = ?
+          )
+        LIMIT 1
+    `).get(trekPhotoId, requestingUserId, requestingUserId);
+    if (journeyAccess) return true;
+
+    // Local photos without owner (uploaded files) — check if user has journey access
+    if (photo.provider === 'local' && !photo.owner_id) {
+        return !!journeyAccess;
+    }
+
+    return false;
 }
 
 

@@ -26,7 +26,8 @@ interface PublicEntry {
 interface PublicPhoto {
   id: number
   entry_id: number
-  provider: string
+  photo_id: number
+  provider?: string
   asset_id?: string | null
   owner_id?: number | null
   file_path?: string | null
@@ -34,8 +35,7 @@ interface PublicPhoto {
 }
 
 function photoUrl(p: PublicPhoto, shareToken: string): string {
-  if (p.provider === 'local') return `/api/public/journey/${shareToken}/photo/local/${encodeURIComponent(p.file_path || '')}/0/original`
-  return `/api/public/journey/${shareToken}/photo/${p.provider}/${p.asset_id}/${p.owner_id}/original`
+  return `/api/public/journey/${shareToken}/photos/${p.photo_id}/original`
 }
 
 function formatDate(d: string): { weekday: string; month: string; day: number } {
