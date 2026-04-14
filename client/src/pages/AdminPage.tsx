@@ -1353,7 +1353,7 @@ export default function AdminPage(): React.ReactElement {
                       disabled={!smtpValues.admin_webhook_url?.trim()}
                       className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors disabled:opacity-40"
                     >
-                      {t('admin.smtp.testButton')}
+                      {t('admin.notifications.testWebhook')}
                     </button>
                   </div>
                 </div>

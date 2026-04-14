@@ -117,7 +117,7 @@ export function listBackups(): BackupInfo[] {
         filename,
         size: stat.size,
         sizeText: formatSize(stat.size),
-        created_at: stat.birthtime.toISOString(),
+        created_at: stat.mtime.toISOString(),
       };
     })
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());

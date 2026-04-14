@@ -399,9 +399,24 @@ export async function sendWebhook(url: string, payload: { event: string; title: 
 }
 
 export async function testSmtp(to: string): Promise<{ success: boolean; error?: string }> {
+  if (!getSmtpConfig()) return { success: false, error: 'SMTP not configured' };
   try {
-    const sent = await sendEmail(to, 'Test Notification', 'This is a test email from TREK. If you received this, your SMTP configuration is working correctly.');
-    return sent ? { success: true } : { success: false, error: 'SMTP not configured' };
+    const config = getSmtpConfig()!;
+    const skipTls = process.env.SMTP_SKIP_TLS_VERIFY === 'true' || getAppSetting('smtp_skip_tls_verify') === 'true';
+    const transporter = nodemailer.createTransport({
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      auth: config.user ? { user: config.user, pass: config.pass } : undefined,
+      ...(skipTls ? { tls: { rejectUnauthorized: false } } : {}),
+    });
+    await transporter.sendMail({
+      from: config.from,
+      to,
+      subject: 'TREK — Test Notification',
+      text: 'This is a test email from TREK. If you received this, your SMTP configuration is working correctly.',
+    });
+    return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }

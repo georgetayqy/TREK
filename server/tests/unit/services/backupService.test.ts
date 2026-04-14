@@ -580,7 +580,7 @@ describe('BACKUP-041 listBackups', () => {
     fsMock.readdirSync.mockReturnValue(['backup-2026-01-01T00-00-00.zip']);
     fsMock.statSync.mockReturnValue({
       size: 1024,
-      birthtime: new Date('2026-01-01T00:00:00Z'),
+      mtime: new Date('2026-01-01T00:00:00Z'),
     });
 
     const result = listBackups();
@@ -599,9 +599,9 @@ describe('BACKUP-041 listBackups', () => {
     ]);
     fsMock.statSync.mockImplementation((p: string) => {
       if (String(p).includes('2026-01-01')) {
-        return { size: 512, birthtime: new Date('2026-01-01T00:00:00Z') };
+        return { size: 512, mtime: new Date('2026-01-01T00:00:00Z') };
       }
-      return { size: 2048, birthtime: new Date('2026-06-01T00:00:00Z') };
+      return { size: 2048, mtime: new Date('2026-06-01T00:00:00Z') };
     });
 
     const result = listBackups();
@@ -619,7 +619,7 @@ describe('BACKUP-041 listBackups', () => {
     ]);
     fsMock.statSync.mockReturnValue({
       size: 1024,
-      birthtime: new Date('2026-01-01T00:00:00Z'),
+      mtime: new Date('2026-01-01T00:00:00Z'),
     });
 
     const result = listBackups();
