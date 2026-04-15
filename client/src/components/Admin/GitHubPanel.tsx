@@ -163,7 +163,7 @@ export default function GitHubPanel({ isPrerelease = false }: { isPrerelease?: b
           <ExternalLink size={14} className="ml-auto flex-shrink-0" style={{ color: 'var(--text-faint)' }} />
         </a>
         <a
-          href="https://discord.gg/nSdKaXgN"
+          href="https://discord.gg/NhZBDSd4qW"
           target="_blank"
           rel="noopener noreferrer"
           className="rounded-xl border overflow-hidden flex items-center gap-4 px-5 py-4 transition-all"
