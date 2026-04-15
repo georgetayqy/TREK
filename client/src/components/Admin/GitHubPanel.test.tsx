@@ -68,7 +68,7 @@ describe('GitHubPanel', () => {
     expect(bmc).toHaveAttribute('rel', 'noopener noreferrer');
 
     const discord = screen.getByText('Discord').closest('a')!;
-    expect(discord).toHaveAttribute('href', 'https://discord.gg/nSdKaXgN');
+    expect(discord).toHaveAttribute('href', 'https://discord.gg/NhZBDSd4qW');
     expect(discord).toHaveAttribute('target', '_blank');
     expect(discord).toHaveAttribute('rel', 'noopener noreferrer');
   });

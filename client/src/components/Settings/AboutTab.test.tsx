@@ -34,7 +34,7 @@ describe('AboutTab', () => {
   it('FE-COMP-ABOUT-005: displays Discord link with correct href', () => {
     render(<AboutTab appVersion="2.9.10" />);
     const link = screen.getByText('Discord').closest('a');
-    expect(link).toHaveAttribute('href', 'https://discord.gg/nSdKaXgN');
+    expect(link).toHaveAttribute('href', 'https://discord.gg/NhZBDSd4qW');
   });
 
   it('FE-COMP-ABOUT-006: displays bug report link', () => {
