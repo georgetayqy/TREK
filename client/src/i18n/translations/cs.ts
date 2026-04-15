@@ -1,4 +1,4 @@
-const cs: Record<string, string | { name: string; category: string }[]> = {
+﻿const cs: Record<string, string | { name: string; category: string }[]> = {
   // Společné (Common)
   'common.save': 'Uložit',
   'common.showMore': 'Zobrazit více',
@@ -891,10 +891,21 @@ const cs: Record<string, string | { name: string; category: string }[]> = {
   // Boční panel míst (Places Sidebar)
   'places.addPlace': 'Přidat místo/aktivitu',
   'places.importGpx': 'GPX',
+  'places.importKeyholeMarkup': 'KMZ / KML',
   'places.gpxImported': '{count} míst importováno z GPX',
+  'places.kmlKmzImported': 'Importováno {count} míst z KMZ/KML',
   'places.urlResolved': 'Místo importováno z URL',
   'places.gpxError': 'Import GPX se nezdařil',
   'places.importList': 'Import seznamu',
+  'places.kmlKmzImportError': 'Import KMZ/KML selhal',
+  'places.kmlKmzInvalidType': 'Vyberte soubor .kml nebo .kmz.',
+  'places.kmlKmzTooLarge': 'Soubor je příliš velký. Maximální velikost nahrání je {maxMb} MB.',
+  'places.kmlKmzHint': 'Importujte mapové soubory z nástrojů jako Google My Maps a Google Earth.',
+  'places.kmlKmzSizeHint': 'Maximální velikost souboru: {maxMb} MB',
+  'places.kmlKmzSelectFile': 'Vybrat soubor',
+  'places.kmlKmzSelectedFile': 'Vybraný soubor: {name}',
+  'places.kmlKmzSummaryTitle': 'Souhrn importu',
+  'places.kmlKmzSummaryValues': 'Placemarks: {total} • Importováno: {created} • Přeskočeno: {skipped}',
   'places.importGoogleList': 'Google Seznam',
   'places.importNaverList': 'Naver Seznam',
   'places.googleListHint': 'Vložte sdílený odkaz na seznam Google Maps pro import všech míst.',
@@ -1669,6 +1680,7 @@ const cs: Record<string, string | { name: string; category: string }[]> = {
   'undo.moveDay': 'Místo přesunuto na jiný den',
   'undo.lock': 'Zámek místa přepnut',
   'undo.importGpx': 'Import GPX',
+  'undo.importKeyholeMarkup': 'Import KMZ/KML',
   'undo.importGoogleList': 'Import z Google Maps',
   'undo.importNaverList': 'Import z Naver Maps',
 

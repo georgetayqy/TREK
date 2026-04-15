@@ -1,4 +1,4 @@
-const ru: Record<string, string> = {
+﻿const ru: Record<string, string> = {
   // Common
   'common.save': 'Сохранить',
   'common.showMore': 'Показать больше',
@@ -890,9 +890,21 @@ const ru: Record<string, string> = {
   // Places Sidebar
   'places.addPlace': 'Добавить место/активность',
   'places.importGpx': 'GPX',
+  'places.importKeyholeMarkup': 'KMZ / KML',
   'places.gpxImported': '{count} мест импортировано из GPX',
+  'places.kmlKmzImported': '{count} мест импортировано из KMZ/KML',
+  'places.urlResolved': 'Место импортировано из URL',
   'places.gpxError': 'Ошибка импорта GPX',
   'places.importList': 'Импорт списка',
+  'places.kmlKmzImportError': 'Ошибка импорта KMZ/KML',
+  'places.kmlKmzInvalidType': 'Выберите файл .kml или .kmz.',
+  'places.kmlKmzTooLarge': 'Файл слишком большой. Максимальный размер загрузки — {maxMb} MB.',
+  'places.kmlKmzHint': 'Импортируйте файлы карт из инструментов, таких как Google My Maps и Google Earth.',
+  'places.kmlKmzSizeHint': 'Максимальный размер файла: {maxMb} MB',
+  'places.kmlKmzSelectFile': 'Выбрать файл',
+  'places.kmlKmzSelectedFile': 'Выбранный файл: {name}',
+  'places.kmlKmzSummaryTitle': 'Сводка импорта',
+  'places.kmlKmzSummaryValues': 'Placemarks: {total} • Импортировано: {created} • Пропущено: {skipped}',
   'places.importGoogleList': 'Список Google',
   'places.importNaverList': 'Список Naver',
   'places.googleListHint': 'Вставьте ссылку на общий список Google Maps для импорта всех мест.',
@@ -902,7 +914,6 @@ const ru: Record<string, string> = {
   'places.naverListImported': '{count} мест импортировано из "{list}"',
   'places.naverListError': 'Не удалось импортировать список Naver Maps',
   'places.viewDetails': 'Подробности',
-  'places.urlResolved': 'Место импортировано из URL',
   'places.assignToDay': 'Добавить в какой день?',
   'places.all': 'Все',
   'places.unplanned': 'Незапланированные',
@@ -1667,6 +1678,7 @@ const ru: Record<string, string> = {
   'undo.moveDay': 'Место перемещено в другой день',
   'undo.lock': 'Блокировка места изменена',
   'undo.importGpx': 'Импорт GPX',
+  'undo.importKeyholeMarkup': 'Импорт KMZ/KML',
   'undo.importGoogleList': 'Импорт из Google Maps',
   'undo.importNaverList': 'Импорт из Naver Maps',
 

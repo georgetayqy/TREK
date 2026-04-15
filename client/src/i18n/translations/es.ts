@@ -1,4 +1,4 @@
-const es: Record<string, string> = {
+﻿const es: Record<string, string> = {
   // Common
   'common.save': 'Guardar',
   'common.showMore': 'Ver más',
@@ -866,9 +866,21 @@ const es: Record<string, string> = {
   // Places Sidebar
   'places.addPlace': 'Añadir lugar/actividad',
   'places.importGpx': 'GPX',
+  'places.importKeyholeMarkup': 'KMZ / KML',
   'places.gpxImported': '{count} lugares importados desde GPX',
+  'places.kmlKmzImported': '{count} lugares importados desde KMZ/KML',
+  'places.urlResolved': 'Lugar importado desde URL',
   'places.gpxError': 'Error al importar GPX',
   'places.importList': 'Importar lista',
+  'places.kmlKmzImportError': 'La importación KMZ/KML falló',
+  'places.kmlKmzInvalidType': 'Selecciona un archivo .kml o .kmz.',
+  'places.kmlKmzTooLarge': 'El archivo es demasiado grande. El tamaño máximo de carga es {maxMb} MB.',
+  'places.kmlKmzHint': 'Importa archivos de mapa desde herramientas como Google My Maps y Google Earth.',
+  'places.kmlKmzSizeHint': 'Tamaño máximo de archivo: {maxMb} MB',
+  'places.kmlKmzSelectFile': 'Seleccionar archivo',
+  'places.kmlKmzSelectedFile': 'Archivo seleccionado: {name}',
+  'places.kmlKmzSummaryTitle': 'Resumen de importación',
+  'places.kmlKmzSummaryValues': 'Placemarks: {total} • Importados: {created} • Omitidos: {skipped}',
   'places.importGoogleList': 'Lista Google',
   'places.importNaverList': 'Lista Naver',
   'places.googleListHint': 'Pega un enlace compartido de una lista de Google Maps para importar todos los lugares.',
@@ -878,7 +890,6 @@ const es: Record<string, string> = {
   'places.naverListImported': '{count} lugares importados de "{list}"',
   'places.naverListError': 'Error al importar la lista de Naver Maps',
   'places.viewDetails': 'Ver detalles',
-  'places.urlResolved': 'Lugar importado desde URL',
   'places.assignToDay': '¿A qué día añadirlo?',
   'places.all': 'Todo',
   'places.unplanned': 'Sin planificar',
@@ -1676,6 +1687,7 @@ const es: Record<string, string> = {
   'undo.moveDay': 'Lugar movido a otro día',
   'undo.lock': 'Bloqueo de lugar activado/desactivado',
   'undo.importGpx': 'Importación GPX',
+  'undo.importKeyholeMarkup': 'Importación KMZ/KML',
   'undo.importGoogleList': 'Importación de Google Maps',
   'undo.importNaverList': 'Importación de Naver Maps',
 

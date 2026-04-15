@@ -1,4 +1,4 @@
-const en: Record<string, string | { name: string; category: string }[]> = {
+﻿const en: Record<string, string | { name: string; category: string }[]> = {
   // Common
   'common.save': 'Save',
   'common.showMore': 'Show more',
@@ -916,10 +916,21 @@ const en: Record<string, string | { name: string; category: string }[]> = {
   // Places Sidebar
   'places.addPlace': 'Add Place/Activity',
   'places.importGpx': 'GPX',
+  'places.importKeyholeMarkup': 'KMZ / KML',
   'places.gpxImported': '{count} places imported from GPX',
+  'places.kmlKmzImported': '{count} places imported from KMZ/KML',
   'places.urlResolved': 'Place imported from URL',
   'places.gpxError': 'GPX import failed',
   'places.importList': 'List Import',
+  'places.kmlKmzImportError': 'KMZ/KML import failed',
+  'places.kmlKmzInvalidType': 'Please select a .kml or .kmz file.',
+  'places.kmlKmzTooLarge': 'File is too large. Maximum upload size is {maxMb} MB.',
+  'places.kmlKmzHint': 'Import map files from tools like Google My Maps and Google Earth.',
+  'places.kmlKmzSizeHint': 'Max file size: {maxMb} MB',
+  'places.kmlKmzSelectFile': 'Select File',
+  'places.kmlKmzSelectedFile': 'Selected file: {name}',
+  'places.kmlKmzSummaryTitle': 'Import summary',
+  'places.kmlKmzSummaryValues': 'Placemarks: {total} • Imported: {created} • Skipped: {skipped}',
   'places.importGoogleList': 'Google List',
   'places.importNaverList': 'Naver List',
   'places.googleListHint': 'Paste a shared Google Maps list link to import all places.',
@@ -1708,6 +1719,7 @@ const en: Record<string, string | { name: string; category: string }[]> = {
   'undo.moveDay': 'Place moved to another day',
   'undo.lock': 'Place lock toggled',
   'undo.importGpx': 'GPX import',
+  'undo.importKeyholeMarkup': 'KMZ/KML import',
   'undo.importGoogleList': 'Google Maps import',
   'undo.importNaverList': 'Naver Maps import',
   'undo.addPlace': 'Place added',

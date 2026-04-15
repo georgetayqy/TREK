@@ -1,4 +1,4 @@
-import en from './en'
+﻿import en from './en'
 
 const ar: Record<string, string | { name: string; category: string }[]> = {
   ...en,
@@ -893,9 +893,21 @@ const ar: Record<string, string | { name: string; category: string }[]> = {
   // Places Sidebar
   'places.addPlace': 'إضافة مكان/نشاط',
   'places.importGpx': 'GPX',
+  'places.importKeyholeMarkup': 'KMZ / KML',
   'places.gpxImported': 'تم استيراد {count} مكان من GPX',
+  'places.kmlKmzImported': 'تم استيراد {count} مكان من KMZ/KML',
+  'places.urlResolved': 'تم استيراد المكان من الرابط',
   'places.gpxError': 'فشل استيراد GPX',
   'places.importList': 'استيراد قائمة',
+  'places.kmlKmzImportError': 'فشل استيراد KMZ/KML',
+  'places.kmlKmzInvalidType': 'يرجى اختيار ملف .kml أو .kmz.',
+  'places.kmlKmzTooLarge': 'الملف كبير جدًا. الحد الأقصى لحجم الرفع هو {maxMb} MB.',
+  'places.kmlKmzHint': 'استورد ملفات الخرائط من أدوات مثل Google My Maps وGoogle Earth.',
+  'places.kmlKmzSizeHint': 'الحد الأقصى لحجم الملف: {maxMb} MB',
+  'places.kmlKmzSelectFile': 'اختيار ملف',
+  'places.kmlKmzSelectedFile': 'الملف المحدد: {name}',
+  'places.kmlKmzSummaryTitle': 'ملخص الاستيراد',
+  'places.kmlKmzSummaryValues': 'علامات المواضع: {total} • تم الاستيراد: {created} • تم التجاوز: {skipped}',
   'places.importGoogleList': 'قائمة Google',
   'places.importNaverList': 'قائمة Naver',
   'places.googleListHint': 'الصق رابط قائمة Google Maps المشتركة لاستيراد جميع الأماكن.',
@@ -905,7 +917,6 @@ const ar: Record<string, string | { name: string; category: string }[]> = {
   'places.naverListImported': 'تم استيراد {count} مكان من "{list}"',
   'places.naverListError': 'فشل استيراد قائمة Naver Maps',
   'places.viewDetails': 'عرض التفاصيل',
-  'places.urlResolved': 'تم استيراد المكان من الرابط',
   'places.assignToDay': 'إلى أي يوم تريد الإضافة؟',
   'places.all': 'الكل',
   'places.unplanned': 'غير مخطط',
@@ -1717,6 +1728,7 @@ const ar: Record<string, string | { name: string; category: string }[]> = {
   'undo.moveDay': 'تم نقل المكان إلى يوم آخر',
   'undo.lock': 'تم تبديل قفل المكان',
   'undo.importGpx': 'استيراد GPX',
+  'undo.importKeyholeMarkup': 'استيراد KMZ/KML',
   'undo.importGoogleList': 'استيراد خرائط Google',
   'undo.importNaverList': 'استيراد خرائط Naver',
 
