@@ -323,7 +323,7 @@ body {
   display: none;
 }
 
-/* Scrollbalken */
+/* Scrollbars — styled on desktop, hidden on mobile */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -333,19 +333,21 @@ body {
   height: 0;
   width: 0;
 }
-
 ::-webkit-scrollbar-track {
   background: var(--scrollbar-track);
   border-radius: 3px;
 }
-
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover);
+}
+
+@media (max-width: 767px) {
+  * { scrollbar-width: none; }
+  ::-webkit-scrollbar { width: 0; height: 0; }
 }
 
 .route-info-pill { background: none !important; border: none !important; box-shadow: none !important; width: auto !important; height: auto !important; margin: 0 !important; }
@@ -405,6 +407,7 @@ img[alt="TREK"] {
 }
 
 .scroll-container {
+  scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
@@ -447,11 +450,6 @@ img[alt="TREK"] {
   color-scheme: dark;
 }
 
-/* Scroll-Container */
-.scroll-container {
-  scrollbar-width: thin;
-  scrollbar-color: #d1d5db #f1f5f9;
-}
 
 /* Toast-Animationen */
 @keyframes slideUp {

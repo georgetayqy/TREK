@@ -1023,7 +1023,7 @@ const DayPlanSidebar = React.memo(function DayPlanSidebar({
       </div>
 
       {/* Tagesliste */}
-      <div className="scroll-container" style={{ flex: 1, overflowY: 'auto', minHeight: 0, scrollbarWidth: 'thin', scrollbarColor: 'var(--scrollbar-thumb) transparent' }}>
+      <div className="scroll-container" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {days.map((day, index) => {
           const isSelected = selectedDayId === day.id
           const isExpanded = expandedDays.has(day.id)
