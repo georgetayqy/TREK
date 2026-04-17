@@ -1042,7 +1042,7 @@ function GalleryView({ entries, journeyId, userId, trips, onPhotoClick, onRefres
           trips={trips}
           existingAssetIds={new Set(entries.flatMap(e => (e.photos || []).filter(p => p.asset_id).map(p => p.asset_id!)))}
           onClose={() => setShowPicker(false)}
-          onAdd={async (assetIds, entryId, passphrase) => {
+          onAdd={async (groups, entryId) => {
             let targetId = entryId
             if (!targetId) {
               try {
@@ -1055,10 +1055,12 @@ function GalleryView({ entries, journeyId, userId, trips, onPhotoClick, onRefres
               } catch { return }
             }
             let added = 0
-            try {
-              const result = await journeyApi.addProviderPhotos(targetId, pickerProvider!, assetIds, undefined, passphrase)
-              added = result.added || 0
-            } catch {}
+            for (const group of groups) {
+              try {
+                const result = await journeyApi.addProviderPhotos(targetId, pickerProvider!, group.assetIds, undefined, group.passphrase)
+                added += result.added || 0
+              } catch {}
+            }
             if (added > 0) {
               toast.success(t('journey.photosAdded', { count: added }))
               onRefresh()
@@ -1532,7 +1534,7 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
   trips: JourneyTrip[]
   existingAssetIds: Set<string>
   onClose: () => void
-  onAdd: (assetIds: string[], entryId: number | null, passphrase?: string) => Promise<void>
+  onAdd: (groups: Array<{ assetIds: string[]; passphrase?: string }>, entryId: number | null) => Promise<void>
 }) {
   const { t } = useTranslation()
   const [filter, setFilter] = useState<'trip' | 'custom' | 'all' | 'album'>('trip')
@@ -1546,7 +1548,7 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
   const [searchPage, setSearchPage] = useState(1)
   const [searchFrom, setSearchFrom] = useState('')
   const [searchTo, setSearchTo] = useState('')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selected, setSelected] = useState<Map<string, { albumId?: string; passphrase?: string }>>(new Map())
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [targetEntryId, setTargetEntryId] = useState<number | null>(null)
@@ -1638,8 +1640,12 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
 
   const toggleAsset = (id: string) => {
     setSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
+      const next = new Map(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.set(id, { albumId: selectedAlbum ?? undefined, passphrase: selectedAlbumPassphrase })
+      }
       return next
     })
   }
@@ -1801,9 +1807,9 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
               <button
                 onClick={() => {
                   if (allSelected) {
-                    setSelected(new Set())
+                    setSelected(new Map())
                   } else {
-                    setSelected(new Set(selectable.map((a: any) => a.id)))
+                    setSelected(new Map(selectable.map((a: any) => [a.id, { albumId: selectedAlbum ?? undefined, passphrase: selectedAlbumPassphrase }])))
                   }
                 }}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
@@ -1905,7 +1911,16 @@ function ProviderPicker({ provider, userId, entries, trips, existingAssetIds, on
               {t('common.cancel')}
             </button>
             <button
-              onClick={() => onAdd([...selected], targetEntryId, selectedAlbumPassphrase)}
+              onClick={() => {
+                const groupMap = new Map<string | undefined, string[]>()
+                for (const [assetId, { passphrase }] of selected.entries()) {
+                  const list = groupMap.get(passphrase) || []
+                  list.push(assetId)
+                  groupMap.set(passphrase, list)
+                }
+                const groups = [...groupMap.entries()].map(([passphrase, assetIds]) => ({ assetIds, passphrase }))
+                onAdd(groups, targetEntryId)
+              }}
               disabled={selected.size === 0}
               className="px-3.5 py-2 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[13px] font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed"
             >

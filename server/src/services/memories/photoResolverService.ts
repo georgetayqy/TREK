@@ -22,7 +22,7 @@ export function getOrCreateTrekPhoto(
   ).get(provider, assetId, ownerId) as { id: number } | undefined;
   if (existing) {
     if (passphrase) {
-      db.prepare('UPDATE trek_photos SET passphrase = ? WHERE id = ? AND passphrase IS NULL')
+      db.prepare('UPDATE trek_photos SET passphrase = ? WHERE id = ?')
         .run(encrypt_api_key(passphrase), existing.id);
     }
     return existing.id;
@@ -143,6 +143,19 @@ export function setTrekPhotoProvider(
   db.prepare(
     'UPDATE trek_photos SET provider = ?, asset_id = ?, owner_id = ? WHERE id = ?'
   ).run(provider, assetId, ownerId, trekPhotoId);
+}
+
+// ── Orphan cleanup ───────────────────────────────────────────────────────
+
+export function deleteTrekPhotoIfOrphan(photoId: number): void {
+  const stillUsed = db.prepare(`
+    SELECT 1 FROM trip_photos WHERE photo_id = ?
+    UNION ALL
+    SELECT 1 FROM journey_photos WHERE photo_id = ?
+    LIMIT 1
+  `).get(photoId, photoId);
+  if (stillUsed) return;
+  db.prepare("DELETE FROM trek_photos WHERE id = ? AND provider != 'local'").run(photoId);
 }
 
 // ── Delete local file for a trek_photo ──────────────────────────────────

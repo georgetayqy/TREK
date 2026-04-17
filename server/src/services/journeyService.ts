@@ -1,7 +1,7 @@
 import { db } from '../db/database';
 import { broadcastToUser } from '../websocket';
 import type { Journey, JourneyEntry, JourneyPhoto, JourneyContributor } from '../types';
-import { getOrCreateTrekPhoto, getOrCreateLocalTrekPhoto, setTrekPhotoProvider } from './memories/photoResolverService';
+import { getOrCreateTrekPhoto, getOrCreateLocalTrekPhoto, setTrekPhotoProvider, deleteTrekPhotoIfOrphan } from './memories/photoResolverService';
 
 function ts(): number {
   return Date.now();
@@ -718,6 +718,7 @@ export function deletePhoto(photoId: number, userId: number): (JourneyPhoto & { 
   if (!canEdit(photo.journey_id, userId)) return null;
 
   db.prepare('DELETE FROM journey_photos WHERE id = ?').run(photoId);
+  deleteTrekPhotoIfOrphan(photo.photo_id);
 
   // clean up empty Gallery entries left behind
   const remaining = db.prepare('SELECT 1 FROM journey_photos WHERE entry_id = ?').get(photo.entry_id);
