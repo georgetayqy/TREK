@@ -30,13 +30,14 @@ function photoUrl(p: JourneyPhoto, size: 'thumbnail' | 'original' = 'original'):
 
 interface Props {
   entry: JourneyEntry
+  readOnly?: boolean
   onClose: () => void
   onEdit: () => void
   onDelete: () => void
   onPhotoClick: (photos: JourneyPhoto[], index: number) => void
 }
 
-export default function MobileEntryView({ entry, onClose, onEdit, onDelete, onPhotoClick }: Props) {
+export default function MobileEntryView({ entry, readOnly, onClose, onEdit, onDelete, onPhotoClick }: Props) {
   const photos = entry.photos || []
   const mood = entry.mood ? MOOD_CONFIG[entry.mood] : null
   const weather = entry.weather ? WEATHER_CONFIG[entry.weather] : null
@@ -57,21 +58,23 @@ export default function MobileEntryView({ entry, onClose, onEdit, onDelete, onPh
         >
           <X size={20} />
         </button>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => { onClose(); onEdit(); }}
-            className="h-8 px-3 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-[12px] font-medium flex items-center gap-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-          >
-            <Pencil size={13} />
-            Edit
-          </button>
-          <button
-            onClick={() => { onClose(); onDelete(); }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
-          >
-            <Trash2 size={15} />
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => { onClose(); onEdit(); }}
+              className="h-8 px-3 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-[12px] font-medium flex items-center gap-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+            >
+              <Pencil size={13} />
+              Edit
+            </button>
+            <button
+              onClick={() => { onClose(); onDelete(); }}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400 transition-colors"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Scrollable content */}

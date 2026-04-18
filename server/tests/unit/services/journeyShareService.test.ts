@@ -176,13 +176,14 @@ describe('getJourneyShareLink', () => {
 });
 
 describe('deleteJourneyShareLink', () => {
-  it('JOURNEY-SHARE-007: removes an existing share link', () => {
+  it('JOURNEY-SHARE-007: owner can remove an existing share link', () => {
     const { user } = createUser(testDb);
     const journey = createJourney(testDb, user.id);
     createOrUpdateJourneyShareLink(journey.id, user.id, {});
 
-    deleteJourneyShareLink(journey.id);
+    const ok = deleteJourneyShareLink(journey.id, user.id);
 
+    expect(ok).toBe(true);
     expect(getJourneyShareLink(journey.id)).toBeNull();
   });
 
@@ -190,7 +191,7 @@ describe('deleteJourneyShareLink', () => {
     const { user } = createUser(testDb);
     const journey = createJourney(testDb, user.id);
 
-    expect(() => deleteJourneyShareLink(journey.id)).not.toThrow();
+    expect(() => deleteJourneyShareLink(journey.id, user.id)).not.toThrow();
   });
 });
 

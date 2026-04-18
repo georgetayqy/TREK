@@ -19,6 +19,7 @@ import {
   UserPlus, Plus, Minus, Calendar, Camera, BookOpen, X, Check, ImagePlus, Trash2, Pencil,
   Laugh, Smile, Meh, Annoyed, Frown,
   Sun, CloudSun, Cloud, CloudRain, CloudLightning, Snowflake, ChevronDown, Eye, EyeOff,
+  Archive, ArchiveRestore,
 } from 'lucide-react'
 import MobileMapTimeline from '../components/Journey/MobileMapTimeline'
 import MobileEntryView from '../components/Journey/MobileEntryView'
@@ -89,6 +90,12 @@ export default function JourneyDetailPage() {
   const [activeLocationId, setActiveLocationId] = useState<string | null>(null)
 
   const isMobile = useIsMobile()
+  // Role-based permissions (server-provided via my_role). Fall back to
+  // "owner" when the field isn't present yet (legacy responses) so behavior
+  // matches the pre-permissions era.
+  const myRole = (current as any)?.my_role ?? 'owner'
+  const canEditEntries = myRole === 'owner' || myRole === 'editor'
+  const canEditJourney = myRole === 'owner'
   const [view, setView] = useState<'timeline' | 'gallery' | 'map'>('timeline')
   const [viewingEntry, setViewingEntry] = useState<JourneyEntry | null>(null)
   const [editingEntry, setEditingEntry] = useState<JourneyEntry | null>(null)
@@ -234,11 +241,12 @@ export default function JourneyDetailPage() {
           entries={timelineEntries}
           mapEntries={sidebarMapItems}
           dark={document.documentElement.classList.contains('dark')}
+          readOnly={!canEditEntries}
           onEntryClick={(entry) => setViewingEntry(entry)}
-          onAddEntry={() => {
+          onAddEntry={canEditEntries ? () => {
             const today = new Date().toISOString().split('T')[0]
             setEditingEntry({ id: 0, journey_id: current.id, author_id: 0, type: 'entry', entry_date: today, visibility: 'private', sort_order: 0, photos: [], created_at: 0, updated_at: 0 } as JourneyEntry)
-          }}
+          } : undefined}
         />
       )}
 
@@ -246,6 +254,7 @@ export default function JourneyDetailPage() {
       {viewingEntry && (
         <MobileEntryView
           entry={viewingEntry}
+          readOnly={!canEditEntries}
           onClose={() => setViewingEntry(null)}
           onEdit={() => { setViewingEntry(null); setEditingEntry(viewingEntry); }}
           onDelete={() => { setViewingEntry(null); setDeleteTarget(viewingEntry); }}
@@ -253,25 +262,55 @@ export default function JourneyDetailPage() {
         />
       )}
 
-      {/* Floating tab toggle on mobile combined view */}
+      {/* Floating top bar on mobile combined view: back | tabs+title | settings */}
       {showMobileCombined && (
-        <div className="fixed top-[calc(var(--nav-h,56px)+12px)] left-4 z-30">
-          <div className="flex bg-white/90 dark:bg-zinc-800/90 backdrop-blur-lg border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden shadow-lg">
-            <button
-              onClick={() => setView('timeline')}
-              className="flex items-center gap-1.5 px-3 py-[7px] text-[12px] font-medium bg-zinc-900 dark:bg-white text-white dark:text-zinc-900"
-            >
-              <MapPin size={13} />
-              {t('journey.detail.journeyTab') || 'Journey'}
-            </button>
-            <button
-              onClick={() => setView('gallery')}
-              className="flex items-center gap-1.5 px-3 py-[7px] text-[12px] font-medium text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-            >
-              <Grid size={13} />
-              {t('journey.share.gallery')}
-            </button>
+        <div
+          className="fixed left-0 right-0 z-30 flex items-start justify-between gap-2 px-4"
+          style={{ top: 'calc(var(--nav-h, 56px) + 12px)' }}
+        >
+          <button
+            onClick={() => navigate('/journey')}
+            aria-label={t('journey.detail.backToJourney')}
+            className="w-10 h-10 flex-shrink-0 rounded-lg bg-white/90 dark:bg-zinc-800/90 backdrop-blur-lg border border-zinc-200 dark:border-zinc-700 shadow-lg text-zinc-700 dark:text-zinc-200 flex items-center justify-center hover:bg-white dark:hover:bg-zinc-800 active:scale-95 transition-transform"
+          >
+            <ArrowLeft size={16} />
+          </button>
+
+          <div className="flex-1 min-w-0 flex flex-col items-center gap-1">
+            <div className="flex bg-white/90 dark:bg-zinc-800/90 backdrop-blur-lg border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden shadow-lg">
+              <button
+                onClick={() => setView('timeline')}
+                className="flex items-center gap-1.5 px-3 py-[7px] text-[12px] font-medium bg-zinc-900 dark:bg-white text-white dark:text-zinc-900"
+              >
+                <MapPin size={13} />
+                {t('journey.detail.journeyTab') || 'Journey'}
+              </button>
+              <button
+                onClick={() => setView('gallery')}
+                className="flex items-center gap-1.5 px-3 py-[7px] text-[12px] font-medium text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              >
+                <Grid size={13} />
+                {t('journey.share.gallery')}
+              </button>
+            </div>
+            {current?.title && (
+              <div className="max-w-full truncate text-center text-[11px] font-medium text-zinc-700 dark:text-zinc-200 px-2.5 py-0.5 rounded-full bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm">
+                {current.title}
+              </div>
+            )}
           </div>
+
+          {canEditJourney ? (
+            <button
+              onClick={() => setShowSettings(true)}
+              aria-label={t('journey.settings.title')}
+              className="w-10 h-10 flex-shrink-0 rounded-lg bg-white/90 dark:bg-zinc-800/90 backdrop-blur-lg border border-zinc-200 dark:border-zinc-700 shadow-lg text-zinc-700 dark:text-zinc-200 flex items-center justify-center hover:bg-white dark:hover:bg-zinc-800 active:scale-95 transition-transform"
+            >
+              <MoreHorizontal size={16} />
+            </button>
+          ) : (
+            <div className="w-10 h-10 flex-shrink-0" aria-hidden />
+          )}
         </div>
       )}
 
@@ -345,7 +384,9 @@ export default function JourneyDetailPage() {
                         {hideSkeletons ? t('journey.skeletons.show') : t('journey.skeletons.hide')}
                       </span>
                     </div>
-                    <button onClick={() => setShowSettings(true)} className="w-[34px] h-[34px] rounded-lg bg-white/15 backdrop-blur flex items-center justify-center hover:bg-white/25"><MoreHorizontal size={14} /></button>
+                    {canEditJourney && (
+                      <button onClick={() => setShowSettings(true)} className="w-[34px] h-[34px] rounded-lg bg-white/15 backdrop-blur flex items-center justify-center hover:bg-white/25"><MoreHorizontal size={14} /></button>
+                    )}
                   </div>
                 </div>
 
@@ -405,7 +446,7 @@ export default function JourneyDetailPage() {
                     </button>
                   ))}
                 </div>
-                {(!isMobile ? view === 'timeline' : view !== 'gallery') && (
+                {canEditEntries && (!isMobile ? view === 'timeline' : view !== 'gallery') && (
                   <button
                     onClick={() => {
                       const today = new Date().toISOString().split('T')[0]
@@ -455,12 +496,13 @@ export default function JourneyDetailPage() {
                         {entries.map(entry => (
                           <div key={entry.id} data-entry-id={String(entry.id)}>
                             {entry.type === 'skeleton' ? (
-                              <SkeletonCard entry={entry} onClick={() => setEditingEntry(entry)} />
+                              <SkeletonCard entry={entry} onClick={canEditEntries ? () => setEditingEntry(entry) : undefined} />
                             ) : entry.type === 'checkin' ? (
-                              <CheckinCard entry={entry} onClick={() => setEditingEntry(entry)} />
+                              <CheckinCard entry={entry} onClick={canEditEntries ? () => setEditingEntry(entry) : undefined} />
                             ) : (
                               <EntryCard
                                 entry={entry}
+                                readOnly={!canEditEntries}
                                 onEdit={() => setEditingEntry(entry)}
                                 onDelete={() => setDeleteTarget(entry)}
                                 onPhotoClick={(photos, idx) => setLightbox({ photos: photos.map(p => ({ id: p.id, src: photoUrl(p, 'original'), caption: p.caption, provider: p.provider, asset_id: p.asset_id, owner_id: p.owner_id })), index: idx })}
@@ -911,12 +953,14 @@ function GalleryView({ entries, journeyId, userId, trips, onPhotoClick, onRefres
     if (!files?.length) return
     setGalleryUploading(true)
     try {
-      // find existing "Gallery" entry or create one
+      // find existing "Gallery" entry or create one. The stored title is the
+      // literal 'Gallery' (server-side checks look for this exact string) —
+      // do not send a translated label here.
       let galleryEntry = entries.find(e => e.title === 'Gallery' && e.type === 'entry')
       let entryId = galleryEntry?.id
       if (!entryId) {
         const entry = await journeyApi.createEntry(journeyId, {
-          title: t('journey.share.gallery'),
+          title: 'Gallery',
           entry_date: new Date().toISOString().split('T')[0],
           type: 'entry',
         })
@@ -1057,7 +1101,7 @@ function GalleryView({ entries, journeyId, userId, trips, onPhotoClick, onRefres
             if (!targetId) {
               try {
                 const entry = await journeyApi.createEntry(journeyId, {
-                  title: t('journey.share.gallery'),
+                  title: 'Gallery',
                   entry_date: new Date().toISOString().split('T')[0],
                   type: 'entry',
                 })
@@ -1233,8 +1277,9 @@ function VerdictSection({ pros, cons }: { pros: string[]; cons: string[] }) {
 
 // ── Entry Card ────────────────────────────────────────────────────────────
 
-function EntryCard({ entry, onEdit, onDelete, onPhotoClick }: {
+function EntryCard({ entry, readOnly, onEdit, onDelete, onPhotoClick }: {
   entry: JourneyEntry
+  readOnly?: boolean
   onEdit: () => void
   onDelete: () => void
   onPhotoClick: (photos: JourneyPhoto[], index: number) => void
@@ -1277,20 +1322,22 @@ function EntryCard({ entry, onEdit, onDelete, onPhotoClick }: {
           </div>
 
           {/* Menu top-right */}
-          <div className="absolute top-2.5 right-3 z-[2]">
-            <button ref={menuBtnRef} onClick={() => setMenuOpen(!menuOpen)} className="w-8 h-8 rounded-[10px] bg-black/40 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/50">
-              <MoreHorizontal size={14} />
-            </button>
-            {menuOpen && (
-              <>
-                <div className="fixed inset-0 z-[99]" onClick={() => setMenuOpen(false)} />
-                <div className="fixed z-[100] bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 min-w-[120px]" style={{ top: (menuBtnRef.current?.getBoundingClientRect().bottom || 0) + 4, right: window.innerWidth - (menuBtnRef.current?.getBoundingClientRect().right || 0) }}>
-                  <button onClick={() => { setMenuOpen(false); onEdit() }} className="w-full text-left px-3 py-1.5 text-[12px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 flex items-center gap-2"><Pencil size={12} /> {t('common.edit')}</button>
-                  <button onClick={() => { setMenuOpen(false); onDelete() }} className="w-full text-left px-3 py-1.5 text-[12px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"><Trash2 size={12} /> {t('common.delete')}</button>
-                </div>
-              </>
-            )}
-          </div>
+          {!readOnly && (
+            <div className="absolute top-2.5 right-3 z-[2]">
+              <button ref={menuBtnRef} onClick={() => setMenuOpen(!menuOpen)} className="w-8 h-8 rounded-[10px] bg-black/40 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/50">
+                <MoreHorizontal size={14} />
+              </button>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-[99]" onClick={() => setMenuOpen(false)} />
+                  <div className="fixed z-[100] bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 min-w-[120px]" style={{ top: (menuBtnRef.current?.getBoundingClientRect().bottom || 0) + 4, right: window.innerWidth - (menuBtnRef.current?.getBoundingClientRect().right || 0) }}>
+                    <button onClick={() => { setMenuOpen(false); onEdit() }} className="w-full text-left px-3 py-1.5 text-[12px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 flex items-center gap-2"><Pencil size={12} /> {t('common.edit')}</button>
+                    <button onClick={() => { setMenuOpen(false); onDelete() }} className="w-full text-left px-3 py-1.5 text-[12px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"><Trash2 size={12} /> {t('common.delete')}</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Title on photo */}
           {entry.title && (
@@ -1314,20 +1361,22 @@ function EntryCard({ entry, onEdit, onDelete, onPhotoClick }: {
               </span>
             )}
           </div>
-          <div className="relative">
-            <button ref={menuBtnRef} onClick={() => setMenuOpen(!menuOpen)} className="w-7 h-7 rounded-md flex items-center justify-center text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-              <MoreHorizontal size={14} />
-            </button>
-            {menuOpen && (
-              <>
-                <div className="fixed inset-0 z-[99]" onClick={() => setMenuOpen(false)} />
-                <div className="fixed z-[100] bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 min-w-[120px]" style={{ top: (menuBtnRef.current?.getBoundingClientRect().bottom || 0) + 4, right: window.innerWidth - (menuBtnRef.current?.getBoundingClientRect().right || 0) }}>
-                  <button onClick={() => { setMenuOpen(false); onEdit() }} className="w-full text-left px-3 py-1.5 text-[12px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 flex items-center gap-2"><Pencil size={12} /> {t('common.edit')}</button>
-                  <button onClick={() => { setMenuOpen(false); onDelete() }} className="w-full text-left px-3 py-1.5 text-[12px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"><Trash2 size={12} /> {t('common.delete')}</button>
-                </div>
-              </>
-            )}
-          </div>
+          {!readOnly && (
+            <div className="relative">
+              <button ref={menuBtnRef} onClick={() => setMenuOpen(!menuOpen)} className="w-7 h-7 rounded-md flex items-center justify-center text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <MoreHorizontal size={14} />
+              </button>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-[99]" onClick={() => setMenuOpen(false)} />
+                  <div className="fixed z-[100] bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 min-w-[120px]" style={{ top: (menuBtnRef.current?.getBoundingClientRect().bottom || 0) + 4, right: window.innerWidth - (menuBtnRef.current?.getBoundingClientRect().right || 0) }}>
+                    <button onClick={() => { setMenuOpen(false); onEdit() }} className="w-full text-left px-3 py-1.5 text-[12px] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 flex items-center gap-2"><Pencil size={12} /> {t('common.edit')}</button>
+                    <button onClick={() => { setMenuOpen(false); onDelete() }} className="w-full text-left px-3 py-1.5 text-[12px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"><Trash2 size={12} /> {t('common.delete')}</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1366,12 +1415,12 @@ function EntryCard({ entry, onEdit, onDelete, onPhotoClick }: {
   )
 }
 
-function SkeletonCard({ entry, onClick }: { entry: JourneyEntry; onClick: () => void }) {
+function SkeletonCard({ entry, onClick }: { entry: JourneyEntry; onClick?: () => void }) {
   const { t } = useTranslation()
   return (
     <div
       onClick={onClick}
-      className="bg-white dark:bg-zinc-900 border border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3.5 flex items-center gap-3 transition-[border-color,border-style] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-solid hover:border-zinc-400 dark:hover:border-zinc-500 cursor-pointer"
+      className={`bg-white dark:bg-zinc-900 border border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3.5 flex items-center gap-3 transition-[border-color,border-style] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] ${onClick ? 'hover:border-solid hover:border-zinc-400 dark:hover:border-zinc-500 cursor-pointer' : ''}`}
     >
       <div className="w-9 h-9 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 flex-shrink-0">
         <MapPin size={14} />
@@ -1391,11 +1440,11 @@ function SkeletonCard({ entry, onClick }: { entry: JourneyEntry; onClick: () => 
   )
 }
 
-function CheckinCard({ entry, onClick }: { entry: JourneyEntry; onClick: () => void }) {
+function CheckinCard({ entry, onClick }: { entry: JourneyEntry; onClick?: () => void }) {
   return (
     <div
       onClick={onClick}
-      className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3.5 py-2.5 flex items-center gap-2.5 transition-colors duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-zinc-400 dark:hover:border-zinc-500 cursor-pointer"
+      className={`bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3.5 py-2.5 flex items-center gap-2.5 transition-colors duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] ${onClick ? 'hover:border-zinc-400 dark:hover:border-zinc-500 cursor-pointer' : ''}`}
     >
       <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
         <MapPin size={13} />
@@ -2082,6 +2131,31 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
   const fileRef = useRef<HTMLInputElement>(null)
   const storyRef = useRef<HTMLTextAreaElement>(null)
 
+  // Track which fields differ from the entry we started editing so we can
+  // warn before discarding on close/cancel.
+  const originalPros = (entry.pros_cons?.pros ?? []).join('\n')
+  const originalCons = (entry.pros_cons?.cons ?? []).join('\n')
+  const isDirty = (
+    title !== (entry.title || '') ||
+    story !== (entry.story || '') ||
+    entryDate !== (entry.entry_date || new Date().toISOString().split('T')[0]) ||
+    entryTime !== (entry.entry_time || '') ||
+    locationName !== (entry.location_name || '') ||
+    (locationLat ?? null) !== (entry.location_lat ?? null) ||
+    (locationLng ?? null) !== (entry.location_lng ?? null) ||
+    mood !== (entry.mood || '') ||
+    weather !== (entry.weather || '') ||
+    pros.filter(p => p.trim()).join('\n') !== originalPros ||
+    cons.filter(c => c.trim()).join('\n') !== originalCons ||
+    pendingFiles.length > 0 ||
+    pendingLinkIds.length > 0
+  )
+
+  const handleClose = () => {
+    if (isDirty && !window.confirm(t('journey.editor.discardChangesConfirm'))) return
+    onClose()
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -2096,7 +2170,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
         mood: mood || null,
         weather: weather || null,
         pros_cons: { pros: pros.filter(p => p.trim()), cons: cons.filter(c => c.trim()) },
-        type: (entry.type === 'skeleton' && story.trim()) ? 'entry' : undefined,
+        type: ((entry.type === 'skeleton' && (story.trim() || pendingFiles.length > 0 || pendingLinkIds.length > 0)) ? 'entry' : undefined),
       })
       // upload queued files after entry is created
       if (pendingFiles.length > 0 && entryId) {
@@ -2119,20 +2193,9 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files?.length) return
-    if (entry.id === 0) {
-      // queue files for upload after save
-      setPendingFiles(prev => [...prev, ...Array.from(files)])
-    } else {
-      setUploading(true)
-      try {
-        const formData = new FormData()
-        for (const f of files) formData.append('photos', f)
-        const newPhotos = await onUploadPhotos(entry.id, formData)
-        if (newPhotos?.length) setPhotos(prev => [...prev, ...newPhotos])
-      } finally {
-        setUploading(false)
-      }
-    }
+    // Queue files locally until Save so cancel/close actually discards. This
+    // keeps photo behavior consistent with text fields — no silent persistence.
+    setPendingFiles(prev => [...prev, ...Array.from(files)])
   }
 
   return (
@@ -2142,7 +2205,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
 
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-700">
           <h2 className="text-[16px] font-bold text-zinc-900 dark:text-white">{entry.id === 0 ? t('journey.detail.newEntry') : t('journey.detail.editEntry')}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <button onClick={handleClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <X size={16} />
           </button>
         </div>
@@ -2474,7 +2537,7 @@ function EntryEditor({ entry, journeyId, tripDates, galleryPhotos, onClose, onSa
 
 
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50" style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))' }}>
-          <button onClick={onClose} className="px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-zinc-600 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">{t('common.cancel')}</button>
+          <button onClick={handleClose} className="px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-zinc-600 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">{t('common.cancel')}</button>
           <button onClick={handleSave} disabled={saving} className="px-3.5 py-2 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[13px] font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 disabled:opacity-50">
             {saving ? t('common.saving') : t('common.save')}
           </button>
@@ -2893,7 +2956,7 @@ function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite }: {
 
   return (
     <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center md:p-5 overscroll-none" style={{ background: 'rgba(9,9,11,0.75)' }} onClick={onClose} onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault() }}>
-      <div className="bg-white dark:bg-zinc-900 rounded-t-2xl md:rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.2)] max-w-[480px] w-full max-h-[85vh] md:max-h-[90vh] flex flex-col overflow-hidden" style={{ paddingBottom: 'var(--bottom-nav-h)' }} onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-zinc-900 rounded-t-2xl md:rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.2)] max-w-[480px] w-full max-h-[85vh] md:max-h-[90vh] flex flex-col overflow-hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }} onClick={e => e.stopPropagation()}>
 
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-700">
           <h2 className="text-[16px] font-bold text-zinc-900 dark:text-white">{t('journey.settings.title')}</h2>
@@ -2986,6 +3049,25 @@ function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite }: {
                   </div>
                   <div className="flex-1 text-[12px] font-medium text-zinc-900 dark:text-white">{c.username}</div>
                   <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${c.role === 'owner' ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>{c.role}</span>
+                  {c.role !== 'owner' && (
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm(t('journey.contributors.removeConfirm', { username: c.username }))) return
+                        try {
+                          await journeyApi.removeContributor(journey.id, c.user_id)
+                          toast.success(t('journey.contributors.removed'))
+                          onSaved()
+                        } catch {
+                          toast.error(t('journey.contributors.removeFailed'))
+                        }
+                      }}
+                      aria-label={t('journey.contributors.remove')}
+                      title={t('journey.contributors.remove')}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-zinc-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500 transition-colors"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
                 </div>
               ))}
               <button
@@ -3005,24 +3087,28 @@ function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite }: {
         </div>
 
         {/* Footer */}
-        <div className="flex flex-wrap items-center gap-2 px-6 py-4 pb-6 md:pb-4 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50">
+        <div className="flex items-center gap-1.5 px-4 md:px-6 py-4 pb-6 md:pb-4 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50">
           <button
             onClick={() => setShowDeleteConfirm(true)}
-            className="flex items-center gap-1.5 text-[12px] font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg px-2.5 py-2"
+            aria-label={t('journey.settings.delete')}
+            title={t('journey.settings.delete')}
+            className="flex items-center justify-center gap-1.5 h-9 min-w-9 px-2 md:px-2.5 text-[12px] font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
           >
-            <Trash2 size={13} />
-            {t('journey.settings.delete')}
+            <Trash2 size={14} />
+            <span className="hidden md:inline">{t('journey.settings.delete')}</span>
           </button>
           <button
             onClick={handleArchiveToggle}
             disabled={archiving}
-            className="flex items-center gap-1.5 text-[12px] font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg px-2.5 py-2 mr-auto disabled:opacity-40"
+            aria-label={journey.status === 'archived' ? t('journey.settings.reopenJourney') : t('journey.settings.endJourney')}
             title={t('journey.settings.endDescription')}
+            className="flex items-center justify-center gap-1.5 h-9 min-w-9 px-2 md:px-2.5 text-[12px] font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-lg mr-auto disabled:opacity-40"
           >
-            {journey.status === 'archived' ? t('journey.settings.reopenJourney') : t('journey.settings.endJourney')}
+            {journey.status === 'archived' ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+            <span className="hidden md:inline">{journey.status === 'archived' ? t('journey.settings.reopenJourney') : t('journey.settings.endJourney')}</span>
           </button>
-          <button onClick={onClose} className="px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-zinc-600 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">{t('common.cancel')}</button>
-          <button onClick={handleSave} disabled={saving || !title.trim()} className="px-3.5 py-2 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[13px] font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 disabled:opacity-40">
+          <button onClick={onClose} className="h-9 px-3.5 rounded-lg border border-zinc-200 dark:border-zinc-600 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">{t('common.cancel')}</button>
+          <button onClick={handleSave} disabled={saving || !title.trim()} className="h-9 px-3.5 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[13px] font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 disabled:opacity-40">
             {saving ? t('common.saving') : t('common.save')}
           </button>
         </div>

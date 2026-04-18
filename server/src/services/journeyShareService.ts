@@ -1,5 +1,6 @@
 import { db } from '../db/database';
 import crypto from 'crypto';
+import { isOwner } from './journeyService';
 
 interface JourneySharePermissions {
   share_timeline?: boolean;
@@ -19,7 +20,11 @@ export function createOrUpdateJourneyShareLink(
   journeyId: number,
   createdBy: number,
   permissions: JourneySharePermissions
-): { token: string; created: boolean } {
+): { token: string; created: boolean } | null {
+  // Public sharing is an owner-only action — editors/viewers must not be
+  // able to publish the journey or change which screens are shared.
+  if (!isOwner(journeyId, createdBy)) return null;
+
   const {
     share_timeline = true,
     share_gallery = true,
@@ -51,8 +56,10 @@ export function getJourneyShareLink(journeyId: number): JourneyShareTokenInfo | 
   };
 }
 
-export function deleteJourneyShareLink(journeyId: number): void {
+export function deleteJourneyShareLink(journeyId: number, userId: number): boolean {
+  if (!isOwner(journeyId, userId)) return false;
   db.prepare('DELETE FROM journey_share_tokens WHERE journey_id = ?').run(journeyId);
+  return true;
 }
 
 export function validateShareTokenForPhoto(token: string, photoId: number): { journeyId: number; ownerId: number } | null {

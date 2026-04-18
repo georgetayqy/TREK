@@ -25,10 +25,16 @@ export function isValidAssetId(id: string): boolean {
 
 export function getConnectionSettings(userId: number) {
   const creds = getImmichCredentials(userId);
+  const prefs = db.prepare('SELECT immich_auto_upload FROM users WHERE id = ?').get(userId) as { immich_auto_upload?: number } | undefined;
   return {
     immich_url: creds?.immich_url || '',
     connected: !!(creds?.immich_url && creds?.immich_api_key),
+    auto_upload: !!(prefs?.immich_auto_upload),
   };
+}
+
+export function setImmichAutoUpload(userId: number, enabled: boolean): void {
+  db.prepare('UPDATE users SET immich_auto_upload = ? WHERE id = ?').run(enabled ? 1 : 0, userId);
 }
 
 export async function saveImmichSettings(

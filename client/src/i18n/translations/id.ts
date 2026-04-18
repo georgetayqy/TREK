@@ -1636,6 +1636,7 @@ const id: Record<string, string | { name: string; category: string }[]> = {
   'memories.providerPassword': 'Kata sandi',
   'memories.providerOTP': 'Kode MFA (jika diaktifkan)',
   'memories.skipSSLVerification': 'Lewati verifikasi sertifikat SSL',
+  'memories.immichAutoUpload': 'Salin foto journey ke Immich saat diunggah',
   'memories.providerUrlHintSynology': 'Sertakan path aplikasi Photos di URL, mis. https://nas:5001/photo',
   'memories.testConnection': 'Uji koneksi',
   'memories.testFirst': 'Uji koneksi terlebih dahulu',
@@ -2042,6 +2043,7 @@ const id: Record<string, string | { name: string; category: string }[]> = {
   'journey.synced.synced': 'tersinkron',
 
   // Journey Entry Editor
+  'journey.editor.discardChangesConfirm': 'Anda memiliki perubahan yang belum disimpan. Buang?',
   'journey.editor.uploadPhotos': 'Unggah foto',
   'journey.editor.uploading': 'Mengunggah...',
   'journey.editor.fromGallery': 'Dari Galeri',

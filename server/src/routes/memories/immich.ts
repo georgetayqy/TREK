@@ -7,6 +7,7 @@ import { getClientIp } from '../../services/auditLog';
 import {
   getConnectionSettings,
   saveImmichSettings,
+  setImmichAutoUpload,
   testConnection,
   getConnectionStatus,
   browseTimeline,
@@ -31,9 +32,12 @@ router.get('/settings', authenticate, (req: Request, res: Response) => {
 
 router.put('/settings', authenticate, async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
-  const { immich_url, immich_api_key } = req.body;
+  const { immich_url, immich_api_key, auto_upload } = req.body;
   const result = await saveImmichSettings(authReq.user.id, immich_url, immich_api_key, getClientIp(req));
   if (!result.success) return res.status(400).json({ error: result.error });
+  if (typeof auto_upload === 'boolean') {
+    setImmichAutoUpload(authReq.user.id, auto_upload);
+  }
   if (result.warning) return res.json({ success: true, warning: result.warning });
   res.json({ success: true });
 });

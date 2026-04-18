@@ -167,6 +167,19 @@ export function getJourneyFull(journeyId: number, userId: number) {
     'SELECT hide_skeletons FROM journey_contributors WHERE journey_id = ? AND user_id = ?'
   ).get(journeyId, userId) as { hide_skeletons: number } | undefined;
 
+  // Determine the viewer's role on this journey so the UI can gate edit/settings
+  // actions. 'owner' = creator, 'editor' | 'viewer' = from journey_contributors.
+  const journeyRow = journey as unknown as { user_id?: number };
+  let myRole: 'owner' | 'editor' | 'viewer' | null = null;
+  if (journeyRow.user_id === userId) {
+    myRole = 'owner';
+  } else {
+    const contribRow = db.prepare(
+      'SELECT role FROM journey_contributors WHERE journey_id = ? AND user_id = ?'
+    ).get(journeyId, userId) as { role: 'editor' | 'viewer' } | undefined;
+    myRole = contribRow?.role ?? null;
+  }
+
   return {
     ...journey,
     entries: enrichedEntries,
@@ -174,6 +187,7 @@ export function getJourneyFull(journeyId: number, userId: number) {
     contributors,
     stats: { entries: entryCount, photos: photoCount, places: places.length },
     hide_skeletons: !!(userPrefs?.hide_skeletons),
+    my_role: myRole,
   };
 }
 
@@ -184,7 +198,9 @@ export function updateJourney(journeyId: number, userId: number, data: Partial<{
   cover_image: string;
   status: string;
 }>): Journey | null {
-  if (!canEdit(journeyId, userId)) return null;
+  // Journey-level settings (title, cover, status) are owner-only — editors
+  // may only edit entries and photos, not reshape the journey itself.
+  if (!isOwner(journeyId, userId)) return null;
 
   const ALLOWED_STATUSES = ['draft', 'active', 'completed', 'archived'];
   const allowed = ['title', 'subtitle', 'cover_gradient', 'cover_image', 'status'];
@@ -615,6 +631,14 @@ export function deleteEntry(entryId: number, userId: number, sid?: string): bool
 
 // ── Photos ───────────────────────────────────────────────────────────────
 
+// Promote a skeleton suggestion to a concrete entry. Called whenever the user
+// adds content (photo upload, provider photo, gallery link) — a suggestion
+// with photos is no longer just a suggestion.
+function promoteSkeletonIfNeeded(entry: JourneyEntry): void {
+  if (entry.type !== 'skeleton') return;
+  db.prepare('UPDATE journey_entries SET type = ?, updated_at = ? WHERE id = ?').run('entry', ts(), entry.id);
+}
+
 export function addPhoto(entryId: number, userId: number, filePath: string, thumbnailPath?: string, caption?: string): JourneyPhoto | null {
   const entry = db.prepare('SELECT * FROM journey_entries WHERE id = ?').get(entryId) as JourneyEntry | undefined;
   if (!entry) return null;
@@ -628,6 +652,8 @@ export function addPhoto(entryId: number, userId: number, filePath: string, thum
     INSERT INTO journey_photos (entry_id, photo_id, caption, sort_order, created_at)
     VALUES (?, ?, ?, ?, ?)
   `).run(entryId, trekPhotoId, caption || null, (maxOrder?.m ?? -1) + 1, now);
+
+  promoteSkeletonIfNeeded(entry);
 
   return db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(Number(res.lastInsertRowid)) as JourneyPhoto;
 }
@@ -651,6 +677,8 @@ export function addProviderPhoto(entryId: number, userId: number, provider: stri
     VALUES (?, ?, ?, ?, ?)
   `).run(entryId, trekPhotoId, caption || null, (maxOrder?.m ?? -1) + 1, now);
 
+  promoteSkeletonIfNeeded(entry);
+
   return db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(Number(res.lastInsertRowid)) as JourneyPhoto;
 }
 
@@ -664,21 +692,41 @@ export function linkPhotoToEntry(entryId: number, photoId: number, userId: numbe
 
   if (source.entry_id === entryId) return source;
 
-  const oldEntryId = source.entry_id;
+  const oldEntry = db.prepare('SELECT * FROM journey_entries WHERE id = ?').get(source.entry_id) as JourneyEntry | undefined;
+  const sourceIsGallery = oldEntry?.title === 'Gallery';
 
-  // move photo to the target entry
-  db.prepare('UPDATE journey_photos SET entry_id = ? WHERE id = ?').run(entryId, photoId);
+  // skip if target already has this photo (by trek_photo_id)
+  const dupe = db.prepare('SELECT id FROM journey_photos WHERE entry_id = ? AND photo_id = ?').get(entryId, source.photo_id) as { id: number } | undefined;
+  if (dupe) return db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(dupe.id) as JourneyPhoto;
 
-  // clean up: if old entry was a "Gallery" entry and is now empty, delete it
-  const oldEntry = db.prepare('SELECT * FROM journey_entries WHERE id = ?').get(oldEntryId) as JourneyEntry | undefined;
-  if (oldEntry && oldEntry.title === 'Gallery') {
-    const remaining = db.prepare('SELECT COUNT(*) as c FROM journey_photos WHERE entry_id = ?').get(oldEntryId) as { c: number };
+  const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM journey_photos WHERE entry_id = ?').get(entryId) as { m: number | null };
+  let resultId: number;
+
+  if (sourceIsGallery) {
+    // Copy so the photo stays in the gallery even after being used in an entry.
+    const res = db.prepare(`
+      INSERT INTO journey_photos (entry_id, photo_id, caption, sort_order, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(entryId, source.photo_id, source.caption || null, (maxOrder?.m ?? -1) + 1, ts());
+    resultId = Number(res.lastInsertRowid);
+  } else {
+    // Non-gallery source: keep existing move behavior.
+    db.prepare('UPDATE journey_photos SET entry_id = ? WHERE id = ?').run(entryId, photoId);
+    resultId = photoId;
+  }
+
+  promoteSkeletonIfNeeded(entry);
+
+  // If we moved out of a Gallery entry (shouldn't happen with the guard above,
+  // but kept for any legacy data), clean up the Gallery wrapper if emptied.
+  if (!sourceIsGallery && oldEntry && oldEntry.title === 'Gallery') {
+    const remaining = db.prepare('SELECT COUNT(*) as c FROM journey_photos WHERE entry_id = ?').get(source.entry_id) as { c: number };
     if (remaining.c === 0) {
-      db.prepare('DELETE FROM journey_entries WHERE id = ?').run(oldEntryId);
+      db.prepare('DELETE FROM journey_entries WHERE id = ?').run(source.entry_id);
     }
   }
 
-  return db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(photoId) as JourneyPhoto;
+  return db.prepare(`SELECT ${JP_SELECT} FROM ${JP_JOIN} WHERE jp.id = ?`).get(resultId) as JourneyPhoto;
 }
 
 export function setPhotoProvider(photoId: number, provider: string, assetId: string, ownerId: number) {

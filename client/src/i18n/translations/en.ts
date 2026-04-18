@@ -1638,6 +1638,7 @@ const en: Record<string, string | { name: string; category: string }[]> = {
   'memories.providerPassword': 'Password',
   'memories.providerOTP': 'MFA code (if enabled)',
   'memories.skipSSLVerification': 'Skip SSL certificate verification',
+  'memories.immichAutoUpload': 'Mirror journey photos to Immich on upload',
   'memories.providerUrlHintSynology': 'Include the Photos app path in the URL, e.g. https://nas:5001/photo',
   'memories.testConnection': 'Test connection',
   'memories.testFirst': 'Test connection first',
@@ -2045,6 +2046,7 @@ const en: Record<string, string | { name: string; category: string }[]> = {
   'journey.synced.synced': 'synced',
 
   // Journey Entry Editor
+  'journey.editor.discardChangesConfirm': 'You have unsaved changes. Discard them?',
   'journey.editor.uploadPhotos': 'Upload photos',
   'journey.editor.uploading': 'Uploading...',
   'journey.editor.fromGallery': 'From Gallery',
@@ -2103,6 +2105,10 @@ const en: Record<string, string | { name: string; category: string }[]> = {
   'journey.contributors.role': 'Role',
   'journey.contributors.added': 'Contributor added',
   'journey.contributors.addFailed': 'Failed to add contributor',
+  'journey.contributors.remove': 'Remove contributor',
+  'journey.contributors.removeConfirm': 'Remove {username} from this journey?',
+  'journey.contributors.removed': 'Contributor removed',
+  'journey.contributors.removeFailed': 'Failed to remove contributor',
 
   // Journey — Share
   'journey.share.publicShare': 'Public Share',

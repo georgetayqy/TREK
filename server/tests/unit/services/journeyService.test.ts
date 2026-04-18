@@ -318,7 +318,9 @@ describe('updateJourney', () => {
     expect(updated!.subtitle).toBe('New Sub');
   });
 
-  it('JOURNEY-SVC-019: editor contributor can update', () => {
+  it('JOURNEY-SVC-019: editor contributor cannot update journey settings (#732)', () => {
+    // Post-#732: journey-level settings (title/cover/status) are owner-only.
+    // Editors keep access to entries and photos, but not the journey shell.
     const { user: owner } = createUser(testDb);
     const { user: editor } = createUser(testDb);
     const journey = createJourney(testDb, owner.id, { title: 'Original' });
@@ -326,8 +328,7 @@ describe('updateJourney', () => {
 
     const updated = updateJourney(journey.id, editor.id, { title: 'Edited' });
 
-    expect(updated).not.toBeNull();
-    expect(updated!.title).toBe('Edited');
+    expect(updated).toBeNull();
   });
 
   it('JOURNEY-SVC-020: viewer cannot update', () => {

@@ -3579,8 +3579,8 @@ describe('JourneyDetailPage', () => {
   });
 
   // ── FE-PAGE-JOURNEYDETAIL-148 ──────────────────────────────────────────
-  describe('FE-PAGE-JOURNEYDETAIL-148: EntryEditor file upload for existing entry calls API directly', () => {
-    it('uploading a file on an existing entry calls the upload API immediately', async () => {
+  describe('FE-PAGE-JOURNEYDETAIL-148: EntryEditor queues file uploads until save (#727)', () => {
+    it('uploading a file on an existing entry stays pending until Save is clicked', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       let uploadCalled = false;
 
@@ -3618,7 +3618,11 @@ describe('JourneyDetailPage', () => {
       const testFile = new File(['data'], 'upload.jpg', { type: 'image/jpeg' });
       await user.upload(fileInput, testFile);
 
-      // For existing entries, upload happens immediately
+      // Picked file is queued locally — upload should NOT fire until Save.
+      expect(uploadCalled).toBe(false);
+
+      // Saving triggers the queued upload.
+      await user.click(screen.getByText('Save'));
       await waitFor(() => {
         expect(uploadCalled).toBe(true);
       });

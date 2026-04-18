@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { authenticate } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import * as svc from '../services/journeyService';
+import { db } from '../db/database';
 import { createOrUpdateJourneyShareLink, getJourneyShareLink, deleteJourneyShareLink, getPublicJourney } from '../services/journeyShareService';
 import { uploadToImmich } from '../services/memories/immichService';
 
@@ -95,16 +96,21 @@ router.post('/entries/:entryId/photos', authenticate, upload.array('photos', 10)
       req.body?.caption
     );
     if (photo) {
-      // sync to Immich if connected — update the same photo record
-      try {
-        const immichId = await uploadToImmich(authReq.user.id, relativePath, file.originalname);
-        if (immichId) {
-          svc.setPhotoProvider(photo.id, 'immich', immichId, authReq.user.id);
-          photo.provider = 'immich' as any;
-          photo.asset_id = immichId;
-          photo.owner_id = authReq.user.id;
-        }
-      } catch {}
+      // Mirror to Immich only when the user has explicitly opted in via the
+      // Immich integration settings. Avoids the "surprise upload" in #730
+      // where a write-capable API key implicitly enabled mirroring.
+      const prefs = db.prepare('SELECT immich_auto_upload FROM users WHERE id = ?').get(authReq.user.id) as { immich_auto_upload?: number } | undefined;
+      if (prefs?.immich_auto_upload) {
+        try {
+          const immichId = await uploadToImmich(authReq.user.id, relativePath, file.originalname);
+          if (immichId) {
+            svc.setPhotoProvider(photo.id, 'immich', immichId, authReq.user.id);
+            photo.provider = 'immich' as any;
+            photo.asset_id = immichId;
+            photo.owner_id = authReq.user.id;
+          }
+        } catch {}
+      }
       results.push(photo);
     }
   }
@@ -301,11 +307,15 @@ router.post('/:id/share-link', authenticate, (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const { share_timeline, share_gallery, share_map } = req.body || {};
   const result = createOrUpdateJourneyShareLink(Number(req.params.id), authReq.user.id, { share_timeline, share_gallery, share_map });
+  if (!result) return res.status(403).json({ error: 'Not allowed' });
   res.json(result);
 });
 
 router.delete('/:id/share-link', authenticate, (req: Request, res: Response) => {
-  deleteJourneyShareLink(Number(req.params.id));
+  const authReq = req as AuthRequest;
+  if (!deleteJourneyShareLink(Number(req.params.id), authReq.user.id)) {
+    return res.status(403).json({ error: 'Not allowed' });
+  }
   res.json({ success: true });
 });
 

@@ -39,6 +39,8 @@ export default function MobileMapTimeline({
   const carouselRef = useRef<HTMLDivElement>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+  const activeIndexRef = useRef(activeIndex)
+  useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
 
   // Sync map focus when carousel scrolls (with guard for uninitialized map)
   const syncMapToCarousel = useCallback((index: number) => {
@@ -53,41 +55,78 @@ export default function MobileMapTimeline({
     }
   }, [entries, mapEntries])
 
-  // IntersectionObserver for instant snap detection
+  // Pick the card that's currently closest to the carousel horizontal center.
+  // More stable than IntersectionObserver thresholds when the active card can
+  // drift toward the viewport edge with proximity snapping.
+  const pickNearestCard = useCallback(() => {
+    const el = carouselRef.current
+    if (!el) return
+    const containerCenter = el.getBoundingClientRect().left + el.clientWidth / 2
+    let bestIdx = 0
+    let bestDist = Infinity
+    cardRefs.current.forEach((node, idx) => {
+      const r = node.getBoundingClientRect()
+      const cardCenter = r.left + r.width / 2
+      const d = Math.abs(cardCenter - containerCenter)
+      if (d < bestDist) { bestDist = d; bestIdx = idx }
+    })
+    setActiveIndex(prev => {
+      if (prev !== bestIdx) syncMapToCarousel(bestIdx)
+      return bestIdx
+    })
+  }, [syncMapToCarousel])
+
+  // Track scroll; debounce to re-center the active card when the user stops.
   useEffect(() => {
     const el = carouselRef.current
     if (!el || entries.length === 0) return
+    let rafId: number | null = null
+    let settleTimer: number | null = null
+    const onScroll = () => {
+      if (rafId != null) return
+      rafId = requestAnimationFrame(() => {
+        pickNearestCard()
+        rafId = null
+      })
+      if (settleTimer != null) window.clearTimeout(settleTimer)
+      settleTimer = window.setTimeout(() => {
+        // Ensure the active card sits at the center once the user settles.
+        const card = cardRefs.current.get(activeIndexRef.current)
+        card?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+      }, 180)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      if (rafId != null) cancelAnimationFrame(rafId)
+      if (settleTimer != null) window.clearTimeout(settleTimer)
+    }
+  }, [entries.length, pickNearestCard])
 
-    const observer = new IntersectionObserver(
-      (observed) => {
-        for (const o of observed) {
-          if (o.isIntersecting) {
-            const idx = Number(o.target.getAttribute('data-idx'))
-            if (!isNaN(idx)) {
-              setActiveIndex(idx)
-              syncMapToCarousel(idx)
-            }
-          }
-        }
-      },
-      { root: el, threshold: 0.6 },
-    )
-
-    cardRefs.current.forEach(node => observer.observe(node))
-    return () => observer.disconnect()
-  }, [entries.length, syncMapToCarousel])
+  // Scroll a given card into the horizontal center of the carousel
+  const scrollCardIntoCenter = useCallback((idx: number) => {
+    const card = cardRefs.current.get(idx)
+    card?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+  }, [])
 
   // Scroll carousel to entry when map marker is clicked
   const handleMarkerClick = useCallback((id: string) => {
     const idx = entries.findIndex((e: any) => String(e.id) === id)
     if (idx === -1) return
     setActiveIndex(idx)
+    scrollCardIntoCenter(idx)
+  }, [entries, scrollCardIntoCenter])
 
-    const el = carouselRef.current
-    if (!el) return
-    const cardWidth = 272
-    el.scrollTo({ left: idx * cardWidth, behavior: 'smooth' })
-  }, [entries])
+  // Tap on a card: if it's already active, open the edit view; otherwise
+  // activate + center it first (don't jump straight into the editor).
+  const handleCardTap = useCallback((entry: any, idx: number) => {
+    if (idx === activeIndex) {
+      onEntryClick(entry)
+    } else {
+      setActiveIndex(idx)
+      scrollCardIntoCenter(idx)
+    }
+  }, [activeIndex, onEntryClick, scrollCardIntoCenter])
 
   // Initial map focus — delay to let Leaflet initialize and fitBounds
   useEffect(() => {
@@ -115,12 +154,12 @@ export default function MobileMapTimeline({
           fullScreen
         />
         {!readOnly && onAddEntry && (
-          <div className="fixed top-[calc(var(--nav-h,56px)+12px)] right-4 z-30">
+          <div className="fixed right-4 z-30" style={{ bottom: 'calc(var(--bottom-nav-h, 84px) + 16px)' }}>
             <button
               onClick={onAddEntry}
-              className="w-10 h-10 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
+              className="w-12 h-12 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
             >
-              <Plus size={18} />
+              <Plus size={20} />
             </button>
           </div>
         )}
@@ -146,14 +185,14 @@ export default function MobileMapTimeline({
 
       {/* Bottom carousel */}
       <div
-        className="fixed bottom-20 left-0 right-0 z-40"
-        style={{ touchAction: 'pan-x' }}
+        className="fixed left-0 right-0 z-40"
+        style={{ touchAction: 'pan-x', bottom: 'calc(var(--bottom-nav-h, 84px) + 8px)' }}
       >
         <div
           ref={carouselRef}
           className="flex gap-3 overflow-x-auto px-4 pb-3 pt-1 scroll-smooth"
           style={{
-            scrollSnapType: 'x mandatory',
+            scrollSnapType: 'x proximity',
             WebkitOverflowScrolling: 'touch',
             scrollbarWidth: 'none',
             msOverflowStyle: 'none',
@@ -170,7 +209,7 @@ export default function MobileMapTimeline({
                 entry={entry}
                 index={i}
                 isActive={i === activeIndex}
-                onClick={() => onEntryClick(entry)}
+                onClick={() => handleCardTap(entry, i)}
                 publicPhotoUrl={publicPhotoUrl}
               />
             </div>
@@ -178,14 +217,17 @@ export default function MobileMapTimeline({
         </div>
       </div>
 
-      {/* FAB: add entry — top right */}
+      {/* FAB: add entry — bottom right, above the timeline carousel */}
       {!readOnly && onAddEntry && (
-        <div className="fixed top-[calc(var(--nav-h,56px)+12px)] right-4 z-30">
+        <div
+          className="fixed right-4 z-30"
+          style={{ bottom: 'calc(var(--bottom-nav-h, 84px) + 168px)' }}
+        >
           <button
             onClick={onAddEntry}
-            className="w-10 h-10 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
+            className="w-12 h-12 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-transform"
           >
-            <Plus size={18} />
+            <Plus size={20} />
           </button>
         </div>
       )}

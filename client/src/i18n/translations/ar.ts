@@ -1577,6 +1577,7 @@ const ar: Record<string, string | { name: string; category: string }[]> = {
   'memories.providerPassword': 'كلمة المرور',
   'memories.providerOTP': 'رمز MFA (إذا كان مفعلاً)',
   'memories.skipSSLVerification': 'تخطي التحقق من شهادة SSL',
+  'memories.immichAutoUpload': 'نسخ صور الرحلة إلى Immich عند الرفع',
   'memories.providerUrlHintSynology': 'أدرج مسار تطبيق Photos في URL، مثل https://nas:5001/photo',
   'memories.testConnection': 'اختبار الاتصال',
   'memories.testFirst': 'اختبر الاتصال أولاً',
@@ -1655,6 +1656,7 @@ const ar: Record<string, string | { name: string; category: string }[]> = {
   'journey.invite.inviting': 'جارٍ الدعوة...',
 
   // Journey Entry Editor
+  'journey.editor.discardChangesConfirm': 'لديك تغييرات غير محفوظة. هل تريد تجاهلها؟',
   'journey.editor.uploadPhotos': 'رفع صور',
   'journey.editor.uploading': '...جارٍ الرفع',
   'journey.editor.fromGallery': 'من المعرض',

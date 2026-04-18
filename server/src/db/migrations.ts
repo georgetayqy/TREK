@@ -1738,6 +1738,35 @@ function runMigrations(db: Database.Database): void {
           AND substr(reservations.reservation_end_time, 1, 10) != substr(reservations.reservation_time, 1, 10)
       `);
     },
+    // Migration 111: opt-in Immich auto-upload — users column only (#730)
+    // Default is off — uploading to Immich must be an explicit choice, not a
+    // side effect of having a writable API key.
+    () => {
+      try { db.exec('ALTER TABLE users ADD COLUMN immich_auto_upload INTEGER NOT NULL DEFAULT 0'); }
+      catch (err: any) { if (!err.message?.includes('duplicate column name')) throw err; }
+    },
+    // Migration 112: expose immich auto-upload toggle in the Settings UI (#730)
+    // Runs after Immich provider seeding so the FK to photo_providers holds.
+    () => {
+      try {
+        const hasTable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('photo_providers', 'photo_provider_fields')").all() as Array<{ name: string }>;
+        const hasProviders = hasTable.some(t => t.name === 'photo_providers');
+        const hasFields = hasTable.some(t => t.name === 'photo_provider_fields');
+        if (hasProviders && hasFields) {
+          const immichRow = db.prepare("SELECT 1 FROM photo_providers WHERE id = 'immich' LIMIT 1").get();
+          if (immichRow) {
+            db.prepare(`
+              INSERT OR IGNORE INTO photo_provider_fields
+                (provider_id, field_key, label, input_type, placeholder, required, secret, settings_key, payload_key, sort_order)
+              VALUES
+                ('immich', 'immich_auto_upload', 'immichAutoUpload', 'checkbox', NULL, 0, 0, 'auto_upload', 'auto_upload', 5)
+            `).run();
+          }
+        }
+      } catch (err: any) {
+        if (!err.message?.includes('no such table') && !err.message?.includes('FOREIGN KEY')) throw err;
+      }
+    },
   ];
 
   if (currentVersion < migrations.length) {
