@@ -36,8 +36,8 @@ interface PublicPhoto {
   caption?: string | null
 }
 
-function photoUrl(p: PublicPhoto, shareToken: string): string {
-  return `/api/public/journey/${shareToken}/photos/${p.photo_id}/original`
+function photoUrl(p: PublicPhoto, shareToken: string, kind: 'thumbnail' | 'original' = 'original'): string {
+  return `/api/public/journey/${shareToken}/photos/${p.photo_id}/${kind}`
 }
 
 function formatDate(d: string): { weekday: string; month: string; day: number } {
@@ -84,9 +84,20 @@ export default function JourneyPublicPage() {
   const journey = data?.journey || {}
   const stats = data?.stats || {}
 
-  const groupedEntries = useMemo(() => groupByDate(entries), [entries])
+  // `[Trip Photos]` and `Gallery` are synthetic photo-only containers
+  // produced by the trip→journey sync. They have no story and no
+  // location, and the owner view strips them from the timeline the
+  // same way (JourneyDetailPage.tsx). Gallery keeps their photos.
+  const timelineEntries = useMemo(
+    () => entries.filter(e => e.title !== '[Trip Photos]' && e.title !== 'Gallery'),
+    [entries],
+  )
+  const groupedEntries = useMemo(() => groupByDate(timelineEntries), [timelineEntries])
   const sortedDates = useMemo(() => [...groupedEntries.keys()].sort(), [groupedEntries])
-  const mapEntries = useMemo(() => entries.filter(e => e.location_lat && e.location_lng), [entries])
+  const mapEntries = useMemo(
+    () => timelineEntries.filter(e => e.location_lat && e.location_lng),
+    [timelineEntries],
+  )
   const allPhotos = useMemo(() => entries.flatMap(e => (e.photos || []).map(p => ({ photo: p, entry: e }))), [entries])
 
   // Set default view based on permissions
@@ -312,7 +323,7 @@ export default function JourneyPublicPage() {
                 className="aspect-square rounded-lg overflow-hidden cursor-pointer"
                 onClick={() => setLightbox({ photos: allPhotos.map(({ photo: p }) => ({ id: String(p.id), src: photoUrl(p, token!), caption: p.caption })), index: idx })}
               >
-                <img src={photoUrl(photo, token!)} className="w-full h-full object-cover hover:scale-105 transition-transform" alt="" loading="lazy" />
+                <img src={photoUrl(photo, token!, 'thumbnail')} className="w-full h-full object-cover hover:scale-105 transition-transform" alt="" loading="lazy" />
               </div>
             ))}
           </div>

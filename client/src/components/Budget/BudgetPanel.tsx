@@ -900,29 +900,30 @@ export default function BudgetPanel({ tripId, tripMembers = [] }: BudgetPanelPro
                             }}
                             onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
                             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                            <td style={{ ...td, display: 'flex', alignItems: 'center', gap: 4 }}>
-                              {canEdit && (
-                                <div draggable onDragStart={e => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; setDragItem(item.id); setDragItemCat(cat) }}
-                                  onDragEnd={() => { setDragItem(null); setDragOverItem(null); setDragItemCat(null) }}
-                                  style={{ cursor: 'grab', display: 'flex', alignItems: 'center', color: 'var(--text-faint)', flexShrink: 0 }}>
-                                  <GripVertical size={12} />
+                            <td style={td}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                {canEdit && (
+                                  <div draggable onDragStart={e => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; setDragItem(item.id); setDragItemCat(cat) }}
+                                    onDragEnd={() => { setDragItem(null); setDragOverItem(null); setDragItemCat(null) }}
+                                    style={{ cursor: 'grab', display: 'flex', alignItems: 'center', color: 'var(--text-faint)', flexShrink: 0 }}>
+                                    <GripVertical size={12} />
+                                  </div>
+                                )}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <InlineEditCell value={item.name} onSave={v => handleUpdateField(item.id, 'name', v)} placeholder={t('budget.table.name')} locale={locale} editTooltip={item.reservation_id ? t('budget.linkedToReservation') : t('budget.editTooltip')} readOnly={!canEdit || !!item.reservation_id} />
+                                  {hasMultipleMembers && (
+                                    <div className="sm:hidden" style={{ marginTop: 4 }}>
+                                      <BudgetMemberChips
+                                        members={item.members || []}
+                                        tripMembers={tripMembers}
+                                        onSetMembers={(userIds) => setBudgetItemMembers(tripId, item.id, userIds)}
+                                        onTogglePaid={(userId, paid) => toggleBudgetMemberPaid(tripId, item.id, userId, paid)}
+                                        compact={false}
+                                        readOnly={!canEdit}
+                                      />
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                              <InlineEditCell value={item.name} onSave={v => handleUpdateField(item.id, 'name', v)} placeholder={t('budget.table.name')} locale={locale} editTooltip={item.reservation_id ? t('budget.linkedToReservation') : t('budget.editTooltip')} readOnly={!canEdit || !!item.reservation_id} />
-                              {/* Mobile: larger chips under name since Persons column is hidden */}
-                              {hasMultipleMembers && (
-                                <div className="sm:hidden" style={{ marginTop: 4 }}>
-                                  <BudgetMemberChips
-                                    members={item.members || []}
-                                    tripMembers={tripMembers}
-                                    onSetMembers={(userIds) => setBudgetItemMembers(tripId, item.id, userIds)}
-                                    onTogglePaid={(userId, paid) => toggleBudgetMemberPaid(tripId, item.id, userId, paid)}
-                                    compact={false}
-                                    readOnly={!canEdit}
-                                  />
-                                </div>
-                              )}
                               </div>
                             </td>
                             <td style={{ ...td, textAlign: 'center' }}>

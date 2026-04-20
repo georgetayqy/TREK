@@ -595,7 +595,11 @@ export default function JourneyDetailPage() {
                         </div>
 
                         {entries.map((entry, idx) => {
-                          const canReorder = !isMobile && canEditEntries && entries.length > 1
+                          // Skeletons are just "suggested" places pulled
+                          // from the linked trip — they aren't real
+                          // journey entries until the user edits them,
+                          // so reordering them does not make sense.
+                          const canReorder = !isMobile && canEditEntries && entries.length > 1 && entry.type !== 'skeleton'
                           const move = (direction: -1 | 1) => {
                             if (!current) return
                             const target = idx + direction

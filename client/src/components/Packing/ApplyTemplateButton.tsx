@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Package } from 'lucide-react'
 import { adminApi, packingApi } from '../../api/client'
+import { useTripStore } from '../../store/tripStore'
 import { useToast } from '../shared/Toast'
 import { useTranslation } from '../../i18n'
 
@@ -43,9 +44,9 @@ export default function ApplyTemplateButton({ tripId, style, className }: ApplyT
     setApplying(true)
     try {
       const data = await packingApi.applyTemplate(tripId, templateId)
+      useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(data.items || [])] }))
       toast.success(t('packing.templateApplied', { count: data.count }))
       setOpen(false)
-      window.location.reload()
     } catch {
       toast.error(t('packing.templateError'))
     } finally {

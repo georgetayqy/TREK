@@ -679,8 +679,10 @@ export async function streamSynologyAsset(
     
     //size: 'sm' 240px| 'm' 320px| 'xl' 1280px| 'preview' ?
     // Use Thumbnail API for both thumbnail and original — avoids serving raw HEIC files
-    // (original uses xl size to get a full-resolution JPEG-compatible render)
-    const resolvedSize = kind === 'original' ? 'xl' : (size || 'sm');
+    // (original uses xl size to get a full-resolution JPEG-compatible render).
+    // Thumbnail default is 'm' (~320px) — 'sm' (240px) looked pixelated on
+    // the journey grid on retina screens.
+    const resolvedSize = kind === 'original' ? 'xl' : (size || 'm');
     const params = new URLSearchParams({
         api: 'SYNO.Foto.Thumbnail',
         method: 'get',

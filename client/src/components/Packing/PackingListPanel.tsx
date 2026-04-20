@@ -959,10 +959,9 @@ export default function PackingListPanel({ tripId, items, openImportSignal = 0, 
     setApplyingTemplate(true)
     try {
       const data = await packingApi.applyTemplate(tripId, templateId)
+      useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(data.items || [])] }))
       toast.success(t('packing.templateApplied', { count: data.count }))
       setShowTemplateDropdown(false)
-      // Reload packing items
-      window.location.reload()
     } catch {
       toast.error(t('packing.templateError'))
     } finally {
@@ -1020,10 +1019,10 @@ export default function PackingListPanel({ tripId, items, openImportSignal = 0, 
     if (parsed.length === 0) { toast.error(t('packing.importEmpty')); return }
     try {
       const result = await packingApi.bulkImport(tripId, parsed)
+      useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(result.items || [])] }))
       toast.success(t('packing.importSuccess', { count: result.count }))
       setImportText('')
       setShowImportModal(false)
-      window.location.reload()
     } catch { toast.error(t('packing.importError')) }
   }
 
