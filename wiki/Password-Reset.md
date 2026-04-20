@@ -1,10 +1,43 @@
 # Password Reset
 
-<!-- TODO: screenshot: admin user edit form showing forced password change option -->
+## Self-service reset (Forgot password?)
 
-## Self-service reset
+TREK supports email-based self-service password reset. On the login page, click the **"Forgot password?"** link to go to `/forgot-password`. Enter your email address and submit — if the address matches a local account, a reset link is sent to that inbox. The page always shows the same confirmation message regardless of whether the email was found, to prevent account enumeration.
 
-TREK does not have a self-service "Forgot password?" email flow. There is no password-reset email or reset-token mechanism in the application. If you have forgotten your password you must contact your admin for a reset.
+> **No SMTP configured?** When the server has no SMTP credentials set up, the reset link is not emailed. Instead, it is printed to the **server console** inside a clearly-fenced block so a self-hoster can copy and relay it manually. The forgot-password page also shows a visible hint that SMTP is unconfigured.
+
+### Reset flow
+
+1. Click **"Forgot password?"** on the login page.
+2. Enter your email address and submit.
+3. Open the reset link from your email (or console) — valid for **60 minutes**.
+4. Enter a new password. If your account has **MFA enabled**, you must also supply a valid TOTP code or backup code before the reset completes.
+5. After a successful reset you are redirected to login. **All existing sessions are invalidated** — every device is signed out immediately.
+
+### Security properties
+
+| Property | Detail |
+|---|---|
+| Token entropy | 256-bit cryptographically random, base64url-encoded |
+| Storage | Only the SHA-256 hash is stored in the database — never the raw token |
+| Expiry | 60 minutes, single-use; any prior unconsumed token is invalidated when a new one is issued |
+| Enumeration safety | `/forgot-password` always returns `{ok:true}` with a minimum response latency pad |
+| Rate limiting | 3 requests / 15-min per IP on `/forgot-password`; 5 requests / 15-min per IP on `/reset-password` |
+| MFA gate | If the account has 2FA enabled, a valid TOTP code or backup code is required to complete the reset — a compromised mailbox alone cannot take over a 2FA-protected account |
+| Session invalidation | Resetting the password bumps the `password_version` on the account and the `pv` claim in all JWTs, which immediately rejects every live session |
+| Audit log | `user.password_reset_request`, `user.password_reset_success`, and `user.password_reset_fail` events are recorded |
+
+### SMTP requirement
+
+The email delivery uses the same SMTP settings as other notification emails. See [Environment-Variables](Environment-Variables) for `SMTP_*` configuration.
+
+### OIDC accounts
+
+Accounts that signed up via SSO and have no local password set cannot use the forgot-password flow — there is no local password to reset. The forgot-password page still shows the generic confirmation to avoid revealing whether the email is OIDC-only. Continue using [OIDC-SSO](OIDC-SSO) to sign in.
+
+### Password login disabled
+
+If the admin has globally disabled password login, the forgot-password endpoint returns an error and the flow is unavailable.
 
 ## Admin-initiated reset
 
@@ -14,7 +47,7 @@ See [Admin-Users-and-Invites](Admin-Users-and-Invites) for step-by-step instruct
 
 ## Password requirements
 
-When choosing a new password (whether via the forced-change prompt or the normal **Settings → Security** page) the password must:
+When choosing a new password (whether via the reset flow, the forced-change prompt, or the normal **Settings → Security** page) the password must:
 
 - Be at least **8 characters** long
 - Contain at least one **uppercase letter**
@@ -25,12 +58,12 @@ When choosing a new password (whether via the forced-change prompt or the normal
 
 ## Rate limiting
 
-Password change requests are rate-limited per IP address to prevent abuse.
-
-## OIDC accounts
-
-If you signed up via SSO and have no local password set, there is no local password to reset. Continue using [OIDC-SSO](OIDC-SSO) to sign in.
+| Endpoint | Limit |
+|---|---|
+| `/auth/forgot-password` | 3 requests / 15-min per IP |
+| `/auth/reset-password` | 5 requests / 15-min per IP |
+| Password change (settings) | Rate-limited per IP |
 
 ---
 
-**See also:** [Login-and-Registration](Login-and-Registration) · [Admin-Users-and-Invites](Admin-Users-and-Invites) · [OIDC-SSO](OIDC-SSO)
+**See also:** [Login-and-Registration](Login-and-Registration) · [Admin-Users-and-Invites](Admin-Users-and-Invites) · [Two-Factor-Authentication](Two-Factor-Authentication) · [OIDC-SSO](OIDC-SSO)

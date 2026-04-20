@@ -10,6 +10,8 @@ Navigate to `/login` and enter your email and password. On success, the server s
 
 If your account has two-factor authentication enabled, you are prompted for a TOTP code (or backup code) after the password step before the session cookie is issued.
 
+If you have forgotten your password, click the **"Forgot password?"** link below the password field to start the self-service reset flow. See [Password-Reset](Password-Reset) for details.
+
 ### Forced password change
 
 If an admin has marked your account as requiring a password change, a **Set new password** form is shown immediately after a successful login (or after the MFA step). The session cookie is not issued until the new password is saved.
@@ -58,6 +60,8 @@ Failed login attempts are rate-limited to **10 attempts per 15-minute window** p
 
 MFA verification attempts are rate-limited separately to **5 attempts per 15-minute window** per IP address.
 
+Forgot-password requests are rate-limited to **3 attempts per 15-minute window** per IP. Reset-password submissions are limited to **5 attempts per 15-minute window** per IP.
+
 ## Demo mode
 
 When the server is started with `DEMO_MODE=true`, a **"Try demo"** button appears below the login form. Clicking it signs you in as the demo user without entering credentials. The demo credentials (`demo@trek.app` / `demo12345`) are also displayed in the app config for reference, but the one-click button is the intended entry point.
@@ -70,4 +74,4 @@ When OIDC-only mode is active (password login disabled), visiting `/login` autom
 
 ---
 
-**See also:** [OIDC-SSO](OIDC-SSO) · [Admin-Users-and-Invites](Admin-Users-and-Invites)
+**See also:** [OIDC-SSO](OIDC-SSO) · [Admin-Users-and-Invites](Admin-Users-and-Invites) · [Password-Reset](Password-Reset)
