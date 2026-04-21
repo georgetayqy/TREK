@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { formatLocationName } from '../utils/formatters'
 import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useJourneyStore } from '../store/journeyStore'
@@ -8,6 +9,7 @@ import { journeyApi, authApi, addonsApi, mapsApi } from '../api/client'
 import { addListener, removeListener } from '../api/websocket'
 import Navbar from '../components/Layout/Navbar'
 import JourneyMap from '../components/Journey/JourneyMapAuto'
+import { DAY_COLORS } from '../components/Journey/dayColors'
 import type { JourneyMapAutoHandle as JourneyMapHandle } from '../components/Journey/JourneyMapAuto'
 import JournalBody from '../components/Journey/JournalBody'
 import MarkdownToolbar from '../components/Journey/MarkdownToolbar'
@@ -188,7 +190,9 @@ export default function JourneyDetailPage() {
       const winner = lastPast || firstAhead
       if (winner) {
         setActiveEntryId(winner.id)
-        mapRef.current?.highlightMarker(winner.id)
+        if (locatedEntryIdsRef.current.has(winner.id)) {
+          mapRef.current?.highlightMarker(winner.id)
+        }
       }
     }
     const onScroll = () => {
@@ -279,16 +283,38 @@ export default function JourneyDetailPage() {
     [current?.entries]
   )
 
-  const sidebarMapItems = useMemo(() => mapEntries.map(e => ({
-    id: String(e.id),
-    lat: e.location_lat!,
-    lng: e.location_lng!,
-    title: e.title || '',
-    location_name: e.location_name || '',
-    mood: e.mood,
-    created_at: e.entry_date,
-    entry_date: e.entry_date,
-  })), [mapEntries])
+  const sidebarMapItems = useMemo(() => {
+    const allDates = [...new Set(
+      (current?.entries || [])
+        .filter(e => e.title !== 'Gallery' && e.title !== '[Trip Photos]')
+        .map(e => e.entry_date)
+        .sort()
+    )]
+    const sorted = [...mapEntries].sort((a, b) => a.entry_date.localeCompare(b.entry_date))
+    const dayCounters = new Map<string, number>()
+    return sorted.map(e => {
+      const dayIdx = allDates.indexOf(e.entry_date)
+      const dayLabel = (dayCounters.get(e.entry_date) ?? 0) + 1
+      dayCounters.set(e.entry_date, dayLabel)
+      return {
+        id: String(e.id),
+        lat: e.location_lat!,
+        lng: e.location_lng!,
+        title: e.title || '',
+        location_name: e.location_name || '',
+        mood: e.mood,
+        created_at: e.entry_date,
+        entry_date: e.entry_date,
+        dayColor: DAY_COLORS[dayIdx % DAY_COLORS.length],
+        dayLabel,
+      }
+    })
+  }, [mapEntries, current?.entries])
+
+  const locatedEntryIdsRef = useRef(new Set<string>())
+  useEffect(() => {
+    locatedEntryIdsRef.current = new Set(sidebarMapItems.map(m => m.id))
+  }, [sidebarMapItems])
 
   const tripDates = useMemo(() => {
     const dates = new Set<string>()
@@ -424,7 +450,7 @@ export default function JourneyDetailPage() {
               ? 'max-w-[1440px] mx-auto px-0 pt-0'
               : 'flex w-full overflow-hidden'
           }
-          style={!isMobile ? { height: 'calc(100vh - var(--nav-h, 56px))' } : undefined}
+          style={!isMobile ? { height: 'calc(100dvh - var(--nav-h, 56px))' } : undefined}
         >
           {/* LEFT column (full width on mobile, scrollable feed on desktop) */}
           <div
@@ -484,7 +510,7 @@ export default function JourneyDetailPage() {
                       >
                         {hideSkeletons ? <EyeOff size={14} /> : <Eye size={14} />}
                       </button>
-                      <span className="absolute top-full mt-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-[11px] font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
+                      <span className="absolute top-full mt-2 right-0 px-2 py-1 rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-[11px] font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
                         {hideSkeletons ? t('journey.skeletons.show') : t('journey.skeletons.hide')}
                       </span>
                     </div>
@@ -584,7 +610,7 @@ export default function JourneyDetailPage() {
                       <div key={date} className="flex flex-col gap-3 trek-stagger">
                         <div className="bg-white/95 dark:bg-zinc-900/95 backdrop-blur border-y md:border border-zinc-200 dark:border-zinc-700 rounded-none md:rounded-xl -mx-4 md:mx-0 px-4 py-3.5 flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 flex items-center justify-center text-[13px] font-bold">
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[13px] font-bold text-white" style={{ background: DAY_COLORS[dayIdx % DAY_COLORS.length] }}>
                               {dayIdx + 1}
                             </div>
                             <div>
@@ -613,7 +639,7 @@ export default function JourneyDetailPage() {
                               .catch(() => toast.error(t('common.errorOccurred')))
                           }
                           return (
-                            <div key={entry.id} data-entry-id={String(entry.id)} className={`relative ${canReorder ? 'flex items-stretch gap-2' : ''}`}>
+                            <div key={entry.id} data-entry-id={String(entry.id)} className={`relative ${canReorder ? 'flex items-stretch gap-2' : ''}`} onMouseEnter={() => { setActiveEntryId(String(entry.id)); mapRef.current?.highlightMarker(String(entry.id)) }} style={String(entry.id) === activeEntryId ? { outline: `2px solid ${DAY_COLORS[dayIdx % DAY_COLORS.length]}`, outlineOffset: '3px', borderRadius: '12px' } : undefined}>
                               {canReorder && (
                                 <div className="flex flex-col gap-1 justify-center flex-shrink-0 py-1">
                                   <button
@@ -735,7 +761,8 @@ export default function JourneyDetailPage() {
           journey={current}
           onClose={() => setShowSettings(false)}
           onSaved={() => { setShowSettings(false); loadJourney(Number(id)) }}
-          onOpenInvite={() => { setShowSettings(false); setShowInvite(true) }}
+          onOpenInvite={() => { setShowInvite(true) }}
+          onRefresh={() => loadJourney(Number(id))}
         />
       )}
 
@@ -917,7 +944,7 @@ function MapView({ entries, mapEntries, sortedDates, activeLocationId, fullMapRe
                             <span className="text-[14px] font-semibold text-zinc-900 dark:text-white truncate">{e.title || e.location_name}</span>
                           </div>
                           <div className="text-[11px] text-zinc-500 truncate">
-                            {e.location_name}{e.entry_time ? ` · ${e.entry_time}` : ''}
+                            {formatLocationName(e.location_name)}{e.entry_time ? ` · ${e.entry_time}` : ''}
                           </div>
                         </div>
 
@@ -1360,7 +1387,7 @@ function EntryCard({ entry, readOnly, onEdit, onDelete, onPhotoClick }: {
             {entry.location_name && (
               <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-black/40 backdrop-blur-sm rounded-full text-[10px] font-semibold text-white tracking-wide max-w-full overflow-hidden">
                 <MapPin size={10} className="flex-shrink-0" />
-                <span className="truncate">{entry.location_name}</span>
+                <span className="truncate">{formatLocationName(entry.location_name)}</span>
               </span>
             )}
             {entry.entry_time && (
@@ -1403,7 +1430,7 @@ function EntryCard({ entry, readOnly, onEdit, onDelete, onPhotoClick }: {
           <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
             {entry.location_name && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded-full text-[10px] font-semibold text-zinc-500 max-w-full overflow-hidden">
-                <MapPin size={10} className="flex-shrink-0" /> <span className="truncate">{entry.location_name}</span>
+                <MapPin size={10} className="flex-shrink-0" /> <span className="truncate">{formatLocationName(entry.location_name)}</span>
               </span>
             )}
             {entry.entry_time && (
@@ -1482,7 +1509,7 @@ function SkeletonCard({ entry, onClick }: { entry: JourneyEntry; onClick?: () =>
           {entry.title || t('journey.detail.newEntry')}
         </div>
         <div className="text-[11px] text-zinc-500 mt-0.5">
-          {entry.location_name || ''}{entry.entry_time ? ` · ${entry.entry_time}` : ''}
+          {formatLocationName(entry.location_name)}{entry.entry_time ? ` · ${entry.entry_time}` : ''}
         </div>
       </div>
       <div className="text-[11px] text-zinc-500 font-medium flex-shrink-0">
@@ -2954,7 +2981,7 @@ function JourneyShareSection({ journeyId }: { journeyId: number }) {
             onClick={deleteLink}
             className="text-[11px] font-medium text-red-500 hover:text-red-600 self-start"
           >
-            Remove share link
+            {t('share.deleteLink')}
           </button>
         </div>
       )}
@@ -2962,11 +2989,12 @@ function JourneyShareSection({ journeyId }: { journeyId: number }) {
   )
 }
 
-function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite }: {
+function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite, onRefresh }: {
   journey: JourneyDetail
   onClose: () => void
   onSaved: () => void
   onOpenInvite: () => void
+  onRefresh: () => void
 }) {
   const { t } = useTranslation()
   const [title, setTitle] = useState(journey.title)
@@ -2974,6 +3002,10 @@ function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite }: {
   const [saving, setSaving] = useState(false)
   const [showAddTrip, setShowAddTrip] = useState(false)
   const [unlinkTarget, setUnlinkTarget] = useState<{ trip_id: number; title: string } | null>(null)
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
+
+  const isDirty = title !== journey.title || subtitle !== (journey.subtitle || '')
+  const handleClose = () => { if (isDirty) setShowDiscardConfirm(true); else onClose() }
   const coverRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
   const navigate = useNavigate()
@@ -3032,12 +3064,12 @@ function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center md:p-5 overscroll-none" style={{ background: 'rgba(9,9,11,0.75)' }} onClick={onClose} onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault() }}>
+    <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center md:p-5 overscroll-none" style={{ background: 'rgba(9,9,11,0.75)' }} onClick={handleClose} onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault() }}>
       <div className="bg-white dark:bg-zinc-900 rounded-t-2xl md:rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.2)] max-w-[480px] w-full max-h-[85vh] md:max-h-[90vh] flex flex-col overflow-hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }} onClick={e => e.stopPropagation()}>
 
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-700">
           <h2 className="text-[16px] font-bold text-zinc-900 dark:text-white">{t('journey.settings.title')}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <button onClick={handleClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <X size={16} />
           </button>
         </div>
@@ -3133,7 +3165,7 @@ function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite }: {
                         try {
                           await journeyApi.removeContributor(journey.id, c.user_id)
                           toast.success(t('journey.contributors.removed'))
-                          onSaved()
+                          onRefresh()
                         } catch {
                           toast.error(t('journey.contributors.removeFailed'))
                         }
@@ -3184,7 +3216,7 @@ function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite }: {
             {journey.status === 'archived' ? <ArchiveRestore size={14} /> : <Archive size={14} />}
             <span className="hidden md:inline">{journey.status === 'archived' ? t('journey.settings.reopenJourney') : t('journey.settings.endJourney')}</span>
           </button>
-          <button onClick={onClose} className="h-9 px-3.5 rounded-lg border border-zinc-200 dark:border-zinc-600 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">{t('common.cancel')}</button>
+          <button onClick={handleClose} className="h-9 px-3.5 rounded-lg border border-zinc-200 dark:border-zinc-600 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">{t('common.cancel')}</button>
           <button onClick={handleSave} disabled={saving || !title.trim()} className="h-9 px-3.5 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[13px] font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 disabled:opacity-40">
             {saving ? t('common.saving') : t('common.save')}
           </button>
@@ -3229,6 +3261,16 @@ function JourneySettingsDialog({ journey, onClose, onSaved, onOpenInvite }: {
         title={t('journey.settings.deleteJourney')}
         message={t('journey.settings.deleteMessage', { title: journey.title })}
         confirmLabel={t('common.delete')}
+        danger
+      />
+
+      <ConfirmDialog
+        isOpen={showDiscardConfirm}
+        onClose={() => setShowDiscardConfirm(false)}
+        onConfirm={() => { setShowDiscardConfirm(false); onClose() }}
+        title={t('common.discardChanges')}
+        message={t('journey.editor.discardChangesConfirm')}
+        confirmLabel={t('common.discard')}
         danger
       />
     </div>

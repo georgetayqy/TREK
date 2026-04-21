@@ -234,28 +234,20 @@ describe('JourneyPublicPage', () => {
     }
   });
 
-  it('FE-PAGE-PUBLICJOURNEY-009: map tab switches view', async () => {
+  it('FE-PAGE-PUBLICJOURNEY-009: map is always visible in desktop two-column layout', async () => {
     setupSuccess();
     render(<JourneyPublicPage />);
     await waitFor(() => {
       expect(screen.getByText('Tokyo 2026')).toBeInTheDocument();
     });
 
-    const buttons = screen.getAllByRole('button');
-    const mapBtn = buttons.find(
-      btn => btn.textContent && /map/i.test(btn.textContent),
-    );
-    expect(mapBtn).toBeDefined();
-    if (mapBtn) {
-      fireEvent.click(mapBtn);
-      // After clicking map tab, the timeline entries should no longer be visible
-      // and the map view content should be rendered (even if JourneyMap errors internally
-      // due to jsdom limitations, the tab state switches)
-      await waitFor(() => {
-        // Shibuya Crossing (timeline-only) should not appear once map is active
-        expect(screen.queryByText('Shibuya Crossing')).not.toBeInTheDocument();
-      });
-    }
+    // Desktop two-column: map sidebar is always rendered alongside the timeline;
+    // there is no standalone "Map" tab button on desktop.
+    await waitFor(() => {
+      expect(screen.getByTestId('journey-map')).toBeInTheDocument();
+    });
+    // Timeline entries remain visible (two-column shows both simultaneously)
+    expect(screen.getByText('Shibuya Crossing')).toBeInTheDocument();
   });
 
   it('FE-PAGE-PUBLICJOURNEY-010: shows journey stats', async () => {
@@ -303,24 +295,18 @@ describe('JourneyPublicPage', () => {
   });
 
   // FE-PAGE-PUBLICJOURNEY-012
-  it('FE-PAGE-PUBLICJOURNEY-012: tab switching from timeline to map shows map component', async () => {
-    const user = userEvent.setup();
+  it('FE-PAGE-PUBLICJOURNEY-012: map component renders with located entries in desktop two-column layout', async () => {
     setupSuccess();
     render(<JourneyPublicPage />);
     await waitFor(() => {
       expect(screen.getByText('Tokyo 2026')).toBeInTheDocument();
     });
 
-    const mapBtn = screen.getAllByRole('button').find(
-      btn => btn.textContent && /map/i.test(btn.textContent),
-    );
-    expect(mapBtn).toBeDefined();
-    await user.click(mapBtn!);
-
+    // Desktop two-column: map sidebar is always rendered; no tab click required.
     await waitFor(() => {
       expect(screen.getByTestId('journey-map')).toBeInTheDocument();
     });
-    // Map receives entries with lat/lng
+    // Both fixture entries have coordinates → map receives 2 located entries
     expect(screen.getByTestId('journey-map').textContent).toContain('2');
   });
 

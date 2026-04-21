@@ -1,9 +1,10 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { Plus } from 'lucide-react'
 import JourneyMap from './JourneyMap'
 import MobileEntryCard from './MobileEntryCard'
 import type { JourneyMapHandle } from './JourneyMap'
 import type { JourneyEntry } from '../../store/journeyStore'
+import { DAY_COLORS } from './dayColors'
 
 interface MapEntry {
   id: string
@@ -23,6 +24,7 @@ interface Props {
   onEntryClick: (entry: any) => void
   onAddEntry?: () => void
   publicPhotoUrl?: (photoId: number) => string
+  carouselBottom?: string
 }
 
 export default function MobileMapTimeline({
@@ -34,14 +36,23 @@ export default function MobileMapTimeline({
   onEntryClick,
   onAddEntry,
   publicPhotoUrl,
+  carouselBottom = 'calc(var(--bottom-nav-h, 84px) + 8px)',
 }: Props) {
   const mapRef = useRef<JourneyMapHandle>(null)
   const carouselRef = useRef<HTMLDivElement>(null)
   const [activeIndex, setActiveIndex] = useState(0)
-  const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map())
-  const activeIndexRef = useRef(activeIndex)
-  useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
 
+  const entryDayMeta = useMemo(() => {
+    const uniqueDates = [...new Set(entries.map((e: any) => e.entry_date).sort())]
+    const counters = new Map<string, number>()
+    return entries.map((e: any) => {
+      const dayIdx = uniqueDates.indexOf(e.entry_date)
+      const dayLabel = (counters.get(e.entry_date) ?? 0) + 1
+      counters.set(e.entry_date, dayLabel)
+      return { dayLabel, dayColor: DAY_COLORS[dayIdx % DAY_COLORS.length] }
+    })
+  }, [entries])
+  const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   // Sync map focus when carousel scrolls (with guard for uninitialized map)
   const syncMapToCarousel = useCallback((index: number) => {
     const entry = entries[index]
@@ -76,29 +87,19 @@ export default function MobileMapTimeline({
     })
   }, [syncMapToCarousel])
 
-  // Track scroll; debounce to re-center the active card when the user stops.
+  // Defer all state updates until scrolling settles — updating activeIndex
+  // mid-swipe resizes cards (240→320px), causing layout reflow every frame.
   useEffect(() => {
     const el = carouselRef.current
     if (!el || entries.length === 0) return
-    let rafId: number | null = null
     let settleTimer: number | null = null
     const onScroll = () => {
-      if (rafId != null) return
-      rafId = requestAnimationFrame(() => {
-        pickNearestCard()
-        rafId = null
-      })
       if (settleTimer != null) window.clearTimeout(settleTimer)
-      settleTimer = window.setTimeout(() => {
-        // Ensure the active card sits at the center once the user settles.
-        const card = cardRefs.current.get(activeIndexRef.current)
-        card?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
-      }, 180)
+      settleTimer = window.setTimeout(pickNearestCard, 150)
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       el.removeEventListener('scroll', onScroll)
-      if (rafId != null) cancelAnimationFrame(rafId)
       if (settleTimer != null) window.clearTimeout(settleTimer)
     }
   }, [entries.length, pickNearestCard])
@@ -142,7 +143,10 @@ export default function MobileMapTimeline({
 
   if (entries.length === 0) {
     return (
-      <div className="fixed inset-0 z-10" style={{ top: 0, bottom: 0 }}>
+      <div
+        className="fixed left-0 right-0 z-10"
+        style={{ top: 'var(--nav-h, 0px)', bottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
         <JourneyMap
           ref={mapRef}
           entries={mapEntries}
@@ -168,7 +172,10 @@ export default function MobileMapTimeline({
   }
 
   return (
-    <div className="fixed inset-0 z-10" style={{ top: 0, bottom: 0 }}>
+    <div
+      className="fixed left-0 right-0 z-10"
+      style={{ top: 'var(--nav-h, 0px)', bottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
       {/* Full-screen map */}
       <JourneyMap
         ref={mapRef}
@@ -186,13 +193,13 @@ export default function MobileMapTimeline({
       {/* Bottom carousel */}
       <div
         className="fixed left-0 right-0 z-40"
-        style={{ touchAction: 'pan-x', bottom: 'calc(var(--bottom-nav-h, 84px) + 8px)' }}
+        style={{ touchAction: 'pan-x', bottom: carouselBottom }}
       >
         <div
           ref={carouselRef}
-          className="flex gap-3 overflow-x-auto px-4 pb-3 pt-1 scroll-smooth"
+          className="flex gap-3 overflow-x-auto px-4 pb-3 pt-1"
           style={{
-            scrollSnapType: 'x proximity',
+            scrollSnapType: 'x mandatory',
             WebkitOverflowScrolling: 'touch',
             scrollbarWidth: 'none',
             msOverflowStyle: 'none',
@@ -207,7 +214,8 @@ export default function MobileMapTimeline({
             >
               <MobileEntryCard
                 entry={entry}
-                index={i}
+                dayLabel={entryDayMeta[i]?.dayLabel ?? i + 1}
+                dayColor={entryDayMeta[i]?.dayColor ?? DAY_COLORS[0]}
                 isActive={i === activeIndex}
                 onClick={() => handleCardTap(entry, i)}
                 publicPhotoUrl={publicPhotoUrl}

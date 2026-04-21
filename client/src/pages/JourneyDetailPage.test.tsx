@@ -1468,7 +1468,7 @@ describe('JourneyDetailPage', () => {
 
   // ── FE-PAGE-JOURNEYDETAIL-074 ──────────────────────────────────────────
   describe('FE-PAGE-JOURNEYDETAIL-074: Delete share link removes it', () => {
-    it('clicking "Remove share link" calls DELETE and returns to create state', async () => {
+    it('clicking "Delete link" calls DELETE and returns to create state', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       let deleteCalled = false;
 
@@ -1493,10 +1493,10 @@ describe('JourneyDetailPage', () => {
       await openSettingsDialog(user);
 
       await waitFor(() => {
-        expect(screen.getByText('Remove share link')).toBeInTheDocument();
+        expect(screen.getByText('Delete link')).toBeInTheDocument();
       });
 
-      await user.click(screen.getByText('Remove share link'));
+      await user.click(screen.getByText('Delete link'));
 
       await waitFor(() => {
         expect(deleteCalled).toBe(true);
@@ -2905,7 +2905,7 @@ describe('JourneyDetailPage', () => {
 
       // The permission toggles show Timeline, Gallery, Map labels within the share section
       // These reuse the same i18n keys as the main tab bar
-      expect(screen.getByText('Remove share link')).toBeInTheDocument();
+      expect(screen.getByText('Delete link')).toBeInTheDocument();
       expect(screen.getByText('Copy')).toBeInTheDocument();
     });
   });
