@@ -18,10 +18,29 @@ function createTables(db: Database.Database): void {
       mfa_enabled INTEGER DEFAULT 0,
       mfa_secret TEXT,
       mfa_backup_codes TEXT,
+      immich_url TEXT,
+      immich_access_token TEXT,
+      synology_url TEXT,
+      synology_username TEXT,
+      synology_password TEXT,
+      synology_sid TEXT,
       must_change_password INTEGER DEFAULT 0,
+      password_version INTEGER NOT NULL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      consumed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_ip TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_prt_user ON password_reset_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS idx_prt_hash ON password_reset_tokens(token_hash);
 
     CREATE TABLE IF NOT EXISTS settings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,9 +178,11 @@ function createTables(db: Database.Database): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
       day_id INTEGER REFERENCES days(id) ON DELETE SET NULL,
+      end_day_id INTEGER REFERENCES days(id) ON DELETE SET NULL,
       place_id INTEGER REFERENCES places(id) ON DELETE SET NULL,
       assignment_id INTEGER REFERENCES day_assignments(id) ON DELETE SET NULL,
       title TEXT NOT NULL,
+      accommodation_id TEXT,
       reservation_time TEXT,
       reservation_end_time TEXT,
       location TEXT,
@@ -222,6 +243,31 @@ function createTables(db: Database.Database): void {
       enabled INTEGER DEFAULT 0,
       config TEXT DEFAULT '{}',
       sort_order INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS photo_providers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      icon TEXT DEFAULT 'Image',
+      enabled INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS photo_provider_fields (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider_id TEXT NOT NULL REFERENCES photo_providers(id) ON DELETE CASCADE,
+      field_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      input_type TEXT NOT NULL DEFAULT 'text',
+      placeholder TEXT,
+      hint TEXT,
+      required INTEGER DEFAULT 0,
+      secret INTEGER DEFAULT 0,
+      settings_key TEXT,
+      payload_key TEXT,
+      sort_order INTEGER DEFAULT 0,
+      UNIQUE(provider_id, field_key)
     );
 
     -- Vacay addon tables
@@ -300,10 +346,11 @@ function createTables(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS day_accommodations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
-      place_id INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+      place_id INTEGER REFERENCES places(id) ON DELETE SET NULL,
       start_day_id INTEGER NOT NULL REFERENCES days(id) ON DELETE CASCADE,
       end_day_id INTEGER NOT NULL REFERENCES days(id) ON DELETE CASCADE,
       check_in TEXT,
+      check_in_end TEXT,
       check_out TEXT,
       confirmation TEXT,
       notes TEXT,
@@ -396,6 +443,39 @@ function createTables(db: Database.Database): void {
       ip TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('simple', 'boolean', 'navigate')),
+      scope TEXT NOT NULL CHECK(scope IN ('trip', 'user', 'admin')),
+      target INTEGER NOT NULL,
+      sender_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title_key TEXT NOT NULL,
+      title_params TEXT DEFAULT '{}',
+      text_key TEXT NOT NULL,
+      text_params TEXT DEFAULT '{}',
+      positive_text_key TEXT,
+      negative_text_key TEXT,
+      positive_callback TEXT,
+      negative_callback TEXT,
+      response TEXT CHECK(response IN ('positive', 'negative')),
+      navigate_text_key TEXT,
+      navigate_target TEXT,
+      is_read INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_id, is_read, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created ON notifications(recipient_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS notification_channel_preferences (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (user_id, event_type, channel)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ncp_user ON notification_channel_preferences(user_id);
   `);
 }
 

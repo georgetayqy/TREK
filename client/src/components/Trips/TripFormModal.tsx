@@ -36,6 +36,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
     start_date: '',
     end_date: '',
     reminder_days: 0 as number,
+    day_count: 7,
   })
   const [customReminder, setCustomReminder] = useState(false)
   const [error, setError] = useState('')
@@ -45,6 +46,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
   const [uploadingCover, setUploadingCover] = useState(false)
   const [allUsers, setAllUsers] = useState<{ id: number; username: string }[]>([])
   const [selectedMembers, setSelectedMembers] = useState<number[]>([])
+  const [existingMembers, setExistingMembers] = useState<{ id: number; username: string }[]>([])
   const [memberSelectValue, setMemberSelectValue] = useState('')
 
   useEffect(() => {
@@ -56,11 +58,12 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         start_date: trip.start_date || '',
         end_date: trip.end_date || '',
         reminder_days: rd,
+        day_count: trip.day_count || 7,
       })
       setCustomReminder(![0, 1, 3, 9].includes(rd))
       setCoverPreview(trip.cover_image || null)
     } else {
-      setFormData({ title: '', description: '', start_date: '', end_date: '', reminder_days: tripRemindersEnabled ? 3 : 0 })
+      setFormData({ title: '', description: '', start_date: '', end_date: '', reminder_days: tripRemindersEnabled ? 3 : 0, day_count: 7 })
       setCustomReminder(false)
       setCoverPreview(null)
     }
@@ -72,8 +75,11 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         if (c?.trip_reminders_enabled !== undefined) setTripRemindersEnabled(c.trip_reminders_enabled)
       }).catch(() => {})
     }
-    if (!trip) {
-      authApi.listUsers().then(d => setAllUsers(d.users || [])).catch(() => {})
+    authApi.listUsers().then(d => setAllUsers(d.users || [])).catch(() => {})
+    if (trip) {
+      tripsApi.getMembers(trip.id).then(d => setExistingMembers(d.members || [])).catch(() => {})
+    } else {
+      setExistingMembers([])
     }
   }, [trip, isOpen])
 
@@ -98,6 +104,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
         reminder_days: formData.reminder_days,
+        ...(!formData.start_date && !formData.end_date ? { day_count: formData.day_count } : {}),
       })
       // Add selected members for newly created trips
       if (selectedMembers.length > 0 && result?.trip?.id) {
@@ -197,10 +204,10 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
       if (!prev.end_date || prev.end_date < value) {
         next.end_date = value
       } else if (prev.start_date) {
-        const oldStart = new Date(prev.start_date + 'T00:00:00')
-        const oldEnd = new Date(prev.end_date + 'T00:00:00')
+        const oldStart = new Date(prev.start_date + 'T00:00:00Z')
+        const oldEnd = new Date(prev.end_date + 'T00:00:00Z')
         const duration = Math.round((oldEnd - oldStart) / 86400000)
-        const newEnd = new Date(value + 'T00:00:00')
+        const newEnd = new Date(value + 'T00:00:00Z')
         newEnd.setDate(newEnd.getDate() + duration)
         next.end_date = newEnd.toISOString().split('T')[0]
       }
@@ -297,6 +304,18 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
           </div>
         </div>
 
+        {!formData.start_date && !formData.end_date && (
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              {t('dashboard.dayCount')}
+            </label>
+            <input type="number" min={1} max={365} value={formData.day_count}
+              onChange={e => update('day_count', Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
+              className={inputCls} />
+            <p className="text-xs text-slate-400 mt-1.5">{t('dashboard.dayCountHint')}</p>
+          </div>
+        )}
+
         {/* Reminder — only visible to owner (or when creating) */}
         {(!isEditing || trip?.user_id === currentUser?.id || currentUser?.role === 'admin') && (
         <div className={!tripRemindersEnabled ? 'opacity-50' : ''}>
@@ -350,12 +369,38 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         </div>
         )}
 
-        {/* Members — only for new trips */}
-        {!isEditing && allUsers.filter(u => u.id !== currentUser?.id).length > 0 && (
+        {/* Members */}
+        {allUsers.filter(u => u.id !== currentUser?.id).length > 0 && (
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              <UserPlus className="inline w-4 h-4 mr-1" />{t('dashboard.addMembers')}
+              <UserPlus className="inline w-4 h-4 mr-1" />{isEditing ? t('dashboard.addMembers') : t('dashboard.addMembers')}
             </label>
+            {/* Existing members (editing mode) */}
+            {isEditing && existingMembers.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                {existingMembers.map(m => (
+                  <span key={m.id}
+                    onClick={async () => {
+                      if (m.id === currentUser?.id) return
+                      try {
+                        await tripsApi.removeMember(trip!.id, m.id)
+                        setExistingMembers(prev => prev.filter(x => x.id !== m.id))
+                        toast.success(t('trips.memberRemoved', { username: m.username }))
+                      } catch { toast.error(t('trips.memberRemoveError')) }
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 99,
+                      background: 'var(--bg-secondary)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
+                      cursor: m.id === currentUser?.id ? 'default' : 'pointer',
+                      border: '1px solid var(--border-primary)',
+                    }}>
+                    {m.username}
+                    {m.id !== currentUser?.id && <X size={11} style={{ color: 'var(--text-faint)' }} />}
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* Newly selected members (both modes) */}
             {selectedMembers.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
                 {selectedMembers.map(uid => {
@@ -378,11 +423,24 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
             <div style={{ display: 'flex', gap: 8 }}>
               <CustomSelect
                 value={memberSelectValue}
-                onChange={value => {
-                  if (value) { setSelectedMembers(prev => prev.includes(Number(value)) ? prev : [...prev, Number(value)]); setMemberSelectValue('') }
+                onChange={async value => {
+                  if (!value) return
+                  if (isEditing && trip?.id) {
+                    const user = allUsers.find(u => u.id === Number(value))
+                    if (user) {
+                      try {
+                        await tripsApi.addMember(trip.id, user.username)
+                        setExistingMembers(prev => [...prev, { id: user.id, username: user.username }])
+                        toast.success(t('trips.memberAdded', { username: user.username }))
+                      } catch { toast.error(t('trips.memberAddError')) }
+                    }
+                  } else {
+                    setSelectedMembers(prev => prev.includes(Number(value)) ? prev : [...prev, Number(value)])
+                  }
+                  setMemberSelectValue('')
                 }}
                 placeholder={t('dashboard.addMember')}
-                options={allUsers.filter(u => u.id !== currentUser?.id && !selectedMembers.includes(u.id)).map(u => ({ value: u.id, label: u.username }))}
+                options={allUsers.filter(u => u.id !== currentUser?.id && !selectedMembers.includes(u.id) && !existingMembers.some(m => m.id === u.id)).map(u => ({ value: u.id, label: u.username }))}
                 searchable
                 size="sm"
               />

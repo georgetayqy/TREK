@@ -118,6 +118,70 @@ const texts: Record<string, DemoTexts> = {
     selfHostLink: 'alójalo tú mismo',
     close: 'Entendido',
   },
+  zh: {
+    titleBefore: '欢迎来到 ',
+    titleAfter: '',
+    title: '欢迎来到 TREK 演示版',
+    description: '你可以查看、编辑和创建旅行。所有更改都会在每小时自动重置。',
+    resetIn: '下次重置将在',
+    minutes: '分钟后',
+    uploadNote: '演示模式下已禁用文件上传（照片、文档、封面）。',
+    fullVersionTitle: '完整版本还包括：',
+    features: [
+      '文件上传（照片、文档、封面）',
+      'API 密钥管理（Google Maps、天气）',
+      '用户和权限管理',
+      '自动备份',
+      '附加组件管理（启用/禁用）',
+      'OIDC / SSO 单点登录',
+    ],
+    addonsTitle: '模块化附加组件（完整版本可禁用）',
+    addons: [
+      ['Vacay', '带日历、节假日和用户融合的假期规划器'],
+      ['Atlas', '带已访问国家和旅行统计的世界地图'],
+      ['Packing', '按旅行管理清单'],
+      ['Budget', '支持分摊的费用追踪'],
+      ['Documents', '将文件附加到旅行'],
+      ['Widgets', '货币换算和时区工具'],
+    ],
+    whatIs: '什么是 TREK？',
+    whatIsDesc: '一个支持实时协作、交互式地图、OIDC 登录和深色模式的自托管旅行规划器。',
+    selfHost: '开源项目 - ',
+    selfHostLink: '自行部署',
+    close: '知道了',
+  },
+  'zh-TW': {
+    titleBefore: '歡迎來到 ',
+    titleAfter: '',
+    title: '歡迎來到 TREK 展示版',
+    description: '你可以檢視、編輯和建立行程。所有變更都會在每小時自動重設。',
+    resetIn: '下次重設將在',
+    minutes: '分鐘後',
+    uploadNote: '展示模式下已停用檔案上傳（照片、文件、封面）。',
+    fullVersionTitle: '完整版本還包含：',
+    features: [
+      '檔案上傳（照片、文件、封面）',
+      'API 金鑰管理（Google Maps、天氣）',
+      '使用者與權限管理',
+      '自動備份',
+      '附加元件管理（啟用/停用）',
+      'OIDC / SSO 單一登入',
+    ],
+    addonsTitle: '模組化附加元件（完整版本可停用）',
+    addons: [
+      ['Vacay', '具備日曆、假日與使用者融合的假期規劃器'],
+      ['Atlas', '顯示已造訪國家與旅行統計的世界地圖'],
+      ['Packing', '依行程管理的檢查清單'],
+      ['Budget', '支援分攤的費用追蹤'],
+      ['Documents', '將檔案附加到行程'],
+      ['Widgets', '貨幣換算與時區工具'],
+    ],
+    whatIs: 'TREK 是什麼？',
+    whatIsDesc: '一個支援即時協作、互動式地圖、OIDC 登入和深色模式的自架旅行規劃器。',
+    selfHost: '開源專案 - ',
+    selfHostLink: '自行架設',
+    close: '知道了',
+  },
   ar: {
     titleBefore: 'مرحبًا بك في ',
     titleAfter: '',
@@ -150,6 +214,38 @@ const texts: Record<string, DemoTexts> = {
     selfHostLink: 'استضفه بنفسك',
     close: 'فهمت',
   },
+  id: {
+    titleBefore: 'Selamat datang di ',
+    titleAfter: '',
+    title: 'Selamat datang di Demo TREK',
+    description: 'Anda dapat melihat, mengedit, dan membuat perjalanan. Semua perubahan akan diatur ulang secara otomatis setiap jam.',
+    resetIn: 'Atur ulang berikutnya dalam',
+    minutes: 'menit',
+    uploadNote: 'Unggah file (foto, dokumen, sampul) dinonaktifkan dalam mode demo.',
+    fullVersionTitle: 'Selain itu dalam versi lengkap:',
+    features: [
+      'Unggah file (foto, dokumen, sampul)',
+      'Manajemen kunci API (Google Maps, Cuaca)',
+      'Manajemen pengguna & izin',
+      'Pencadangan otomatis',
+      'Manajemen Addon (aktifkan/nonaktifkan)',
+      'OIDC / SSO single sign-on',
+    ],
+    addonsTitle: 'Addon Modular (dapat dinonaktifkan di versi lengkap)',
+    addons: [
+      ['Vacay', 'Perencana liburan dengan kalender, hari libur & penggabungan pengguna'],
+      ['Atlas', 'Peta dunia dengan negara yang dikunjungi & statistik perjalanan'],
+      ['Pengepakan', 'Daftar periksa per perjalanan'],
+      ['Anggaran', 'Pelacakan pengeluaran dengan pemisahan tagihan'],
+      ['Dokumen', 'Lampirkan file ke perjalanan'],
+      ['Widget', 'Konverter mata uang & zona waktu'],
+    ],
+    whatIs: 'Apa itu TREK?',
+    whatIsDesc: 'Perencana perjalanan yang di-host sendiri dengan kolaborasi real-time, peta interaktif, login OIDC, dan mode gelap.',
+    selfHost: 'Buka sumber — ',
+    selfHostLink: 'host mandiri',
+    close: 'Mengerti',
+  },
 }
 
 const featureIcons = [Upload, Key, Users, Database, Puzzle, Shield]
@@ -170,17 +266,22 @@ export default function DemoBanner(): React.ReactElement | null {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, zIndex: 9999,
+      position: 'fixed', inset: 0, zIndex: 99999,
       background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 16, overflow: 'auto',
+      paddingTop: 'max(16px, env(safe-area-inset-top))',
+      paddingBottom: 'max(16px, calc(env(safe-area-inset-bottom) + 80px))',
+      paddingLeft: 16, paddingRight: 16,
+      overflow: 'auto',
       fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     }} onClick={() => setDismissed(true)}>
       <div style={{
-        background: 'white', borderRadius: 20, padding: '28px 24px 20px',
+        background: 'white', borderRadius: 20, padding: '28px 24px 0',
         maxWidth: 480, width: '100%',
         boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-        maxHeight: '90vh', overflow: 'auto',
+        maxHeight: 'min(90vh, calc(100dvh - 96px))',
+        overflow: 'auto',
+        display: 'flex', flexDirection: 'column',
       }} onClick={(e: React.MouseEvent<HTMLDivElement>) => e.stopPropagation()}>
 
         {/* Header */}
@@ -271,8 +372,10 @@ export default function DemoBanner(): React.ReactElement | null {
 
         {/* Footer */}
         <div style={{
-          paddingTop: 14, borderTop: '1px solid #e5e7eb',
+          padding: '14px 0 20px', borderTop: '1px solid #e5e7eb',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          position: 'sticky', bottom: 0, background: 'white',
+          marginTop: 'auto',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#9ca3af' }}>
             <Github size={13} />

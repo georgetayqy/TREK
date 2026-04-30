@@ -1,144 +1,55 @@
 import express, { Request, Response } from 'express';
-import crypto from 'crypto';
-import fetch from 'node-fetch';
-import jwt from 'jsonwebtoken';
-import { db } from '../db/database';
-import { JWT_SECRET } from '../config';
-import { User } from '../types';
-import { decrypt_api_key } from '../services/apiKeyCrypto';
 import { setAuthCookie } from '../services/cookie';
-
-interface OidcDiscoveryDoc {
-  authorization_endpoint: string;
-  token_endpoint: string;
-  userinfo_endpoint: string;
-  _issuer?: string;
-}
-
-interface OidcTokenResponse {
-  access_token?: string;
-  id_token?: string;
-  token_type?: string;
-}
-
-interface OidcUserInfo {
-  sub: string;
-  email?: string;
-  name?: string;
-  preferred_username?: string;
-  groups?: string[];
-  roles?: string[];
-  [key: string]: unknown;
-}
+import {
+  getOidcConfig,
+  discover,
+  createState,
+  consumeState,
+  createAuthCode,
+  consumeAuthCode,
+  exchangeCodeForToken,
+  getUserInfo,
+  verifyIdToken,
+  findOrCreateUser,
+  touchLastLogin,
+  generateToken,
+  frontendUrl,
+  getAppUrl,
+} from '../services/oidcService';
+import { resolveAuthToggles } from '../services/authService';
 
 const router = express.Router();
 
-const AUTH_CODE_TTL = 60000;          // 1 minute
-const AUTH_CODE_CLEANUP = 30000;      // 30 seconds
-const STATE_TTL = 5 * 60 * 1000;     // 5 minutes
-const STATE_CLEANUP = 60 * 1000;      // 1 minute
-
-const authCodes = new Map<string, { token: string; created: number }>();
-setInterval(() => {
-  const now = Date.now();
-  for (const [code, entry] of authCodes) {
-    if (now - entry.created > AUTH_CODE_TTL) authCodes.delete(code);
-  }
-}, AUTH_CODE_CLEANUP);
-
-const pendingStates = new Map<string, { createdAt: number; redirectUri: string; inviteToken?: string }>();
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [state, data] of pendingStates) {
-    if (now - data.createdAt > STATE_TTL) pendingStates.delete(state);
-  }
-}, STATE_CLEANUP);
-
-function getOidcConfig() {
-  const get = (key: string) => (db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as { value: string } | undefined)?.value || null;
-  const issuer = process.env.OIDC_ISSUER || get('oidc_issuer');
-  const clientId = process.env.OIDC_CLIENT_ID || get('oidc_client_id');
-  const clientSecret = process.env.OIDC_CLIENT_SECRET || decrypt_api_key(get('oidc_client_secret'));
-  const displayName = process.env.OIDC_DISPLAY_NAME || get('oidc_display_name') || 'SSO';
-  const discoveryUrl = process.env.OIDC_DISCOVERY_URL || get('oidc_discovery_url') || null;
-  if (!issuer || !clientId || !clientSecret) return null;
-  return { issuer: issuer.replace(/\/+$/, ''), clientId, clientSecret, displayName, discoveryUrl };
-}
-
-let discoveryCache: OidcDiscoveryDoc | null = null;
-let discoveryCacheTime = 0;
-const DISCOVERY_TTL = 60 * 60 * 1000; // 1 hour
-
-async function discover(issuer: string, discoveryUrl?: string | null) {
-  const url = discoveryUrl || `${issuer}/.well-known/openid-configuration`;
-  if (discoveryCache && Date.now() - discoveryCacheTime < DISCOVERY_TTL && discoveryCache._issuer === url) {
-    return discoveryCache;
-  }
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Failed to fetch OIDC discovery document');
-  const doc = await res.json() as OidcDiscoveryDoc;
-  doc._issuer = url;
-  discoveryCache = doc;
-  discoveryCacheTime = Date.now();
-  return doc;
-}
-
-function generateToken(user: { id: number }) {
-  return jwt.sign(
-    { id: user.id },
-    JWT_SECRET,
-    { expiresIn: '24h', algorithm: 'HS256' }
-  );
-}
-
-// Check if user should be admin based on OIDC claims
-// Env: OIDC_ADMIN_CLAIM (default: "groups"), OIDC_ADMIN_VALUE (required, e.g. "app-trek-admins")
-function resolveOidcRole(userInfo: OidcUserInfo, isFirstUser: boolean): 'admin' | 'user' {
-  if (isFirstUser) return 'admin';
-  const adminValue = process.env.OIDC_ADMIN_VALUE;
-  if (!adminValue) return 'user'; // No claim mapping configured
-  const claimKey = process.env.OIDC_ADMIN_CLAIM || 'groups';
-  const claimData = userInfo[claimKey];
-  if (Array.isArray(claimData)) {
-    return claimData.some(v => String(v) === adminValue) ? 'admin' : 'user';
-  }
-  if (typeof claimData === 'string') {
-    return claimData === adminValue ? 'admin' : 'user';
-  }
-  return 'user';
-}
-
-function frontendUrl(path: string): string {
-  const base = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173';
-  return base + path;
-}
+// ---- GET /login ----------------------------------------------------------
 
 router.get('/login', async (req: Request, res: Response) => {
+  if (!resolveAuthToggles().oidc_login) {
+    return res.status(403).json({ error: 'SSO login is disabled.' });
+  }
+
   const config = getOidcConfig();
   if (!config) return res.status(400).json({ error: 'OIDC not configured' });
 
-  if (config.issuer && !config.issuer.startsWith('https://') && process.env.NODE_ENV === 'production') {
+  if (config.issuer && !config.issuer.startsWith('https://') && process.env.NODE_ENV?.toLowerCase() === 'production') {
     return res.status(400).json({ error: 'OIDC issuer must use HTTPS in production' });
   }
 
   try {
     const doc = await discover(config.issuer, config.discoveryUrl);
-    const state = crypto.randomBytes(32).toString('hex');
-    const appUrl = process.env.APP_URL || (db.prepare("SELECT value FROM app_settings WHERE key = 'app_url'").get() as { value: string } | undefined)?.value;
+    const appUrl = getAppUrl();
     if (!appUrl) {
       return res.status(500).json({ error: 'APP_URL is not configured. OIDC cannot be used.' });
     }
+
     const redirectUri = `${appUrl.replace(/\/+$/, '')}/api/auth/oidc/callback`;
     const inviteToken = req.query.invite as string | undefined;
-
-    pendingStates.set(state, { createdAt: Date.now(), redirectUri, inviteToken });
+    const state = createState(redirectUri, inviteToken);
 
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: config.clientId,
       redirect_uri: redirectUri,
-      scope: process.env.OIDC_SCOPE || 'openid email profile groups',
+      scope: process.env.OIDC_SCOPE || 'openid email profile',
       state,
     });
 
@@ -149,133 +60,87 @@ router.get('/login', async (req: Request, res: Response) => {
   }
 });
 
+// ---- GET /callback -------------------------------------------------------
+
 router.get('/callback', async (req: Request, res: Response) => {
+  if (!resolveAuthToggles().oidc_login) {
+    return res.redirect(frontendUrl('/login?oidc_error=sso_disabled'));
+  }
+
   const { code, state, error: oidcError } = req.query as { code?: string; state?: string; error?: string };
 
   if (oidcError) {
     console.error('[OIDC] Provider error:', oidcError);
     return res.redirect(frontendUrl('/login?oidc_error=' + encodeURIComponent(oidcError)));
   }
-
   if (!code || !state) {
     return res.redirect(frontendUrl('/login?oidc_error=missing_params'));
   }
 
-  const pending = pendingStates.get(state);
+  const pending = consumeState(state);
   if (!pending) {
     return res.redirect(frontendUrl('/login?oidc_error=invalid_state'));
   }
-  pendingStates.delete(state);
 
   const config = getOidcConfig();
   if (!config) return res.redirect(frontendUrl('/login?oidc_error=not_configured'));
 
-  if (config.issuer && !config.issuer.startsWith('https://') && process.env.NODE_ENV === 'production') {
+  if (config.issuer && !config.issuer.startsWith('https://') && process.env.NODE_ENV?.toLowerCase() === 'production') {
     return res.redirect(frontendUrl('/login?oidc_error=issuer_not_https'));
   }
 
   try {
     const doc = await discover(config.issuer, config.discoveryUrl);
 
-    const tokenRes = await fetch(doc.token_endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: pending.redirectUri,
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-      }),
-    });
-
-    const tokenData = await tokenRes.json() as OidcTokenResponse;
-    if (!tokenRes.ok || !tokenData.access_token) {
-      console.error('[OIDC] Token exchange failed: status', tokenRes.status);
+    const tokenData = await exchangeCodeForToken(doc, code, pending.redirectUri, config.clientId, config.clientSecret);
+    if (!tokenData._ok || !tokenData.access_token) {
+      console.error('[OIDC] Token exchange failed: status', tokenData._status);
       return res.redirect(frontendUrl('/login?oidc_error=token_failed'));
     }
 
-    const userInfoRes = await fetch(doc.userinfo_endpoint, {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
-    });
-    const userInfo = await userInfoRes.json() as OidcUserInfo;
+    // Strict id_token verification: signature via JWKS + iss + aud.
+    // Previously only the access_token was used to hit userinfo, so a
+    // compromised provider or MITM could supply a crafted userinfo
+    // response the server would blindly trust. When the id_token is
+    // missing from the token response (non-compliant provider) we still
+    // reject — an Authorization Code flow MUST return one per OIDC Core.
+    if (!tokenData.id_token) {
+      console.error('[OIDC] Token response missing id_token — refusing login');
+      return res.redirect(frontendUrl('/login?oidc_error=no_id_token'));
+    }
+    const idVerify = await verifyIdToken(
+      tokenData.id_token,
+      doc,
+      config.clientId,
+      (doc.issuer ?? '').replace(/\/+$/, '') || config.issuer,
+    );
+    if (idVerify.ok !== true) {
+      const reason = 'error' in idVerify ? idVerify.error : 'unknown';
+      console.error('[OIDC] id_token verification failed:', reason);
+      return res.redirect(frontendUrl('/login?oidc_error=id_token_invalid'));
+    }
 
+    const userInfo = await getUserInfo(doc.userinfo_endpoint, tokenData.access_token);
     if (!userInfo.email) {
       return res.redirect(frontendUrl('/login?oidc_error=no_email'));
     }
-
-    const email = userInfo.email.toLowerCase();
-    const name = userInfo.name || userInfo.preferred_username || email.split('@')[0];
-    const sub = userInfo.sub;
-
-    let user = db.prepare('SELECT * FROM users WHERE oidc_sub = ? AND oidc_issuer = ?').get(sub, config.issuer) as User | undefined;
-    if (!user) {
-      user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email) as User | undefined;
+    // Cross-check: the userinfo response must be for the same subject
+    // the id_token signed. Catches a compromised userinfo endpoint that
+    // speaks for a different principal than the id_token's claim.
+    const tokenSub = idVerify.claims.sub;
+    if (typeof tokenSub === 'string' && userInfo.sub && userInfo.sub !== tokenSub) {
+      console.error('[OIDC] userinfo.sub does not match id_token.sub — refusing login');
+      return res.redirect(frontendUrl('/login?oidc_error=subject_mismatch'));
     }
 
-    if (user) {
-      if (!user.oidc_sub) {
-        db.prepare('UPDATE users SET oidc_sub = ?, oidc_issuer = ? WHERE id = ?').run(sub, config.issuer, user.id);
-      }
-      // Update role based on OIDC claims on every login (if claim mapping is configured)
-      if (process.env.OIDC_ADMIN_VALUE) {
-        const newRole = resolveOidcRole(userInfo, false);
-        if (user.role !== newRole) {
-          db.prepare('UPDATE users SET role = ? WHERE id = ?').run(newRole, user.id);
-          user = { ...user, role: newRole } as User;
-        }
-      }
-    } else {
-      const userCount = (db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
-      const isFirstUser = userCount === 0;
-
-      let validInvite: any = null;
-      if (pending.inviteToken) {
-        validInvite = db.prepare('SELECT * FROM invite_tokens WHERE token = ?').get(pending.inviteToken);
-        if (validInvite) {
-          if (validInvite.max_uses > 0 && validInvite.used_count >= validInvite.max_uses) validInvite = null;
-          if (validInvite?.expires_at && new Date(validInvite.expires_at) < new Date()) validInvite = null;
-        }
-      }
-
-      if (!isFirstUser && !validInvite) {
-        const setting = db.prepare("SELECT value FROM app_settings WHERE key = 'allow_registration'").get() as { value: string } | undefined;
-        if (setting?.value === 'false') {
-          return res.redirect(frontendUrl('/login?oidc_error=registration_disabled'));
-        }
-      }
-
-      const role = resolveOidcRole(userInfo, isFirstUser);
-      const randomPass = crypto.randomBytes(32).toString('hex');
-      const bcrypt = require('bcryptjs');
-      const hash = bcrypt.hashSync(randomPass, 10);
-
-      let username = name.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 30) || 'user';
-      const existing = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(username);
-      if (existing) username = `${username}_${Date.now() % 10000}`;
-
-      const result = db.prepare(
-        'INSERT INTO users (username, email, password_hash, role, oidc_sub, oidc_issuer) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(username, email, hash, role, sub, config.issuer);
-
-      if (validInvite) {
-        const updated = db.prepare(
-          'UPDATE invite_tokens SET used_count = used_count + 1 WHERE id = ? AND (max_uses = 0 OR used_count < max_uses)'
-        ).run(validInvite.id);
-        if (updated.changes === 0) {
-          console.warn(`[OIDC] Invite token ${pending.inviteToken?.slice(0, 8)}... exceeded max_uses (race condition)`);
-        }
-      }
-
-      user = { id: Number(result.lastInsertRowid), username, email, role } as User;
+    const result = findOrCreateUser(userInfo, config, pending.inviteToken);
+    if ('error' in result) {
+      return res.redirect(frontendUrl('/login?oidc_error=' + result.error));
     }
 
-    db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
-
-    const token = generateToken(user);
-    const { v4: uuidv4 } = require('uuid');
-    const authCode = uuidv4();
-    authCodes.set(authCode, { token, created: Date.now() });
+    touchLastLogin(result.user.id);
+    const jwtToken = generateToken(result.user);
+    const authCode = createAuthCode(jwtToken);
     res.redirect(frontendUrl('/login?oidc_code=' + authCode));
   } catch (err: unknown) {
     console.error('[OIDC] Callback error:', err);
@@ -283,15 +148,17 @@ router.get('/callback', async (req: Request, res: Response) => {
   }
 });
 
+// ---- GET /exchange -------------------------------------------------------
+
 router.get('/exchange', (req: Request, res: Response) => {
   const { code } = req.query as { code?: string };
   if (!code) return res.status(400).json({ error: 'Code required' });
-  const entry = authCodes.get(code);
-  if (!entry) return res.status(400).json({ error: 'Invalid or expired code' });
-  authCodes.delete(code);
-  if (Date.now() - entry.created > AUTH_CODE_TTL) return res.status(400).json({ error: 'Code expired' });
-  setAuthCookie(res, entry.token);
-  res.json({ token: entry.token });
+
+  const result = consumeAuthCode(code);
+  if ('error' in result) return res.status(400).json({ error: result.error });
+
+  setAuthCookie(res, result.token, req);
+  res.json({ token: result.token });
 });
 
 export default router;

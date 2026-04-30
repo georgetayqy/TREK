@@ -1,22 +1,36 @@
 // Trip PDF via browser print window
 import { createElement } from 'react'
 import { getCategoryIcon } from '../shared/categoryIcons'
-import { FileText, Info, Clock, MapPin, Navigation, Train, Plane, Bus, Car, Ship, Coffee, Ticket, Star, Heart, Camera, Flag, Lightbulb, AlertTriangle, ShoppingBag, Bookmark } from 'lucide-react'
-import { mapsApi } from '../../api/client'
+import { FileText, Info, Clock, MapPin, Navigation, Train, Plane, Bus, Car, Ship, Coffee, Ticket, Star, Heart, Camera, Flag, Lightbulb, AlertTriangle, ShoppingBag, Bookmark, Hotel, LogIn, LogOut, KeyRound, BedDouble, Utensils, Users, LucideIcon } from 'lucide-react'
+import { accommodationsApi, mapsApi } from '../../api/client'
 import type { Trip, Day, Place, Category, AssignmentsMap, DayNotesMap } from '../../types'
+import { isDayInAccommodationRange, getDayOrder } from '../../utils/dayOrder'
+
+function renderLucideIcon(icon:LucideIcon, props = {}) {
+  if (!_renderToStaticMarkup) return ''
+  return _renderToStaticMarkup(
+    createElement(icon, props)
+  );
+}
 
 const NOTE_ICON_MAP = { FileText, Info, Clock, MapPin, Navigation, Train, Plane, Bus, Car, Ship, Coffee, Ticket, Star, Heart, Camera, Flag, Lightbulb, AlertTriangle, ShoppingBag, Bookmark }
 function noteIconSvg(iconId) {
-  if (!_renderToStaticMarkup) return ''
   const Icon = NOTE_ICON_MAP[iconId] || FileText
-  return _renderToStaticMarkup(createElement(Icon, { size: 14, strokeWidth: 1.8, color: '#94a3b8' }))
+  return renderLucideIcon(Icon, { size: 14, strokeWidth: 1.8, color: '#94a3b8' })
 }
 
-const TRANSPORT_ICON_MAP = { flight: Plane, train: Train, bus: Bus, car: Car, cruise: Ship }
-function transportIconSvg(type) {
-  if (!_renderToStaticMarkup) return ''
-  const Icon = TRANSPORT_ICON_MAP[type] || Ticket
-  return _renderToStaticMarkup(createElement(Icon, { size: 14, strokeWidth: 1.8, color: '#3b82f6' }))
+const RESERVATION_ICON_MAP = { flight: Plane, train: Train, bus: Bus, car: Car, cruise: Ship, restaurant: Utensils, event: Ticket, tour: Users, other: FileText }
+const RESERVATION_COLOR_MAP = { flight: '#3b82f6', train: '#06b6d4', bus: '#6b7280', car: '#6b7280', cruise: '#0ea5e9', restaurant: '#ef4444', event: '#f59e0b', tour: '#10b981', other: '#6b7280' }
+function reservationIconSvg(type) {
+  const Icon = RESERVATION_ICON_MAP[type] || Ticket
+  const color = RESERVATION_COLOR_MAP[type] || '#3b82f6'
+  return renderLucideIcon(Icon, { size: 14, strokeWidth: 1.8, color })
+}
+
+const ACCOMMODATION_ICON_MAP = { accommodation: Hotel, checkin: LogIn, checkout: LogOut, location: MapPin, note: FileText, confirmation: KeyRound }
+function accommodationIconSvg(type) {
+  const Icon = ACCOMMODATION_ICON_MAP[type] || BedDouble
+  return renderLucideIcon(Icon, { size: 14, strokeWidth: 1.8, color: '#03398f', className: 'accommodation-icon' })
 }
 
 // ── SVG inline icons (for chips) ─────────────────────────────────────────────
@@ -61,15 +75,15 @@ function categoryIconSvg(iconName, color = '#6366f1', size = 24) {
 
 function shortDate(d, locale) {
   if (!d) return ''
-  return new Date(d + 'T00:00:00').toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' })
+  return new Date(d + 'T00:00:00Z').toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
 }
 
 function longDateRange(days, locale) {
   const dd = [...days].filter(d => d.date).sort((a, b) => a.day_number - b.day_number)
   if (!dd.length) return null
-  const f = new Date(dd[0].date + 'T00:00:00')
-  const l = new Date(dd[dd.length - 1].date + 'T00:00:00')
-  return `${f.toLocaleDateString(locale, { day: 'numeric', month: 'long' })} – ${l.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' })}`
+  const f = new Date(dd[0].date + 'T00:00:00Z')
+  const l = new Date(dd[dd.length - 1].date + 'T00:00:00Z')
+  return `${f.toLocaleDateString(locale, { day: 'numeric', month: 'long', timeZone: 'UTC' })} – ${l.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}`
 }
 
 function dayCost(assignments, dayId, locale) {
@@ -83,12 +97,12 @@ async function fetchPlacePhotos(assignments) {
   const allPlaces = Object.values(assignments).flatMap(a => a.map(x => x.place)).filter(Boolean)
   const unique = [...new Map(allPlaces.map(p => [p.id, p])).values()]
 
-  const toFetch = unique.filter(p => !p.image_url && p.google_place_id)
+  const toFetch = unique.filter(p => !p.image_url && (p.google_place_id || p.osm_id))
 
   await Promise.allSettled(
     toFetch.map(async (place) => {
       try {
-        const data = await mapsApi.placePhoto(place.google_place_id)
+        const data = await mapsApi.placePhoto(place.google_place_id || place.osm_id, place.lat, place.lng, place.name)
         if (data.photoUrl) photoMap[place.id] = data.photoUrl
       } catch {}
     })
@@ -115,6 +129,8 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   const sorted = [...(days || [])].sort((a, b) => a.day_number - b.day_number)
   const range = longDateRange(sorted, loc)
   const coverImg = safeImg(trip?.cover_image)
+  //retrieve accommodations for the trip to display on the day sections and prefetch their photos if needed
+  const accommodations = await accommodationsApi.list(trip.id);
 
   // Pre-fetch place photos from Google
   const photoMap = await fetchPlacePhotos(assignments)
@@ -125,25 +141,59 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   const totalCost = Object.values(assignments || {})
     .flatMap(a => a).reduce((s, a) => s + (parseFloat(a.place?.price) || 0), 0)
 
+  // Span helpers for multi-day transport (mirrors DayPlanSidebar logic)
+  const pdfGetDayOrder = (d: Day) => d.day_number
+  const pdfGetSpanPhase = (r: any, dayId: number): 'single' | 'start' | 'middle' | 'end' => {
+    const startId = r.day_id
+    const endId = r.end_day_id ?? startId
+    if (!startId || startId === endId) return 'single'
+    if (dayId === startId) return 'start'
+    if (dayId === endId) return 'end'
+    return 'middle'
+  }
+  const pdfGetDisplayTime = (r: any, dayId: number): string | null => {
+    const phase = pdfGetSpanPhase(r, dayId)
+    if (phase === 'end') return r.reservation_end_time || null
+    if (phase === 'middle') return null
+    return r.reservation_time || null
+  }
+  const pdfGetSpanLabel = (r: any, phase: string): string | null => {
+    if (phase === 'single') return null
+    if (r.type === 'flight') return tr(`reservations.span.${phase === 'start' ? 'departure' : phase === 'end' ? 'arrival' : 'inTransit'}`)
+    if (r.type === 'car') return tr(`reservations.span.${phase === 'start' ? 'pickup' : phase === 'end' ? 'return' : 'active'}`)
+    return tr(`reservations.span.${phase === 'start' ? 'start' : phase === 'end' ? 'end' : 'ongoing'}`)
+  }
+  const pdfGetTransportForDay = (dayId: number) => (reservations || []).filter(r => {
+    if (r.type === 'hotel') return false
+    const startId = r.day_id
+    const endId = r.end_day_id ?? startId
+    if (startId == null) return false
+    if (endId !== startId) {
+      const startDay = sorted.find(d => d.id === startId)
+      const endDay = sorted.find(d => d.id === endId)
+      const thisDay = sorted.find(d => d.id === dayId)
+      if (!startDay || !endDay || !thisDay) return false
+      return pdfGetDayOrder(thisDay) >= pdfGetDayOrder(startDay) && pdfGetDayOrder(thisDay) <= pdfGetDayOrder(endDay)
+    }
+    return startId === dayId
+  })
+
   // Build day HTML
   const daysHtml = sorted.map((day, di) => {
     const assigned = assignments[String(day.id)] || []
     const notes = (dayNotes || []).filter(n => n.day_id === day.id)
     const cost = dayCost(assignments, day.id, loc)
 
-    // Transport bookings for this day
-    const TRANSPORT_TYPES = new Set(['flight', 'train', 'bus', 'car', 'cruise'])
-    const dayTransport = (reservations || []).filter(r => {
-      if (!r.reservation_time || !TRANSPORT_TYPES.has(r.type)) return false
-      return day.date && r.reservation_time.split('T')[0] === day.date
-    })
+    // Reservations for this day (hotel rendered via accommodations block; car middle-phase rendered in sidebar header only)
+    const dayReservations = pdfGetTransportForDay(day.id)
+      .filter(r => !(r.type === 'car' && pdfGetSpanPhase(r, day.id) === 'middle'))
 
     const merged = []
     assigned.forEach(a => merged.push({ type: 'place', k: a.order_index ?? a.sort_order ?? 0, data: a }))
     notes.forEach(n    => merged.push({ type: 'note',  k: n.sort_order ?? 0, data: n }))
-    dayTransport.forEach(r => {
-      const pos = r.day_plan_position ?? (merged.length > 0 ? Math.max(...merged.map(m => m.k)) + 0.5 : 0.5)
-      merged.push({ type: 'transport', k: pos, data: r })
+    dayReservations.forEach(r => {
+      const pos = r.day_positions?.[day.id] ?? r.day_positions?.[String(day.id)] ?? r.day_plan_position ?? (merged.length > 0 ? Math.max(...merged.map(m => m.k)) + 0.5 : 0.5)
+      merged.push({ type: 'reservation', k: pos, data: r })
     })
     merged.sort((a, b) => a.k - b.k)
 
@@ -151,21 +201,31 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
     const itemsHtml = merged.length === 0
       ? `<div class="empty-day">${escHtml(tr('dayplan.emptyDay'))}</div>`
       : merged.map(item => {
-          if (item.type === 'transport') {
+          if (item.type === 'reservation') {
             const r = item.data
             const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata || '{}') : (r.metadata || {})
-            const icon = transportIconSvg(r.type)
+            const icon = reservationIconSvg(r.type)
+            const color = RESERVATION_COLOR_MAP[r.type] || '#3b82f6'
             let subtitle = ''
             if (r.type === 'flight') subtitle = [meta.airline, meta.flight_number, meta.departure_airport && meta.arrival_airport ? `${meta.departure_airport} → ${meta.arrival_airport}` : ''].filter(Boolean).join(' · ')
             else if (r.type === 'train') subtitle = [meta.train_number, meta.platform ? `Gl. ${meta.platform}` : '', meta.seat ? `Seat ${meta.seat}` : ''].filter(Boolean).join(' · ')
-            const time = r.reservation_time?.includes('T') ? r.reservation_time.split('T')[1]?.substring(0, 5) : ''
+            else if (r.type === 'restaurant') subtitle = [meta.party_size ? `${meta.party_size} guests` : ''].filter(Boolean).join(' · ')
+            else if (r.type === 'event') subtitle = [meta.venue].filter(Boolean).join(' · ')
+            else if (r.type === 'tour') subtitle = [meta.operator].filter(Boolean).join(' · ')
+            const locationLine = r.location || meta.location || ''
+            const phase = pdfGetSpanPhase(r, day.id)
+            const spanLabel = pdfGetSpanLabel(r, phase)
+            const displayTime = pdfGetDisplayTime(r, day.id)
+            const time = displayTime?.includes('T') ? displayTime.split('T')[1]?.substring(0, 5) : ''
+            const titleHtml = `${spanLabel ? escHtml(spanLabel) + ': ' : ''}${escHtml(r.title)}`
             return `
-              <div class="note-card" style="border-left: 3px solid #3b82f6;">
-                <div class="note-line" style="background: #3b82f6;"></div>
+              <div class="note-card" style="border-left: 3px solid ${color};">
+                <div class="note-line" style="background: ${color};"></div>
                 <span class="note-icon">${icon}</span>
                 <div class="note-body">
-                  <div class="note-text" style="font-weight: 600;">${escHtml(r.title)}${time ? ` <span style="color:#6b7280;font-weight:400;font-size:10px;">${time}</span>` : ''}</div>
+                  <div class="note-text" style="font-weight: 600;">${titleHtml}${time ? ` <span style="color:#6b7280;font-weight:400;font-size:10px;">${time}</span>` : ''}</div>
                   ${subtitle ? `<div class="note-time">${escHtml(subtitle)}</div>` : ''}
+                  ${locationLine ? `<div class="note-time">${escHtml(locationLine)}</div>` : ''}
                   ${r.confirmation_number ? `<div class="note-time" style="font-size:9px;">Code: ${escHtml(r.confirmation_number)}</div>` : ''}
                 </div>
               </div>`
@@ -223,7 +283,45 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
                 ${place.notes ? `<div class="info-row"><span class="info-spacer"></span><span class="info-text muted italic">${escHtml(place.notes)}</span></div>` : ''}
               </div>
             </div>`
-        }).join('')
+      }).join('')
+
+    const accommodationsForDay = (accommodations.accommodations || []).filter(a =>
+      day ? isDayInAccommodationRange(day, a.start_day_id, a.end_day_id, days) : false
+    ).sort((a, b) => {
+      const startA = days.find(d => d.id === a.start_day_id)
+      const startB = days.find(d => d.id === b.start_day_id)
+      return (startA ? getDayOrder(startA, days) : 0) - (startB ? getDayOrder(startB, days) : 0)
+    })
+
+    const accommodationDetails = accommodationsForDay.map(item => {
+      const isCheckIn = day.id === item.start_day_id
+      const isCheckOut = day.id === item.end_day_id
+      const actionLabel = isCheckIn ? tr('reservations.meta.checkIn')
+        : isCheckOut ? tr('reservations.meta.checkOut')
+        : tr('reservations.meta.linkAccommodation')
+      const actionIcon = isCheckIn ? accommodationIconSvg('checkin')
+        : isCheckOut ? accommodationIconSvg('checkout')
+        : accommodationIconSvg('accommodation')
+      const timeStr = isCheckIn ? (item.check_in || '')
+        : isCheckOut ? (item.check_out || '')
+        : ''
+
+      return `
+        <div class="day-accommodation">
+          <div class="day-accommodation-title accommodation-center-icon">${actionIcon} ${escHtml(actionLabel)}</div>
+          ${timeStr ? `<div class="accommodation-center-icon">${accommodationIconSvg('checkin')} <b>${escHtml(timeStr)}</b></div>` : ''}
+          <div class="accommodation-center-icon">${accommodationIconSvg('accommodation')} ${escHtml(item.place_name)}</div>
+          ${item.place_address ? `<div class="accommodation-center-icon">${accommodationIconSvg('location')} ${escHtml(item.place_address)}</div>` : ''}
+          ${item.notes ? `<div class="accommodation-center-icon">${accommodationIconSvg('note')} ${escHtml(item.notes)}</div>` : ''}
+          ${isCheckIn && item.confirmation ? `<div class="accommodation-center-icon">${accommodationIconSvg('confirmation')} ${escHtml(item.confirmation)}</div>` : ''}
+        </div>`
+    }).join('')
+
+    const accommodationsHtml = accommodationsForDay.length > 0
+      ? `<div class="day-accommodations-overview">
+          <div class="day-accommodations ${accommodationsForDay.length === 1 ? 'single' : ''}">${accommodationDetails}</div>
+        </div>`
+      : ''
 
     return `
       <div class="day-section${di > 0 ? ' page-break' : ''}">
@@ -233,8 +331,8 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
           ${day.date ? `<span class="day-date">${shortDate(day.date, loc)}</span>` : ''}
           ${cost ? `<span class="day-cost">${cost}</span>` : ''}
         </div>
-        <div class="day-body">${itemsHtml}</div>
-      </div>`
+        <div class="day-body">${accommodationsHtml}${itemsHtml}</div>
+      </div>`  
   }).join('')
 
   const html = `<!DOCTYPE html>
@@ -316,6 +414,22 @@ export async function downloadTripPDF({ trip, days, places, assignments, categor
   .day-date  { font-size: 9px; color: rgba(255,255,255,0.45); }
   .day-cost  { font-size: 9px; font-weight: 600; color: rgba(255,255,255,0.65); }
   .day-body  { padding: 12px 28px 6px; }
+
+  /* accommodation info */
+  .day-accommodations-overview { font-size: 12px; }
+  .day-accommodations { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+  .day-accommodations.single { justify-content: center; }
+  .day-accommodation {
+    flex: 1 1 45%; min-width: 200px; margin: 4px 0; padding: 10px;
+    border: 2px solid #e2e8f0; border-radius: 12px;
+    display: flex; flex-direction: column;
+  }
+  .day-accommodation-title {
+    font-size: 16px; font-weight: 600; text-align: center;
+    margin-bottom: 4px; align-self: center;
+  }
+  .accommodation-center-icon { display: flex; align-items: center; gap: 4px; }
+
 
   /* ── Place card ────────────────────────────────── */
   .place-card {
@@ -451,7 +565,7 @@ ${daysHtml}
 
   const iframe = document.createElement('iframe')
   iframe.style.cssText = 'flex:1;width:100%;border:none;'
-  iframe.sandbox = 'allow-same-origin allow-modals'
+  iframe.sandbox = 'allow-same-origin allow-modals allow-scripts'
   iframe.srcdoc = html
 
   card.appendChild(header)

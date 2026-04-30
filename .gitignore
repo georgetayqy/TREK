@@ -16,7 +16,7 @@ client/public/icons/*.png
 *.sqlite-wal
 
 # User data
-server/data/
+server/data/*
 server/uploads/
 
 # Environment
@@ -56,3 +56,9 @@ coverage
 .cache
 *.tsbuildinfo
 *.tgz
+
+.scannerwork
+test-data
+
+.run
+.full-review

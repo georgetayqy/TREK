@@ -1,16 +1,22 @@
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp';
-import { db, canAccessTrip } from '../db/database';
-
-const TRIP_SELECT = `
-  SELECT t.*,
-    (SELECT COUNT(*) FROM days d WHERE d.trip_id = t.id) as day_count,
-    (SELECT COUNT(*) FROM places p WHERE p.trip_id = t.id) as place_count,
-    CASE WHEN t.user_id = :userId THEN 1 ELSE 0 END as is_owner,
-    u.username as owner_username,
-    (SELECT COUNT(*) FROM trip_members tm WHERE tm.trip_id = t.id) as shared_count
-  FROM trips t
-  JOIN users u ON u.id = t.user_id
-`;
+import { canAccessTrip } from '../db/database';
+import { listTrips, getTrip, getTripOwner, listMembers } from '../services/tripService';
+import { listDays, listAccommodations } from '../services/dayService';
+import { listPlaces } from '../services/placeService';
+import { listBudgetItems, getPerPersonSummary, calculateSettlement } from '../services/budgetService';
+import { listItems as listPackingItems, listBags } from '../services/packingService';
+import { listReservations } from '../services/reservationService';
+import { listNotes as listDayNotes } from '../services/dayNoteService';
+import { listNotes as listCollabNotes, listPolls, listMessages } from '../services/collabService';
+import { listItems as listTodoItems } from '../services/todoService';
+import { listCategories } from '../services/categoryService';
+import { listBucketList, listVisitedCountries, getStats as getAtlasStats, listManuallyVisitedRegions } from '../services/atlasService';
+import { getNotifications } from '../services/inAppNotifications';
+import { getActivePlanId, getActivePlan, getPlanData, getEntries as getVacayEntries, getHolidays } from '../services/vacayService';
+import { isAddonEnabled, getCollabFeatures } from '../services/adminService';
+import { ADDON_IDS } from '../addons';
+import { canAccessJourney, getJourneyFull, listEntries, listJourneys } from '../services/journeyService';
+import { canRead, canReadTrips } from './scopes';
 
 function parseId(value: string | string[]): number | null {
   const n = Number(Array.isArray(value) ? value[0] : value);
@@ -27,6 +33,16 @@ function accessDenied(uri: string) {
   };
 }
 
+function scopeDenied(uri: string) {
+  return {
+    contents: [{
+      uri,
+      mimeType: 'application/json',
+      text: JSON.stringify({ error: 'Insufficient OAuth scope to access this resource' }),
+    }],
+  };
+}
+
 function jsonContent(uri: string, data: unknown) {
   return {
     contents: [{
@@ -37,268 +53,390 @@ function jsonContent(uri: string, data: unknown) {
   };
 }
 
-export function registerResources(server: McpServer, userId: number): void {
+export function registerResources(server: McpServer, userId: number, scopes: string[] | null): void {
   // List all accessible trips
-  server.registerResource(
+  if (canReadTrips(scopes)) server.registerResource(
     'trips',
     'trek://trips',
-    { description: 'All trips the user owns or is a member of' },
+    { description: 'All trips the user owns or is a member of', mimeType: 'application/json' },
     async (uri) => {
-      const trips = db.prepare(`
-        ${TRIP_SELECT}
-        LEFT JOIN trip_members m ON m.trip_id = t.id AND m.user_id = :userId
-        WHERE (t.user_id = :userId OR m.user_id IS NOT NULL) AND t.is_archived = 0
-        ORDER BY t.created_at DESC
-      `).all({ userId });
+      const trips = listTrips(userId, 0);
       return jsonContent(uri.href, trips);
     }
   );
 
   // Single trip detail
-  server.registerResource(
+  if (canReadTrips(scopes)) server.registerResource(
     'trip',
     new ResourceTemplate('trek://trips/{tripId}', { list: undefined }),
-    { description: 'A single trip with metadata and member count' },
+    { description: 'A single trip with metadata and member count', mimeType: 'application/json' },
     async (uri, { tripId }) => {
       const id = parseId(tripId);
       if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
-      const trip = db.prepare(`
-        ${TRIP_SELECT}
-        LEFT JOIN trip_members m ON m.trip_id = t.id AND m.user_id = :userId
-        WHERE t.id = :tripId AND (t.user_id = :userId OR m.user_id IS NOT NULL)
-      `).get({ userId, tripId: id });
+      const trip = getTrip(id, userId);
       return jsonContent(uri.href, trip);
     }
   );
 
   // Days with assigned places
-  server.registerResource(
+  if (canReadTrips(scopes)) server.registerResource(
     'trip-days',
     new ResourceTemplate('trek://trips/{tripId}/days', { list: undefined }),
-    { description: 'Days of a trip with their assigned places' },
+    { description: 'Days of a trip with their assigned places', mimeType: 'application/json' },
     async (uri, { tripId }) => {
       const id = parseId(tripId);
       if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
 
-      const days = db.prepare(
-        'SELECT * FROM days WHERE trip_id = ? ORDER BY day_number ASC'
-      ).all(id) as { id: number; day_number: number; date: string | null; title: string | null; notes: string | null }[];
-
-      const dayIds = days.map(d => d.id);
-      const assignmentsByDay: Record<number, unknown[]> = {};
-
-      if (dayIds.length > 0) {
-        const placeholders = dayIds.map(() => '?').join(',');
-        const assignments = db.prepare(`
-          SELECT da.id, da.day_id, da.order_index, da.notes as assignment_notes,
-            p.id as place_id, p.name, p.address, p.lat, p.lng, p.category_id,
-            COALESCE(da.assignment_time, p.place_time) as place_time,
-            c.name as category_name, c.color as category_color, c.icon as category_icon
-          FROM day_assignments da
-          JOIN places p ON da.place_id = p.id
-          LEFT JOIN categories c ON p.category_id = c.id
-          WHERE da.day_id IN (${placeholders})
-          ORDER BY da.order_index ASC, da.created_at ASC
-        `).all(...dayIds) as (Record<string, unknown> & { day_id: number })[];
-
-        for (const a of assignments) {
-          if (!assignmentsByDay[a.day_id]) assignmentsByDay[a.day_id] = [];
-          assignmentsByDay[a.day_id].push(a);
-        }
-      }
-
-      const result = days.map(d => ({ ...d, assignments: assignmentsByDay[d.id] || [] }));
-      return jsonContent(uri.href, result);
+      const { days } = listDays(id);
+      return jsonContent(uri.href, days);
     }
   );
 
   // Places in a trip
-  server.registerResource(
+  if (canRead(scopes, 'places')) server.registerResource(
     'trip-places',
     new ResourceTemplate('trek://trips/{tripId}/places', { list: undefined }),
-    { description: 'All places/POIs saved in a trip' },
+    { description: 'All places/POIs in a trip, optionally filtered by assignment status (e.g. ?assignment=unassigned)', mimeType: 'application/json' },
     async (uri, { tripId }) => {
       const id = parseId(tripId);
       if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
-      const places = db.prepare(`
-        SELECT p.*, c.name as category_name, c.color as category_color, c.icon as category_icon
-        FROM places p
-        LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.trip_id = ?
-        ORDER BY p.created_at DESC
-      `).all(id);
+      const assignment = uri.searchParams.get('assignment') as 'all' | 'unassigned' | 'assigned' | null;
+      const places = listPlaces(String(id), { assignment: assignment ?? undefined });
       return jsonContent(uri.href, places);
     }
   );
 
   // Budget items
-  server.registerResource(
+  if (isAddonEnabled(ADDON_IDS.BUDGET) && canRead(scopes, 'budget')) server.registerResource(
     'trip-budget',
     new ResourceTemplate('trek://trips/{tripId}/budget', { list: undefined }),
-    { description: 'Budget and expense items for a trip' },
+    { description: 'Budget and expense items for a trip', mimeType: 'application/json' },
     async (uri, { tripId }) => {
       const id = parseId(tripId);
       if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
-      const items = db.prepare(
-        'SELECT * FROM budget_items WHERE trip_id = ? ORDER BY category ASC, created_at ASC'
-      ).all(id);
+      const items = listBudgetItems(id);
       return jsonContent(uri.href, items);
     }
   );
 
   // Packing checklist
-  server.registerResource(
+  if (isAddonEnabled(ADDON_IDS.PACKING) && canRead(scopes, 'packing')) server.registerResource(
     'trip-packing',
     new ResourceTemplate('trek://trips/{tripId}/packing', { list: undefined }),
-    { description: 'Packing checklist for a trip' },
+    { description: 'Packing checklist for a trip', mimeType: 'application/json' },
     async (uri, { tripId }) => {
       const id = parseId(tripId);
       if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
-      const items = db.prepare(
-        'SELECT * FROM packing_items WHERE trip_id = ? ORDER BY sort_order ASC, created_at ASC'
-      ).all(id);
+      const items = listPackingItems(id);
       return jsonContent(uri.href, items);
     }
   );
 
   // Reservations (flights, hotels, restaurants)
-  server.registerResource(
+  if (canRead(scopes, 'reservations')) server.registerResource(
     'trip-reservations',
     new ResourceTemplate('trek://trips/{tripId}/reservations', { list: undefined }),
-    { description: 'Reservations (flights, hotels, restaurants) for a trip' },
+    { description: 'Reservations (flights, hotels, restaurants) for a trip', mimeType: 'application/json' },
     async (uri, { tripId }) => {
       const id = parseId(tripId);
       if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
-      const reservations = db.prepare(`
-        SELECT r.*, d.day_number, p.name as place_name
-        FROM reservations r
-        LEFT JOIN days d ON r.day_id = d.id
-        LEFT JOIN places p ON r.place_id = p.id
-        WHERE r.trip_id = ?
-        ORDER BY r.reservation_time ASC, r.created_at ASC
-      `).all(id);
+      const reservations = listReservations(id);
       return jsonContent(uri.href, reservations);
     }
   );
 
   // Day notes
-  server.registerResource(
+  if (canReadTrips(scopes)) server.registerResource(
     'day-notes',
     new ResourceTemplate('trek://trips/{tripId}/days/{dayId}/notes', { list: undefined }),
-    { description: 'Notes for a specific day in a trip' },
+    { description: 'Notes for a specific day in a trip', mimeType: 'application/json' },
     async (uri, { tripId, dayId }) => {
       const tId = parseId(tripId);
       const dId = parseId(dayId);
       if (tId === null || dId === null || !canAccessTrip(tId, userId)) return accessDenied(uri.href);
-      const notes = db.prepare(
-        'SELECT * FROM day_notes WHERE day_id = ? AND trip_id = ? ORDER BY sort_order ASC, created_at ASC'
-      ).all(dId, tId);
+      const notes = listDayNotes(dId, tId);
       return jsonContent(uri.href, notes);
     }
   );
 
   // Accommodations (hotels, rentals) per trip
-  server.registerResource(
+  if (canReadTrips(scopes)) server.registerResource(
     'trip-accommodations',
     new ResourceTemplate('trek://trips/{tripId}/accommodations', { list: undefined }),
-    { description: 'Accommodations (hotels, rentals) for a trip with check-in/out details' },
+    { description: 'Accommodations (hotels, rentals) for a trip with check-in/out details', mimeType: 'application/json' },
     async (uri, { tripId }) => {
       const id = parseId(tripId);
       if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
-      const accommodations = db.prepare(`
-        SELECT da.*, p.name as place_name, p.address as place_address, p.lat, p.lng,
-          ds.day_number as start_day_number, de.day_number as end_day_number
-        FROM day_accommodations da
-        JOIN places p ON da.place_id = p.id
-        LEFT JOIN days ds ON da.start_day_id = ds.id
-        LEFT JOIN days de ON da.end_day_id = de.id
-        WHERE da.trip_id = ?
-        ORDER BY ds.day_number ASC
-      `).all(id);
+      const accommodations = listAccommodations(id);
       return jsonContent(uri.href, accommodations);
     }
   );
 
   // Trip members (owner + collaborators)
-  server.registerResource(
+  if (canReadTrips(scopes)) server.registerResource(
     'trip-members',
     new ResourceTemplate('trek://trips/{tripId}/members', { list: undefined }),
-    { description: 'Owner and collaborators of a trip' },
+    { description: 'Owner and collaborators of a trip', mimeType: 'application/json' },
     async (uri, { tripId }) => {
       const id = parseId(tripId);
       if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
-      const trip = db.prepare('SELECT user_id FROM trips WHERE id = ?').get(id) as { user_id: number } | undefined;
-      if (!trip) return accessDenied(uri.href);
-      const owner = db.prepare('SELECT id, username, avatar FROM users WHERE id = ?').get(trip.user_id) as Record<string, unknown> | undefined;
-      const members = db.prepare(`
-        SELECT u.id, u.username, u.avatar, tm.added_at
-        FROM trip_members tm
-        JOIN users u ON tm.user_id = u.id
-        WHERE tm.trip_id = ?
-        ORDER BY tm.added_at ASC
-      `).all(id);
-      return jsonContent(uri.href, {
-        owner: owner ? { ...owner, role: 'owner' } : null,
-        members,
-      });
+      const ownerRow = getTripOwner(id);
+      if (!ownerRow) return accessDenied(uri.href);
+      const { owner, members } = listMembers(id, ownerRow.user_id);
+      return jsonContent(uri.href, { owner, members });
     }
   );
 
   // Collab notes for a trip
-  server.registerResource(
+  const collabFeatures = isAddonEnabled(ADDON_IDS.COLLAB) ? getCollabFeatures() : null;
+  if (collabFeatures?.notes && canRead(scopes, 'collab')) server.registerResource(
     'trip-collab-notes',
     new ResourceTemplate('trek://trips/{tripId}/collab-notes', { list: undefined }),
-    { description: 'Shared collaborative notes for a trip' },
+    { description: 'Shared collaborative notes for a trip', mimeType: 'application/json' },
     async (uri, { tripId }) => {
       const id = parseId(tripId);
       if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
-      const notes = db.prepare(`
-        SELECT cn.*, u.username
-        FROM collab_notes cn
-        JOIN users u ON cn.user_id = u.id
-        WHERE cn.trip_id = ?
-        ORDER BY cn.pinned DESC, cn.updated_at DESC
-      `).all(id);
+      const notes = listCollabNotes(id);
       return jsonContent(uri.href, notes);
     }
   );
 
-  // All place categories (global, no trip filter)
+  // Trip to-do list
+  if (isAddonEnabled(ADDON_IDS.PACKING) && canRead(scopes, 'todos')) server.registerResource(
+    'trip-todos',
+    new ResourceTemplate('trek://trips/{tripId}/todos', { list: undefined }),
+    { description: 'To-do items for a trip, ordered by position', mimeType: 'application/json' },
+    async (uri, { tripId }) => {
+      const id = parseId(tripId);
+      if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
+      const items = listTodoItems(id);
+      return jsonContent(uri.href, items);
+    }
+  );
+
+  // All place categories (global, no trip filter) — safe for any authenticated session
   server.registerResource(
     'categories',
     'trek://categories',
-    { description: 'All available place categories (id, name, color, icon) for use when creating places' },
+    { description: 'All available place categories (id, name, color, icon) for use when creating places', mimeType: 'application/json' },
     async (uri) => {
-      const categories = db.prepare(
-        'SELECT id, name, color, icon FROM categories ORDER BY name ASC'
-      ).all();
+      const categories = listCategories();
       return jsonContent(uri.href, categories);
     }
   );
 
   // User's bucket list
-  server.registerResource(
+  if (isAddonEnabled(ADDON_IDS.ATLAS) && canRead(scopes, 'atlas')) server.registerResource(
     'bucket-list',
     'trek://bucket-list',
-    { description: 'Your personal travel bucket list' },
+    { description: 'Your personal travel bucket list', mimeType: 'application/json' },
     async (uri) => {
-      const items = db.prepare(
-        'SELECT * FROM bucket_list WHERE user_id = ? ORDER BY created_at DESC'
-      ).all(userId);
+      const items = listBucketList(userId);
       return jsonContent(uri.href, items);
     }
   );
 
   // User's visited countries
-  server.registerResource(
+  if (isAddonEnabled(ADDON_IDS.ATLAS) && canRead(scopes, 'atlas')) server.registerResource(
     'visited-countries',
     'trek://visited-countries',
-    { description: 'Countries you have marked as visited in Atlas' },
+    { description: 'Countries you have marked as visited in Atlas', mimeType: 'application/json' },
     async (uri) => {
-      const countries = db.prepare(
-        'SELECT country_code, created_at FROM visited_countries WHERE user_id = ? ORDER BY created_at DESC'
-      ).all(userId);
+      const countries = listVisitedCountries(userId);
       return jsonContent(uri.href, countries);
     }
   );
+
+  // Budget per-person summary
+  if (isAddonEnabled(ADDON_IDS.BUDGET) && canRead(scopes, 'budget')) server.registerResource(
+    'trip-budget-per-person',
+    new ResourceTemplate('trek://trips/{tripId}/budget/per-person', { list: undefined }),
+    { description: 'Per-person budget summary for a trip (total spent per member, split breakdown)', mimeType: 'application/json' },
+    async (uri, { tripId }) => {
+      const id = parseId(tripId);
+      if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
+      const summary = getPerPersonSummary(id);
+      return jsonContent(uri.href, summary);
+    }
+  );
+
+  // Budget settlement
+  if (isAddonEnabled(ADDON_IDS.BUDGET) && canRead(scopes, 'budget')) server.registerResource(
+    'trip-budget-settlement',
+    new ResourceTemplate('trek://trips/{tripId}/budget/settlement', { list: undefined }),
+    { description: 'Suggested settlement transactions to balance who owes whom', mimeType: 'application/json' },
+    async (uri, { tripId }) => {
+      const id = parseId(tripId);
+      if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
+      const settlement = calculateSettlement(id);
+      return jsonContent(uri.href, settlement);
+    }
+  );
+
+  // Packing bags
+  if (isAddonEnabled(ADDON_IDS.PACKING) && canRead(scopes, 'packing')) server.registerResource(
+    'trip-packing-bags',
+    new ResourceTemplate('trek://trips/{tripId}/packing/bags', { list: undefined }),
+    { description: 'All packing bags for a trip with their members', mimeType: 'application/json' },
+    async (uri, { tripId }) => {
+      const id = parseId(tripId);
+      if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
+      const bags = listBags(id);
+      return jsonContent(uri.href, bags);
+    }
+  );
+
+  // In-app notifications
+  if (canRead(scopes, 'notifications')) server.registerResource(
+    'notifications-in-app',
+    'trek://notifications/in-app',
+    { description: "The current user's in-app notifications (most recent 50, unread first)", mimeType: 'application/json' },
+    async (uri) => {
+      const result = getNotifications(userId, { limit: 50 });
+      return jsonContent(uri.href, result);
+    }
+  );
+
+  // Atlas stats and regions (addon-gated)
+  if (isAddonEnabled(ADDON_IDS.ATLAS) && canRead(scopes, 'atlas')) {
+    server.registerResource(
+      'atlas-stats',
+      'trek://atlas/stats',
+      { description: "User's atlas statistics — visited country counts and breakdown", mimeType: 'application/json' },
+      async (uri) => {
+        const stats = await getAtlasStats(userId);
+        return jsonContent(uri.href, stats);
+      }
+    );
+
+    server.registerResource(
+      'atlas-regions',
+      'trek://atlas/regions',
+      { description: 'List of manually visited regions for the current user', mimeType: 'application/json' },
+      async (uri) => {
+        const regions = listManuallyVisitedRegions(userId);
+        return jsonContent(uri.href, regions);
+      }
+    );
+  }
+
+  // Collab polls (addon + sub-feature gated)
+  if (collabFeatures?.polls && canRead(scopes, 'collab')) {
+    server.registerResource(
+      'trip-collab-polls',
+      new ResourceTemplate('trek://trips/{tripId}/collab/polls', { list: undefined }),
+      { description: 'All polls for a trip with vote counts per option', mimeType: 'application/json' },
+      async (uri, { tripId }) => {
+        const id = parseId(tripId);
+        if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
+        const polls = listPolls(id);
+        return jsonContent(uri.href, polls);
+      }
+    );
+  }
+
+  // Collab messages (addon + sub-feature gated)
+  if (collabFeatures?.chat && canRead(scopes, 'collab')) {
+    server.registerResource(
+      'trip-collab-messages',
+      new ResourceTemplate('trek://trips/{tripId}/collab/messages', { list: undefined }),
+      { description: 'Most recent 100 chat messages for a trip', mimeType: 'application/json' },
+      async (uri, { tripId }) => {
+        const id = parseId(tripId);
+        if (id === null || !canAccessTrip(id, userId)) return accessDenied(uri.href);
+        const messages = listMessages(id);
+        return jsonContent(uri.href, messages);
+      }
+    );
+  }
+
+  // Vacay resources (addon-gated)
+  if (isAddonEnabled(ADDON_IDS.VACAY) && canRead(scopes, 'vacay')) {
+    server.registerResource(
+      'vacay-plan',
+      'trek://vacay/plan',
+      { description: "Full snapshot of the user's active vacation plan (members, years, settings)", mimeType: 'application/json' },
+      async (uri) => {
+        const plan = getPlanData(userId);
+        return jsonContent(uri.href, plan);
+      }
+    );
+
+    server.registerResource(
+      'vacay-entries',
+      new ResourceTemplate('trek://vacay/entries/{year}', { list: undefined }),
+      { description: 'All vacation entries for the active plan and a specific year', mimeType: 'application/json' },
+      async (uri, { year }) => {
+        const planId = getActivePlanId(userId);
+        const entries = getVacayEntries(planId, Array.isArray(year) ? year[0] : year);
+        return jsonContent(uri.href, entries);
+      }
+    );
+
+    server.registerResource(
+      'vacay-holidays',
+      new ResourceTemplate('trek://vacay/holidays/{year}', { list: undefined }),
+      { description: "Cached public holidays for the plan's configured region and year", mimeType: 'application/json' },
+      async (uri, { year }) => {
+        const plan = getActivePlan(userId);
+        if (!plan.holidays_enabled || !plan.holidays_region) return jsonContent(uri.href, []);
+        const yearStr = Array.isArray(year) ? year[0] : year;
+        const result = await getHolidays(yearStr, plan.holidays_region);
+        return jsonContent(uri.href, result.data ?? []);
+      }
+    );
+  }
+
+  // Journey resources (Journey addon)
+  if (isAddonEnabled(ADDON_IDS.JOURNEY) && canRead(scopes, 'journey')) {
+    server.registerResource(
+      'journeys',
+      'trek://journeys',
+      { description: 'All journeys owned or contributed to by the current user', mimeType: 'application/json' },
+      async (uri) => {
+        const journeys = listJourneys(userId);
+        return jsonContent(uri.href, journeys);
+      }
+    );
+
+    server.registerResource(
+      'journey-detail',
+      new ResourceTemplate('trek://journeys/{journeyId}', { list: undefined }),
+      { description: 'Single journey with entries, contributors, and trip links', mimeType: 'application/json' },
+      async (uri, { journeyId }) => {
+        const id = parseId(journeyId);
+        if (id === null) return accessDenied(uri.href);
+        const journey = getJourneyFull(id, userId);
+        if (!journey) return accessDenied(uri.href);
+        return jsonContent(uri.href, journey);
+      }
+    );
+
+    server.registerResource(
+      'journey-entries',
+      new ResourceTemplate('trek://journeys/{journeyId}/entries', { list: undefined }),
+      { description: 'All entries in a journey (date, text, mood, linked trip)', mimeType: 'application/json' },
+      async (uri, { journeyId }) => {
+        const id = parseId(journeyId);
+        if (id === null) return accessDenied(uri.href);
+        const j = canAccessJourney(id, userId);
+        if (!j) return accessDenied(uri.href);
+        const entries = listEntries(id, userId);
+        return jsonContent(uri.href, entries);
+      }
+    );
+
+    server.registerResource(
+      'journey-contributors',
+      new ResourceTemplate('trek://journeys/{journeyId}/contributors', { list: undefined }),
+      { description: 'Contributors (owners and collaborators) of a journey', mimeType: 'application/json' },
+      async (uri, { journeyId }) => {
+        const id = parseId(journeyId);
+        if (id === null) return accessDenied(uri.href);
+        const j = getJourneyFull(id, userId);
+        if (!j) return accessDenied(uri.href);
+        return jsonContent(uri.href, (j as any).contributors ?? []);
+      }
+    );
+  }
 }

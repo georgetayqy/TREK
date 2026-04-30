@@ -3,8 +3,11 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import DOM from 'react-dom'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Plus, Trash2, Pin, PinOff, Pencil, X, Check, StickyNote, Settings, ExternalLink, Maximize2 } from 'lucide-react'
+import remarkBreaks from 'remark-breaks'
+import { Plus, Trash2, Pin, PinOff, Pencil, X, Check, StickyNote, Settings, ExternalLink, Maximize2, Loader2 } from 'lucide-react'
 import { collabApi } from '../../api/client'
+import { getAuthUrl } from '../../api/authUrl'
+import { openFile } from '../../utils/fileDownload'
 import { useCanDo } from '../../store/permissionsStore'
 import { useTripStore } from '../../store/tripStore'
 import { addListener, removeListener } from '../../api/websocket'
@@ -96,22 +99,34 @@ interface FilePreviewPortalProps {
 }
 
 function FilePreviewPortal({ file, onClose }: FilePreviewPortalProps) {
+  const [authUrl, setAuthUrl] = useState('')
+  const rawUrl = file?.url || ''
+  useEffect(() => {
+    setAuthUrl('')
+    if (!rawUrl) return
+    getAuthUrl(rawUrl, 'download').then(setAuthUrl)
+  }, [rawUrl])
+
   if (!file) return null
-  const url = file.url || `/uploads/${file.filename}`
   const isImage = file.mime_type?.startsWith('image/')
   const isPdf = file.mime_type === 'application/pdf'
   const isTxt = file.mime_type?.startsWith('text/')
+
+  const openInNewTab = () => openFile(rawUrl).catch(() => {})
 
   return ReactDOM.createPortal(
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.88)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={onClose}>
       {isImage ? (
         /* Image lightbox — floating controls */
         <div style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }} onClick={e => e.stopPropagation()}>
-          <img src={url} alt={file.original_name} style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 8, display: 'block' }} />
+          {authUrl
+            ? <img src={authUrl} alt={file.original_name} style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 8, display: 'block' }} />
+            : <Loader2 size={32} className="animate-spin" style={{ color: 'rgba(255,255,255,0.5)' }} />
+          }
           <div style={{ position: 'absolute', top: -36, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}>
             <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>{file.original_name}</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <a href={url} target="_blank" rel="noreferrer" style={{ color: 'rgba(255,255,255,0.7)', display: 'flex' }}><ExternalLink size={15} /></a>
+              <button onClick={openInNewTab} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.7)', display: 'flex', padding: 0 }}><ExternalLink size={15} /></button>
               <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.7)', display: 'flex', padding: 0 }}><X size={17} /></button>
             </div>
           </div>
@@ -122,19 +137,19 @@ function FilePreviewPortal({ file, onClose }: FilePreviewPortalProps) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderBottom: '1px solid var(--border-primary)', flexShrink: 0 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.original_name}</span>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <a href={url} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--text-muted)', textDecoration: 'none' }}><ExternalLink size={13} /></a>
+              <button onClick={openInNewTab} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--text-muted)', padding: 0 }}><ExternalLink size={13} /></button>
               <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', display: 'flex', padding: 2 }}><X size={18} /></button>
             </div>
           </div>
           {(isPdf || isTxt) ? (
-            <object data={`${url}#view=FitH`} type={file.mime_type} style={{ flex: 1, width: '100%', border: 'none', background: '#fff' }} title={file.original_name}>
+            <object data={authUrl ? `${authUrl}#view=FitH` : ''} type={file.mime_type} style={{ flex: 1, width: '100%', border: 'none', background: '#fff' }} title={file.original_name}>
               <p style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
-                <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-primary)', textDecoration: 'underline' }}>Download</a>
+                <button onClick={openInNewTab} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-primary)', textDecoration: 'underline', fontSize: 14, padding: 0 }}>Download</button>
               </p>
             </object>
           ) : (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
-              <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-primary)', textDecoration: 'underline', fontSize: 14 }}>Download {file.original_name}</a>
+              <button onClick={openInNewTab} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-primary)', textDecoration: 'underline', fontSize: 14, padding: 0 }}>Download {file.original_name}</button>
             </div>
           )}
         </div>
@@ -142,6 +157,14 @@ function FilePreviewPortal({ file, onClose }: FilePreviewPortalProps) {
     </div>,
     document.body
   )
+}
+
+function AuthedImg({ src, style, onClick, onMouseEnter, onMouseLeave, alt }: { src: string; style?: React.CSSProperties; onClick?: () => void; onMouseEnter?: React.MouseEventHandler<HTMLImageElement>; onMouseLeave?: React.MouseEventHandler<HTMLImageElement>; alt?: string }) {
+  const [authSrc, setAuthSrc] = useState('')
+  useEffect(() => {
+    getAuthUrl(src, 'download').then(setAuthSrc)
+  }, [src])
+  return authSrc ? <img src={authSrc} alt={alt} style={style} onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} /> : null
 }
 
 const NOTE_COLORS = [
@@ -289,7 +312,6 @@ function NoteFormModal({ onClose, onSubmit, onDeleteFile, existingCategories, ca
         padding: 16,
         fontFamily: FONT,
       }}
-      onClick={onClose}
     >
       <form
         style={{
@@ -460,14 +482,14 @@ function NoteFormModal({ onClose, onSubmit, onDeleteFile, existingCategories, ca
             <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4, fontFamily: FONT }}>
               {t('collab.notes.attachFiles')}
             </div>
-            <input id="note-file-input" ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={e => { setPendingFiles(prev => [...prev, ...Array.from((e.target as HTMLInputElement).files)]); e.target.value = '' }} />
+            <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={e => { const files = e.target.files; if (files?.length) setPendingFiles(prev => [...prev, ...Array.from(files)]); e.target.value = '' }} />
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
               {/* Existing attachments (edit mode) */}
               {existingAttachments.map(a => {
                 const isImage = a.mime_type?.startsWith('image/')
                 return (
                   <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8, background: 'var(--bg-secondary)', fontSize: 11, color: 'var(--text-muted)' }}>
-                    {isImage && <img src={a.url} style={{ width: 18, height: 18, objectFit: 'cover', borderRadius: 3 }} />}
+                    {isImage && <AuthedImg src={a.url} style={{ width: 18, height: 18, objectFit: 'cover', borderRadius: 3 }} />}
                     {(a.original_name || '').length > 20 ? a.original_name.slice(0, 17) + '...' : a.original_name}
                     <button type="button" onClick={() => handleDeleteAttachment(a.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 0, display: 'flex' }}>
                       <X size={10} />
@@ -484,10 +506,10 @@ function NoteFormModal({ onClose, onSubmit, onDeleteFile, existingCategories, ca
                   </button>
                 </div>
               ))}
-              <label htmlFor="note-file-input"
+              <button type="button" onClick={() => fileRef.current?.click()}
                 style={{ padding: '4px 10px', borderRadius: 8, border: '1px dashed var(--border-faint)', background: 'transparent', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 11, fontFamily: FONT, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <Plus size={11} /> {t('files.attach') || 'Add'}
-              </label>
+              </button>
             </div>
           </div>}
 
@@ -822,7 +844,7 @@ function NoteCard({ note, currentUser, canEdit, onUpdate, onDelete, onEdit, onVi
                 maxHeight: '4.5em', overflow: 'hidden',
                 wordBreak: 'break-word', fontFamily: FONT,
               }}>
-                <Markdown remarkPlugins={[remarkGfm]}>{note.content}</Markdown>
+                <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{note.content}</Markdown>
               </div>
             )}
           </div>
@@ -845,7 +867,7 @@ function NoteCard({ note, currentUser, canEdit, onUpdate, onDelete, onEdit, onVi
                     const isImage = a.mime_type?.startsWith('image/')
                     const ext = (a.original_name || '').split('.').pop()?.toUpperCase() || '?'
                     return isImage ? (
-                      <img key={a.id} src={a.url} alt={a.original_name}
+                      <AuthedImg key={a.id} src={a.url} alt={a.original_name}
                         style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', transition: 'transform 0.12s, box-shadow 0.12s' }}
                         onClick={() => onPreviewFile?.(a)}
                         onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)' }}
@@ -974,7 +996,7 @@ export default function CollabNotes({ tripId, currentUser }: CollabNotesProps) {
         for (const file of pendingFiles) {
           const fd = new FormData()
           fd.append('file', file)
-          try { await collabApi.uploadNoteFile(tripId, note.id, fd) } catch {}
+          try { await collabApi.uploadNoteFile(tripId, note.id, fd) } catch (err) { console.error('Failed to upload note attachment:', err) }
         }
         // Reload note with attachments
         const fresh = await collabApi.getNotes(tripId)
@@ -1329,7 +1351,42 @@ export default function CollabNotes({ tripId, currentUser }: CollabNotesProps) {
               </div>
             </div>
             <div className="collab-note-md-full" style={{ padding: '16px 20px', overflowY: 'auto', fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.7 }}>
-              <Markdown remarkPlugins={[remarkGfm]}>{viewingNote.content || ''}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{viewingNote.content || ''}</Markdown>
+              {(viewingNote.attachments || []).length > 0 && (
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>{t('files.title')}</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {(viewingNote.attachments || []).map(a => {
+                      const isImage = a.mime_type?.startsWith('image/')
+                      const ext = (a.original_name || '').split('.').pop()?.toUpperCase() || '?'
+                      return (
+                        <div key={a.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, maxWidth: 72 }}>
+                          {isImage ? (
+                            <AuthedImg src={a.url} alt={a.original_name}
+                              style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', transition: 'transform 0.12s, box-shadow 0.12s' }}
+                              onClick={() => setPreviewFile(a)}
+                              onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.06)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)' }}
+                              onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' }} />
+                          ) : (
+                            <div title={a.original_name} onClick={() => setPreviewFile(a)}
+                              style={{
+                                width: 64, height: 64, borderRadius: 8, cursor: 'pointer',
+                                background: a.mime_type === 'application/pdf' ? '#ef44441a' : 'var(--bg-secondary)',
+                                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
+                                transition: 'transform 0.12s, box-shadow 0.12s',
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.06)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)' }}
+                              onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none' }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: a.mime_type === 'application/pdf' ? '#ef4444' : 'var(--text-muted)', letterSpacing: 0.3 }}>{ext}</span>
+                            </div>
+                          )}
+                          <span style={{ fontSize: 9, color: 'var(--text-faint)', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>{a.original_name}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>,
