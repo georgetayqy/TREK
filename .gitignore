@@ -62,3 +62,6 @@ test-data
 
 .run
 .full-review
+
+# ignore values file
+charts/trek/values.yaml
