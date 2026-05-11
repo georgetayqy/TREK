@@ -775,10 +775,10 @@ function runMigrations(db: Database.Database): void {
       const columns = db.prepare("PRAGMA table_info('trip_photos')").all() as Array<{ name: string }>;
       const names = new Set(columns.map(c => c.name));
       if (names.has('asset_id') && !names.has('immich_asset_id')) return;
-      db.exec('ALTER TABLE `trip_photos` RENAME COLUMN immich_asset_id TO asset_id');
-      db.exec('ALTER TABLE `trip_photos` ADD COLUMN provider TEXT NOT NULL DEFAULT "immich"');
-      db.exec('ALTER TABLE `trip_album_links` ADD COLUMN provider TEXT NOT NULL DEFAULT "immich"');
-      db.exec('ALTER TABLE `trip_album_links` RENAME COLUMN immich_album_id TO album_id');
+      try { db.exec('ALTER TABLE `trip_photos` RENAME COLUMN immich_asset_id TO asset_id'); } catch (err: any) { if (!err.message?.includes('no such column')) throw err; }
+      try { db.exec('ALTER TABLE `trip_photos` ADD COLUMN provider TEXT NOT NULL DEFAULT "immich"'); } catch (err: any) { if (!err.message?.includes('duplicate column name')) throw err; }
+      try { db.exec('ALTER TABLE `trip_album_links` ADD COLUMN provider TEXT NOT NULL DEFAULT "immich"'); } catch (err: any) { if (!err.message?.includes('duplicate column name')) throw err; }
+      try { db.exec('ALTER TABLE `trip_album_links` RENAME COLUMN immich_album_id TO album_id'); } catch (err: any) { if (!err.message?.includes('no such column')) throw err; }
     },
     () => {
       // Track which album link each photo was synced from
