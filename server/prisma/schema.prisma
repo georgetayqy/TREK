@@ -1,0 +1,60 @@
+// Prisma schema for TREK
+//
+// Pilot-stage schema: models only the tables exercised by the ported routes.
+// The SQLite file is still created & migrated by the legacy custom migration
+// system in src/db/migrations.ts. Prisma is a read/write client only.
+//
+// To expand coverage, run `npx prisma db pull` against a running travel.db —
+// that will introspect the live schema and populate additional models.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Runtime queries go through the pg driver adapter in src/db/prisma.ts,
+  // which builds its Pool from discrete PG* env vars. DATABASE_URL here is
+  // only consumed by the Prisma CLI (migrate, db pull, studio).
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   Int       @id @default(autoincrement())
+  username             String    @unique
+  email                String    @unique
+  password_hash        String
+  role                 String    @default("user")
+  maps_api_key         String?
+  unsplash_api_key     String?
+  openweather_api_key  String?
+  avatar               String?
+  oidc_sub             String?
+  oidc_issuer          String?
+  last_login           DateTime?
+  mfa_enabled          Int?      @default(0)
+  mfa_secret           String?
+  mfa_backup_codes     String?
+  must_change_password Int?      @default(0)
+  immich_url           String?
+  immich_api_key       String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @default(now())
+
+  tags Tag[]
+
+  @@index([email], name: "idx_users_email")
+  @@map("users")
+}
+
+model Tag {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  name       String
+  color      String?  @default("#10b981")
+  created_at DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("tags")
+}
