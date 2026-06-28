@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseTimeToMinutes, getSpanPhase, getDisplayTimeForDay, getTransportForDay, getMergedItems } from './dayMerge'
+import { parseTimeToMinutes, getSpanPhase, getTransportRouteEndpoints, getDisplayTimeForDay, getTransportForDay, getMergedItems } from './dayMerge'
 
 describe('parseTimeToMinutes', () => {
   it('parses HH:MM string', () => {
@@ -34,6 +34,38 @@ describe('getSpanPhase', () => {
   })
 })
 
+describe('getTransportRouteEndpoints', () => {
+  const pickup = { role: 'from', lat: 48.1, lng: 11.5 }
+  const dropoff = { role: 'to', lat: 52.5, lng: 13.4 }
+  // A car rental spanning day 1 (pickup) through day 3 (drop-off).
+  const rental = { day_id: 1, end_day_id: 3, endpoints: [pickup, dropoff] }
+
+  it('routes to the pickup only on the start day of a multi-day rental', () => {
+    expect(getTransportRouteEndpoints(rental, 1)).toEqual({ from: { lat: 48.1, lng: 11.5 }, to: null })
+  })
+
+  it('routes from the drop-off only on the end day', () => {
+    expect(getTransportRouteEndpoints(rental, 3)).toEqual({ from: null, to: { lat: 52.5, lng: 13.4 } })
+  })
+
+  it('adds no waypoints on the days in between (regression for #1210)', () => {
+    expect(getTransportRouteEndpoints(rental, 2)).toEqual({ from: null, to: null })
+  })
+
+  it('uses both endpoints for a single-day transport', () => {
+    const sameDay = { day_id: 1, end_day_id: 1, endpoints: [pickup, dropoff] }
+    expect(getTransportRouteEndpoints(sameDay, 1)).toEqual({
+      from: { lat: 48.1, lng: 11.5 },
+      to: { lat: 52.5, lng: 13.4 },
+    })
+  })
+
+  it('returns nulls when the endpoints carry no coordinates', () => {
+    const noCoords = { day_id: 1, end_day_id: 1, endpoints: [{ role: 'from' }, { role: 'to' }] }
+    expect(getTransportRouteEndpoints(noCoords, 1)).toEqual({ from: null, to: null })
+  })
+})
+
 describe('getDisplayTimeForDay', () => {
   const r = { day_id: 1, end_day_id: 3, reservation_time: '2025-01-01T09:00:00', reservation_end_time: '2025-01-03T14:00:00' }
 
@@ -57,8 +89,24 @@ describe('getTransportForDay', () => {
     { id: 3, day_number: 3 },
   ]
 
-  it('excludes non-transport types', () => {
+  it('excludes hotel (rendered via accommodation path)', () => {
     const reservations = [{ id: 10, type: 'hotel', day_id: 1 }]
+    expect(getTransportForDay({ reservations, dayId: 1, dayAssignmentIds: [], days })).toHaveLength(0)
+  })
+
+  it('includes tour booking on the correct day', () => {
+    const reservations = [{ id: 20, type: 'tour', day_id: 1 }]
+    expect(getTransportForDay({ reservations, dayId: 1, dayAssignmentIds: [], days })).toHaveLength(1)
+    expect(getTransportForDay({ reservations, dayId: 2, dayAssignmentIds: [], days })).toHaveLength(0)
+  })
+
+  it('includes restaurant, event, and other bookings by day_id', () => {
+    const reservations = [
+      { id: 30, type: 'restaurant', day_id: 2 },
+      { id: 31, type: 'event', day_id: 2 },
+      { id: 32, type: 'other', day_id: 2 },
+    ]
+    expect(getTransportForDay({ reservations, dayId: 2, dayAssignmentIds: [], days })).toHaveLength(3)
     expect(getTransportForDay({ reservations, dayId: 1, dayAssignmentIds: [], days })).toHaveLength(0)
   })
 
@@ -110,18 +158,18 @@ describe('getMergedItems', () => {
     expect(types).toEqual(['place', 'transport', 'place'])
   })
 
-  it('per-day position overrides time-based insertion', () => {
+  it('orders a timed transport chronologically regardless of a stale per-day position', () => {
     const dayAssignments = [
       { id: 1, order_index: 0, place: { place_time: '08:00' } },
       { id: 2, order_index: 1, place: { place_time: '13:00' } },
     ]
-    // Transport at 10:30 would normally go between the two places
-    // but per-day position 1.5 puts it after the second place
+    // The train is at 10:30, so it sorts between the 08:00 and 13:00 places by time —
+    // timed items are arranged chronologically even if an old manual position exists.
     const dayTransports = [
       { id: 20, type: 'train', day_id: 5, end_day_id: 5, reservation_time: '10:30', day_positions: { 5: 1.5 } },
     ]
     const result = getMergedItems({ dayAssignments, dayNotes: [], dayTransports, dayId: 5 })
     const types = result.map(i => i.type)
-    expect(types).toEqual(['place', 'place', 'transport'])
+    expect(types).toEqual(['place', 'transport', 'place'])
   })
 })

@@ -31,18 +31,61 @@ const glMap = vi.hoisted(() => ({
 vi.mock('mapbox-gl', () => ({
   default: {
     accessToken: '',
-    Map: vi.fn(() => glMap),
-    Marker: vi.fn(() => ({
-      setLngLat: vi.fn().mockReturnThis(),
-      addTo: vi.fn().mockReturnThis(),
-      remove: vi.fn(),
-      getElement: vi.fn(() => document.createElement('div')),
-    })),
-    LngLatBounds: vi.fn(() => ({ extend: vi.fn().mockReturnThis() })),
+    Map: vi.fn(function () {
+      return glMap
+    }),
+    Marker: vi.fn(function () {
+      return {
+        setLngLat: vi.fn().mockReturnThis(),
+        addTo: vi.fn().mockReturnThis(),
+        remove: vi.fn(),
+        getElement: vi.fn(() => document.createElement('div')),
+      }
+    }),
+    LngLatBounds: vi.fn(function () {
+      return { extend: vi.fn().mockReturnThis() }
+    }),
     NavigationControl: vi.fn(),
+    Popup: vi.fn(function () {
+      return {
+        setLngLat: vi.fn().mockReturnThis(),
+        setHTML: vi.fn().mockReturnThis(),
+        addTo: vi.fn().mockReturnThis(),
+        remove: vi.fn(),
+      }
+    }),
   },
 }))
 vi.mock('mapbox-gl/dist/mapbox-gl.css', () => ({}))
+
+vi.mock('maplibre-gl', () => ({
+  default: {
+    Map: vi.fn(function () {
+      return glMap
+    }),
+    Marker: vi.fn(function () {
+      return {
+        setLngLat: vi.fn().mockReturnThis(),
+        addTo: vi.fn().mockReturnThis(),
+        remove: vi.fn(),
+        getElement: vi.fn(() => document.createElement('div')),
+      }
+    }),
+    LngLatBounds: vi.fn(function () {
+      return { extend: vi.fn().mockReturnThis() }
+    }),
+    NavigationControl: vi.fn(),
+    Popup: vi.fn(function () {
+      return {
+        setLngLat: vi.fn().mockReturnThis(),
+        setHTML: vi.fn().mockReturnThis(),
+        addTo: vi.fn().mockReturnThis(),
+        remove: vi.fn(),
+      }
+    }),
+  },
+}))
+vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}))
 
 vi.mock('./mapboxSetup', () => ({
   isStandardFamily: vi.fn(() => false),
@@ -57,7 +100,9 @@ vi.mock('./locationMarkerMapbox', () => ({
 }))
 
 vi.mock('./reservationsMapbox', () => ({
-  ReservationMapboxOverlay: vi.fn().mockImplementation(() => ({ update: vi.fn() })),
+  ReservationMapboxOverlay: vi.fn(function () {
+    return { update: vi.fn() }
+  }),
 }))
 
 vi.mock('../../hooks/useGeolocation', () => ({
@@ -160,5 +205,26 @@ describe('MapViewGL', () => {
     rerender(<MapViewGL places={places} fitKey={2} />)
     await act(async () => {})
     expect(glMap.fitBounds.mock.calls.length).toBeGreaterThan(after_first)
+  })
+
+  it('FE-COMP-MAPVIEWGL-004: renders with the MapLibre provider and no token', async () => {
+    const mapboxgl = (await import('mapbox-gl')).default
+    const maplibregl = (await import('maplibre-gl')).default
+    useSettingsStore.setState({
+      settings: {
+        ...useSettingsStore.getState().settings,
+        map_provider: 'maplibre-gl',
+        mapbox_access_token: '', // MapLibre/OpenFreeMap is tokenless — must not short-circuit
+        maplibre_style: 'https://tiles.openfreemap.org/styles/liberty',
+      },
+    } as any)
+    const places = [buildMapPlace({ id: 1, lat: 48.8584, lng: 2.2945 })]
+
+    render(<MapViewGL places={places} fitKey={1} glProvider="maplibre-gl" />)
+    await act(async () => {})
+
+    // The MapLibre engine builds the map even without a token; Mapbox is not used.
+    expect(maplibregl.Map).toHaveBeenCalled()
+    expect(mapboxgl.Map).not.toHaveBeenCalled()
   })
 })
