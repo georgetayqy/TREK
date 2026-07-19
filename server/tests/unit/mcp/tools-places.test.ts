@@ -43,8 +43,16 @@ vi.mock('../../../src/services/mapsService', () => ({ searchPlaces: searchPlaces
 import { createTables } from '../../../src/db/schema';
 import { runMigrations } from '../../../src/db/migrations';
 import { resetTestDb } from '../../helpers/test-db';
-import { createUser, createTrip, createPlace, createDay } from '../../helpers/factories';
+import { createUser, createTrip, createPlace, createDay, createDayAssignment, createJourney } from '../../helpers/factories';
 import { createMcpHarness, parseToolResult, type McpHarness } from '../../helpers/mcp-harness';
+
+/** Link a journey to a trip so journey-skeleton sync has a target. */
+function linkJourney(journeyId: number, tripId: number) {
+  testDb.prepare('INSERT INTO journey_trips (journey_id, trip_id, added_at) VALUES (?, ?, ?)').run(journeyId, tripId, Date.now());
+}
+function skeletonFor(journeyId: number, placeId: number) {
+  return testDb.prepare('SELECT * FROM journey_entries WHERE journey_id = ? AND source_place_id = ?').get(journeyId, placeId) as any;
+}
 
 beforeAll(() => {
   createTables(testDb);
@@ -198,6 +206,64 @@ describe('Tool: update_place', () => {
 });
 
 // ---------------------------------------------------------------------------
+// bulk_update_places
+// ---------------------------------------------------------------------------
+
+describe('Tool: bulk_update_places', () => {
+  it('applies the same field to many places in one call', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const a = createPlace(testDb, trip.id, { name: 'A' });
+    const b = createPlace(testDb, trip.id, { name: 'B' });
+
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({
+        name: 'bulk_update_places',
+        arguments: { tripId: trip.id, placeIds: [a.id, b.id], transport_mode: 'walking' },
+      });
+      const data = parseToolResult(result) as any;
+      expect(data.count).toBe(2);
+      expect([...data.updatedIds].sort()).toEqual([a.id, b.id].sort());
+      expect(data.skipped).toBe(0);
+    });
+  });
+
+  it('broadcasts place:updated for each updated place', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const a = createPlace(testDb, trip.id);
+    const b = createPlace(testDb, trip.id);
+    await withHarness(user.id, async (h) => {
+      broadcastMock.mockClear();
+      await h.client.callTool({ name: 'bulk_update_places', arguments: { tripId: trip.id, placeIds: [a.id, b.id], notes: 'seen' } });
+      const updates = broadcastMock.mock.calls.filter((c) => c[1] === 'place:updated');
+      expect(updates).toHaveLength(2);
+    });
+  });
+
+  it('errors when no update fields are provided', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const a = createPlace(testDb, trip.id);
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({ name: 'bulk_update_places', arguments: { tripId: trip.id, placeIds: [a.id] } });
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  it('returns access denied for non-member', async () => {
+    const { user } = createUser(testDb);
+    const { user: other } = createUser(testDb);
+    const trip = createTrip(testDb, other.id);
+    const place = createPlace(testDb, trip.id);
+    await withHarness(user.id, async (h) => {
+      const result = await h.client.callTool({ name: 'bulk_update_places', arguments: { tripId: trip.id, placeIds: [place.id], notes: 'x' } });
+      expect(result.isError).toBe(true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // delete_place
 // ---------------------------------------------------------------------------
 
@@ -241,6 +307,51 @@ describe('Tool: delete_place', () => {
     await withHarness(user.id, async (h) => {
       const result = await h.client.callTool({ name: 'delete_place', arguments: { tripId: trip.id, placeId: place.id } });
       expect(result.isError).toBe(true);
+    });
+  });
+
+  it('removes the linked journey skeleton when the place is deleted', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const day = createDay(testDb, trip.id);
+    const place = createPlace(testDb, trip.id);
+    createDayAssignment(testDb, day.id, place.id);
+    const journey = createJourney(testDb, user.id);
+    linkJourney(journey.id, trip.id);
+    // Materialise the skeleton for the assigned place.
+    testDb.prepare(
+      `INSERT INTO journey_entries (journey_id, source_trip_id, source_place_id, author_id, type, title, entry_date, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'skeleton', ?, ?, 0, ?, ?)`,
+    ).run(journey.id, trip.id, place.id, user.id, place.name, '2026-05-01', Date.now(), Date.now());
+    expect(skeletonFor(journey.id, place.id)).toBeDefined();
+
+    await withHarness(user.id, async (h) => {
+      await h.client.callTool({ name: 'delete_place', arguments: { tripId: trip.id, placeId: place.id } });
+      expect(skeletonFor(journey.id, place.id)).toBeUndefined();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// create_and_assign_place
+// ---------------------------------------------------------------------------
+
+describe('Tool: create_and_assign_place', () => {
+  it('creates a skeleton suggestion in a linked journey', async () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id);
+    const day = createDay(testDb, trip.id);
+    const journey = createJourney(testDb, user.id);
+    linkJourney(journey.id, trip.id);
+
+    await withHarness(user.id, async (h) => {
+      const result = parseToolResult(
+        await h.client.callTool({ name: 'create_and_assign_place', arguments: { tripId: trip.id, dayId: day.id, name: 'Fresh POI' } }),
+      ) as any;
+      const skeleton = skeletonFor(journey.id, result.place.id);
+      expect(skeleton).toBeDefined();
+      expect(skeleton.type).toBe('skeleton');
+      expect(skeleton.title).toBe('Fresh POI');
     });
   });
 });

@@ -5,6 +5,8 @@ import { mapsApi } from '../../api/client'
 import { useAuthStore } from '../../store/authStore'
 import { useCanDo } from '../../store/permissionsStore'
 import { useTripStore } from '../../store/tripStore'
+import { useAddonStore } from '../../store/addonStore'
+import CollectionPicker from '../Collections/CollectionPicker'
 import { useToast } from '../shared/Toast'
 import { Search, Paperclip, X, AlertTriangle, Loader2 } from 'lucide-react'
 import { useTranslation } from '../../i18n'
@@ -12,6 +14,7 @@ import CustomTimePicker from '../shared/CustomTimePicker'
 import { DEFAULT_FORM, isGoogleMapsUrl, type PlaceFormData } from './PlaceFormModal.helpers'
 import { getApiErrorMessage } from '../../utils/apiError'
 import type { Place, Category, Assignment } from '../../types'
+import { NumericInput } from '../shared/NumericInput'
 
 // The submit payload mirrors the form, but lat/lng are parsed to numbers and
 // category_id is normalised, plus any files chosen before the place existed.
@@ -33,6 +36,10 @@ interface PlaceFormModalProps {
   onCategoryCreated: (category: { name: string; color?: string; icon?: string }) => Promise<Category> | undefined
   assignmentId: number | null
   dayAssignments?: Assignment[]
+  /** Mobile keeps the untouched single-column form; desktop adds the saved-place
+   *  picker column when the Collections addon is enabled. Sourced from the trip
+   *  planner's matchMedia('(max-width:767px)'). */
+  isMobile?: boolean
 }
 
 
@@ -67,7 +74,7 @@ function findDuplicatePlace(
 function usePlaceFormModal(props: PlaceFormModalProps) {
   const {
   isOpen, onClose, onSave, place, prefillCoords, tripId, categories,
-  onCategoryCreated, assignmentId, dayAssignments = [],
+  onCategoryCreated, assignmentId, dayAssignments = [], isMobile = false,
   } = props
   const [form, setForm] = useState(DEFAULT_FORM)
   const [mapsSearch, setMapsSearch] = useState('')
@@ -79,6 +86,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState([])
   const fileRef = useRef(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [acSuggestions, setAcSuggestions] = useState<{ placeId: string; mainText: string; secondaryText: string }[]>([])
   const [acHighlight, setAcHighlight] = useState(-1)
   const acDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -89,6 +97,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
   const can = useCanDo()
   const tripObj = useTripStore((s) => s.trip)
   const canUploadFiles = can('file_upload', tripObj)
+  const collectionsEnabled = useAddonStore((s) => s.isEnabled('collections'))
 
   useEffect(() => {
     if (place) {
@@ -130,6 +139,17 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     // re-run on identity changes (place/assignmentId/open), not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [place, prefillCoords, isOpen, assignmentId])
+
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => {
+        const modal = searchInputRef.current?.closest('[role="dialog"]') ?? document.body
+        if (!modal.contains(document.activeElement) || document.activeElement === document.body) {
+          searchInputRef.current?.focus()
+        }
+      }, 50)
+    }
+  }, [isOpen])
 
   // Derive location bias bounding box from the trip's existing places
   const places = useTripStore((s) => s.places)
@@ -404,6 +424,8 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     onCategoryCreated,
     assignmentId,
     dayAssignments,
+    isMobile,
+    collectionsEnabled,
     form,
     setForm,
     mapsSearch,
@@ -436,6 +458,7 @@ function usePlaceFormModal(props: PlaceFormModalProps) {
     canUploadFiles,
     places,
     locationBias,
+    searchInputRef,
     fetchSuggestions,
     handleChange,
     handleMapsSearch,
@@ -465,6 +488,8 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
     onCategoryCreated,
     assignmentId,
     dayAssignments,
+    isMobile,
+    collectionsEnabled,
     form,
     setForm,
     mapsSearch,
@@ -497,6 +522,7 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
     canUploadFiles,
     places,
     locationBias,
+    searchInputRef,
     fetchSuggestions,
     handleChange,
     handleMapsSearch,
@@ -511,12 +537,15 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
     handleSubmit,
     duplicateWarning,
   } = S
+  // Desktop + Collections addon → two columns (form + saved-place picker). Mobile
+  // always keeps the original single-column form untouched.
+  const twoColumn = !isMobile && collectionsEnabled
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title={place ? t('places.editPlace') : t('places.addPlace')}
-      size="lg"
+      size={twoColumn ? '3xl' : 'lg'}
       footer={
         <div className="flex justify-end gap-3">
           <button
@@ -537,7 +566,8 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
         </div>
       }
     >
-      <form onSubmit={handleSubmit} className="space-y-4" onPaste={handlePaste}>
+      <div className={twoColumn ? 'flex gap-5 items-stretch' : ''}>
+      <form onSubmit={handleSubmit} className={twoColumn ? 'flex-1 min-w-0 space-y-4' : 'space-y-4'} onPaste={handlePaste}>
         {/* Place Search */}
         <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
           {!hasMapsKey && (
@@ -548,6 +578,7 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
           <div className="relative">
             <div className="flex gap-2">
               <input
+                ref={searchInputRef}
                 type="text"
                 value={mapsSearch}
                 onChange={e => setMapsSearch(e.target.value)}
@@ -668,11 +699,10 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
             className="form-input"
           />
           <div className="grid grid-cols-2 gap-2 mt-2">
-            <input
-              type="number"
-              step="any"
+            <NumericInput
+              mode="signed"
               value={form.lat}
-              onChange={e => handleChange('lat', e.target.value)}
+              onValueChange={v => handleChange('lat', v)}
               onPaste={e => {
                 const text = e.clipboardData.getData('text').trim()
                 const match = text.match(/^(-?\d+\.?\d*)\s*[,;\s]\s*(-?\d+\.?\d*)$/)
@@ -685,11 +715,10 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
               placeholder={t('places.formLat')}
               className="form-input"
             />
-            <input
-              type="number"
-              step="any"
+            <NumericInput
+              mode="signed"
               value={form.lng}
-              onChange={e => handleChange('lng', e.target.value)}
+              onValueChange={v => handleChange('lng', v)}
               placeholder={t('places.formLng')}
               className="form-input"
             />
@@ -796,6 +825,10 @@ export default function PlaceFormModal(props: PlaceFormModalProps) {
         )}
 
       </form>
+      {twoColumn && (
+        <CollectionPicker bias={locationBias} onSelect={handleSelectMapsResult} t={t} />
+      )}
+      </div>
     </Modal>
   )
 }

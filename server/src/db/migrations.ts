@@ -3081,6 +3081,636 @@ function runMigrations(db: Database.Database): void {
         if (!err.message?.includes('duplicate column name')) throw err;
       }
     },
+    () => {
+      try {
+        db.exec('ALTER TABLE budget_item_members ADD COLUMN amount REAL');
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+    },
+    // Calendar feed tokens — subscribable ICS links for per-trip and all-trips feeds
+    () => {
+      try {
+        db.exec('ALTER TABLE trips ADD COLUMN feed_token TEXT');
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+      try {
+        db.exec('ALTER TABLE users ADD COLUMN feed_token TEXT');
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_trips_feed_token ON trips(feed_token) WHERE feed_token IS NOT NULL');
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_feed_token ON users(feed_token) WHERE feed_token IS NOT NULL');
+    },
+    // Optimistic-concurrency token for offline conflict detection (#1135).
+    // packing_items had only created_at, so an offline edit could not be checked
+    // against a concurrent server change. SQLite forbids a non-constant DEFAULT on
+    // ALTER ADD COLUMN, so add it nullable and backfill from created_at; new rows
+    // set it explicitly (packingService). Additive: a request without the
+    // X-Base-Updated-At header keeps the old last-write-wins behaviour.
+    () => {
+      try {
+        db.exec('ALTER TABLE packing_items ADD COLUMN updated_at DATETIME');
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+      db.exec('UPDATE packing_items SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL');
+    },
+    // Video support (#823): the trek_photos registry held only images. media_type
+    // discriminates image vs video so the gallery, lightbox and provider proxy can
+    // branch; duration_ms is optional metadata for the player. Additive — existing
+    // rows default to 'image'.
+    () => {
+      for (const stmt of [
+        "ALTER TABLE trek_photos ADD COLUMN media_type TEXT NOT NULL DEFAULT 'image'",
+        'ALTER TABLE trek_photos ADD COLUMN duration_ms INTEGER',
+      ]) {
+        try {
+          db.exec(stmt);
+        } catch (err: any) {
+          if (!err.message?.includes('duplicate column name')) throw err;
+        }
+      }
+    },
+    // Dedicated booking URL (#935) — users previously stuffed links into notes.
+    // Additive nullable TEXT; existing rows default to NULL.
+    () => {
+      try {
+        db.exec('ALTER TABLE reservations ADD COLUMN url TEXT');
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+    },
+    // Private packing items (#858): an item can be hidden from other trip members.
+    // is_private toggles the visibility; owner_id records who it belongs to so the
+    // listing can show it only to them. owner_id is NULL on legacy rows (shared).
+    () => {
+      for (const stmt of [
+        'ALTER TABLE packing_items ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0',
+        'ALTER TABLE packing_items ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL',
+      ]) {
+        try {
+          db.exec(stmt);
+        } catch (err: any) {
+          if (!err.message?.includes('duplicate column name')) throw err;
+        }
+      }
+    },
+    // Guest members (#1362): people added to a trip without an account. A guest is a
+    // users row flagged is_guest=1 (no usable credentials) joined into trip_members,
+    // so it's assignable everywhere a member is — but must never authenticate or show
+    // up in the global user directory. The flag is the discriminator for those guards.
+    () => {
+      try {
+        db.exec('ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0');
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+    },
+    // Three-tier packing sharing (#858 follow-up): an item is Common (is_private=0,
+    // every existing item — non-breaking), Personal (is_private=1, owner only) or
+    // Shared-with-people (is_private=1 + recipient rows). owner_id is the "bringer".
+    // Contributors are extra people who said "I can bring that too" on a Common item
+    // (status 'pending' until the owner accepts).
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS packing_item_recipients (
+          item_id INTEGER NOT NULL REFERENCES packing_items(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          PRIMARY KEY (item_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_packing_item_recipients_user ON packing_item_recipients(user_id);
+        CREATE TABLE IF NOT EXISTS packing_item_contributors (
+          item_id INTEGER NOT NULL REFERENCES packing_items(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'accepted',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (item_id, user_id)
+        );
+      `);
+    },
+    // Migration 150: Collections addon — personal place library (#1081).
+    // Multi-list + per-place status (idea/want/visited) + fusion sharing.
+    // (150 = migrations.length of this array after appending — the runner uses
+    //  migrations.length, not this comment; the label is cosmetic.)
+    () => {
+      db.prepare(
+        `
+        INSERT OR IGNORE INTO addons (id, name, description, type, icon, enabled, config, sort_order)
+        VALUES ('collections', 'Collections', 'Personal place library — save places across trips into named lists, copy into any trip, share with others', 'global', 'Bookmark', 0, '{}', 16)
+      `,
+      ).run();
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS collections (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          description TEXT,
+          color TEXT DEFAULT '#6366f1',
+          icon TEXT DEFAULT 'Bookmark',
+          cover_image TEXT,
+          sort_order INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS collection_members (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(collection_id, user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS collection_places (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+          owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          saved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          lat REAL,
+          lng REAL,
+          address TEXT,
+          category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+          price REAL,
+          currency TEXT,
+          notes TEXT,
+          image_url TEXT,
+          google_place_id TEXT,
+          google_ftid TEXT,
+          osm_id TEXT,
+          website TEXT,
+          phone TEXT,
+          status TEXT NOT NULL DEFAULT 'idea',
+          source_trip_id INTEGER,
+          source_place_id INTEGER,
+          sort_order INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS collection_place_tags (
+          collection_place_id INTEGER NOT NULL REFERENCES collection_places(id) ON DELETE CASCADE,
+          tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+          PRIMARY KEY (collection_place_id, tag_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_collection_places_collection ON collection_places(collection_id);
+        CREATE INDEX IF NOT EXISTS idx_collection_members_user ON collection_members(user_id);
+        CREATE INDEX IF NOT EXISTS idx_collection_place_tags_place ON collection_place_tags(collection_place_id);
+        CREATE INDEX IF NOT EXISTS idx_collection_place_tags_tag ON collection_place_tags(tag_id);
+      `);
+    },
+
+    // Migration 151: user-added links on collections + saved places (JSON text)
+    () => {
+      try { db.exec('ALTER TABLE collections ADD COLUMN links TEXT'); } catch (err) { console.warn('[migrations] Non-fatal migration step failed:', err); }
+      try { db.exec('ALTER TABLE collection_places ADD COLUMN links TEXT'); } catch (err) { console.warn('[migrations] Non-fatal migration step failed:', err); }
+    },
+    // Migration 152: per-member permission role on a shared list. Existing
+    // accepted members default to 'editor' so nothing regresses.
+    () => {
+      try { db.exec("ALTER TABLE collection_members ADD COLUMN role TEXT NOT NULL DEFAULT 'editor'"); } catch (err) { console.warn('[migrations] Non-fatal migration step failed:', err); }
+    },
+    // Migration 153: per-trip invite links (#1143). One rotating token per trip;
+    // a logged-in existing user who opens the link joins the trip as a member.
+    // Deleting the trip drops the token (CASCADE); the creator is nulled if their
+    // account is removed so the link keeps working.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS trip_invite_tokens (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          trip_id INTEGER NOT NULL UNIQUE REFERENCES trips(id) ON DELETE CASCADE,
+          token TEXT UNIQUE NOT NULL,
+          created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          expires_at TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_trip_invite_tokens_token ON trip_invite_tokens(token);
+      `);
+    },
+    // Migration 154: optional trip binding on an admin invite link (#1402). A user
+    // who REGISTERS via the link is auto-added to the trip. Nullable for backward
+    // compatibility; ON DELETE SET NULL so removing the trip just unbinds the invite.
+    () => {
+      try { db.exec('ALTER TABLE invite_tokens ADD COLUMN trip_id INTEGER REFERENCES trips(id) ON DELETE SET NULL'); } catch (err) { console.warn('[migrations] Non-fatal migration step failed:', err); }
+    },
+    // Migration 155: plugin system scaffold (#plugins). A plugin is a row here;
+    // its code lives on the /plugins volume and (once the runtime lands) runs in
+    // an isolated child process. This migration only lays down the registry
+    // tables — nothing executes yet. Own data lives in a per-plugin sqlite file
+    // under /plugins-data, never in these tables.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plugins (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          type TEXT NOT NULL DEFAULT 'integration',
+          icon TEXT DEFAULT 'Blocks',
+          version TEXT,
+          api_version INTEGER DEFAULT 1,
+          min_trek_version TEXT,
+          permissions TEXT DEFAULT '[]',
+          granted_permissions TEXT DEFAULT '[]',
+          status TEXT NOT NULL DEFAULT 'inactive',
+          config TEXT DEFAULT '{}',
+          source_repo TEXT,
+          source_commit TEXT,
+          sha256 TEXT,
+          crash_count INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          reviewed_at TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS plugin_meta_migrations (
+          plugin_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (plugin_id, migration_id)
+        );
+        CREATE TABLE IF NOT EXISTS plugin_error_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plugin_id TEXT NOT NULL,
+          ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+          level TEXT NOT NULL DEFAULT 'error',
+          message TEXT,
+          stack TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_plugin_error_log_plugin ON plugin_error_log(plugin_id, ts);
+        CREATE TABLE IF NOT EXISTS plugin_settings_fields (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plugin_id TEXT NOT NULL,
+          field_key TEXT NOT NULL,
+          label TEXT,
+          input_type TEXT NOT NULL DEFAULT 'text',
+          placeholder TEXT,
+          hint TEXT,
+          required INTEGER NOT NULL DEFAULT 0,
+          secret INTEGER NOT NULL DEFAULT 0,
+          scope TEXT NOT NULL DEFAULT 'instance',
+          options TEXT,
+          oauth_config TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          UNIQUE (plugin_id, field_key)
+        );
+      `);
+    },
+    // Migration 156: separate the admin's ON/OFF intent (`enabled`) from the
+    // runtime health (`status`). A crash used to flip status to 'error', which
+    // erased the "keep it on" intent, so the plugin never rebooted after a deploy.
+    // Boot now retries every enabled plugin regardless of last status.
+    () => {
+      try {
+        db.exec("ALTER TABLE plugins ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0;");
+        // Anything not explicitly deactivated was meant to be on ('inactive' is the
+        // only status deactivate() sets; a crash/shutdown could leave error/stopped/starting).
+        db.exec("UPDATE plugins SET enabled = 1 WHERE status != 'inactive';");
+      } catch (err) { console.warn('[migrations] Non-fatal migration step failed:', err); }
+    },
+    // Migration 157: plugin capabilities (from trek-plugin.json) — the client
+    // needs them to place widgets (e.g. widget.slot 'hero' renders as an overlay
+    // on the boarding-pass bar instead of the dashboard sidebar).
+    () => {
+      try { db.exec("ALTER TABLE plugins ADD COLUMN capabilities TEXT NOT NULL DEFAULT '{}';"); } catch (err) { console.warn('[migrations] Non-fatal migration step failed:', err); }
+    },
+    // Migration 158: TOFU pin for a plugin's author signing key (#plugins, #4).
+    // Set on first install of a signed plugin; a later install whose registry key
+    // differs is a hard stop (author change / key rotation / attack) unless an
+    // admin re-trusts. NULL for unsigned plugins (signing is opt-in).
+    () => {
+      try { db.exec("ALTER TABLE plugins ADD COLUMN author_pubkey TEXT;"); } catch (err) { console.warn('[migrations] Non-fatal migration step failed:', err); }
+    },
+    // Migration 159: hash-chained capability audit log (#plugins, L1 hardening).
+    // Every host-mediated capability call the plugin makes is recorded at the RPC
+    // boundary (where the plugin provably can't reach) with the host-bound acting
+    // user and a per-plugin hash chain, so wide data grants stay attributable +
+    // tamper-evident + user-visible.
+    () => {
+      try {
+        db.exec(`CREATE TABLE IF NOT EXISTS plugin_capability_audit (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plugin_id TEXT NOT NULL,
+          acting_user_id INTEGER,
+          method TEXT NOT NULL,
+          resource TEXT,
+          code TEXT NOT NULL,
+          ts TEXT NOT NULL DEFAULT (datetime('now')),
+          prev_hash TEXT,
+          hash TEXT NOT NULL
+        );`);
+        db.exec('CREATE INDEX IF NOT EXISTS idx_plugin_audit_plugin ON plugin_capability_audit (plugin_id, id);');
+      } catch (err) { console.warn('[migrations] Non-fatal migration step failed:', err); }
+    },
+    // Migration 160: per-collection custom labels (#collections). Each list owns
+    // its own label set (unlike the instance-wide `tags` table), and a place can
+    // carry several labels. Used for grouping + filtering places within a list.
+    () => {
+      db.exec(`CREATE TABLE IF NOT EXISTS collection_labels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        color TEXT DEFAULT '#6366f1',
+        sort_order INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );`);
+      db.exec(`CREATE TABLE IF NOT EXISTS collection_place_labels (
+        collection_place_id INTEGER NOT NULL REFERENCES collection_places(id) ON DELETE CASCADE,
+        label_id INTEGER NOT NULL REFERENCES collection_labels(id) ON DELETE CASCADE,
+        PRIMARY KEY (collection_place_id, label_id)
+      );`);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_collection_labels_collection ON collection_labels(collection_id);');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_collection_place_labels_place ON collection_place_labels(collection_place_id);');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_collection_place_labels_label ON collection_place_labels(label_id);');
+    },
+    // Migration 161: plugin-owned metadata on core entities (#1429). A namespaced
+    // key/value store so a plugin can attach data to a trip/place/day WITHOUT
+    // forking the core schema. One row per (plugin, entity, key); a plugin only
+    // ever sees its own rows. entity_type is polymorphic (no cross-table FK), so
+    // rows are purged by plugin_id on uninstall; entity deletes leave harmless
+    // orphans that the plugin's own reads never surface.
+    () => {
+      db.exec(`CREATE TABLE IF NOT EXISTS plugin_entity_metadata (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plugin_id TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (plugin_id, entity_type, entity_id, key)
+      );`);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_plugin_meta_entity ON plugin_entity_metadata (plugin_id, entity_type, entity_id);');
+    },
+
+    // Freeze the FX rate on settle-up transfers too (#1445). budget_settlements
+    // stored only a bare `amount` in whatever display currency the payer was
+    // viewing, so a later live-rate drift re-opened an already-settled position
+    // with a few-cent residual. Capture the display `currency` and the rate frozen
+    // at settle time (units of that currency per 1 trip currency), mirroring the
+    // budget_items columns. Legacy rows keep currency = NULL / rate = 1 and stay on
+    // live rates until re-edited.
+    () => {
+      try {
+        db.exec('ALTER TABLE budget_settlements ADD COLUMN currency TEXT');
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+      try {
+        db.exec('ALTER TABLE budget_settlements ADD COLUMN exchange_rate REAL NOT NULL DEFAULT 1');
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+    },
+
+    // #1446: guests are per-trip people, but their display name lived in the globally
+    // UNIQUE users.username, so a second "Jake" on another trip was auto-renamed to
+    // "Jake 2". Add a non-unique display_name; new guests store the human name here and
+    // get a uuid-based username that is never shown (the member views COALESCE to it).
+    () => {
+      try {
+        db.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+    },
+
+    // Plugin dependencies (#plugins): a plugin's trek-plugin.json can now declare
+    // `requiredAddons` (addon ids that must be enabled to activate) and
+    // `pluginDependencies` ({id, version-range} of other plugins that must be
+    // installed + satisfied). Stored as one JSON blob and populated by the
+    // discovery upsert on every install path. Legacy rows default to '{}' (no deps).
+    () => {
+      try {
+        db.exec("ALTER TABLE plugins ADD COLUMN dependencies TEXT NOT NULL DEFAULT '{}'");
+      } catch (err: any) {
+        if (!err.message?.includes('duplicate column name')) throw err;
+      }
+    },
+    // Per-user plugin settings (#plugins). A plugin can declare `scope:'user'`
+    // settings fields (e.g. an API key or a personal preference); each USER stores
+    // their own values here, separate from the admin-owned instance `plugins.config`.
+    // Secrets are encrypted with the same apiKeyCrypto as instance secrets and are
+    // never echoed back to the client (masked). Runtime reads the acting user's row.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plugin_user_config (
+          plugin_id TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          config TEXT NOT NULL DEFAULT '{}',
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (plugin_id, user_id)
+        );
+      `);
+    },
+    // Host-brokered outbound OAuth (#plugins). A plugin becomes an OAuth *client* of a
+    // third-party service; the HOST runs authorize->callback->token->refresh with
+    // PKCE+state and owns the tokens — the plugin never sees the refresh token. Tokens
+    // are per-user + encrypted at rest; the in-flight PKCE verifier/state is short-lived.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plugin_oauth_tokens (
+          plugin_id TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          access_token TEXT,
+          refresh_token TEXT,
+          expires_at INTEGER,
+          scope TEXT,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (plugin_id, user_id)
+        );
+        CREATE TABLE IF NOT EXISTS plugin_oauth_state (
+          state TEXT PRIMARY KEY,
+          plugin_id TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          verifier TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+      `);
+    },
+    // Persistent plugin scheduler (#plugins). A plugin with the existing `jobs:run`
+    // grant can schedule a userless callback to fire at a future time (once, or
+    // recurring), surviving server restarts because the entry lives here. Same risk
+    // class as cron jobs (no user, no trip reads, own db + declared egress only) —
+    // so it rides on `jobs:run`, no new consent. UNIQUE(plugin_id, name) makes
+    // scheduler.set an upsert and cancel deterministic. Rows are purged on uninstall.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plugin_scheduled_tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plugin_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          due_at INTEGER NOT NULL,
+          payload TEXT NOT NULL DEFAULT 'null',
+          every_ms INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (plugin_id, name)
+        );
+      `);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_plugin_sched_due ON plugin_scheduled_tasks (due_at);');
+    },
+    // Durable GDPR erasure queue (#plugins). When a TREK account is deleted, every
+    // installed plugin holding `hook:user-data` gets a pending row here so its own
+    // deleteUserData handler runs even if the plugin was offline at delete time —
+    // erasure must not be lost across a restart, so it is persisted (unlike the
+    // best-effort event buffer). The row is removed once the plugin acknowledges,
+    // and all of a plugin's rows are purged on uninstall. UNIQUE(plugin_id, user_id)
+    // makes re-enqueue idempotent.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plugin_user_erasure_queue (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plugin_id TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (plugin_id, user_id)
+        );
+      `);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_plugin_erasure_plugin ON plugin_user_erasure_queue (plugin_id);');
+    },
+
+    // Tombstones for Atlas countries the user has explicitly removed (#1490).
+    // Atlas derives visited countries from trip places and transport endpoints on every
+    // request, so those countries have no row to delete — "Remove" deleted from
+    // visited_countries (which never had the row), the client hid it optimistically, and
+    // the next getStats re-derived it. Recording the removal here lets getStats suppress
+    // a derived country. Re-marking a country deletes its tombstone.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS hidden_countries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          country_code TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (user_id, country_code)
+        );
+      `);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_hidden_countries_user ON hidden_countries (user_id);');
+    },
+
+    // Operator-supplied egress hosts for a plugin (#plugins).
+    // A plugin's egress allow-list is fixed in its manifest at publish time, but a plugin
+    // that talks to a SELF-HOSTED service (Gotify, ntfy, …) cannot know the operator's
+    // hostname — so a community plugin could serve nobody. These rows let the ADMIN add
+    // hosts post-install; the runtime unions them into the child's allow-list at spawn.
+    // Consent stays with the admin (never the end user), exactly as for manifest egress.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plugin_egress_hosts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plugin_id TEXT NOT NULL,
+          host TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (plugin_id, host)
+        );
+      `);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_plugin_egress_hosts_plugin ON plugin_egress_hosts (plugin_id);');
+      // Whether the plugin DECLARED that it needs operator-supplied hosts. Only such a
+      // plugin may have hosts added — an admin can never widen egress for a plugin that
+      // never asked for it, so the install-time consent still bounds what's possible.
+      const columns = db.prepare("PRAGMA table_info('plugins')").all() as Array<{ name: string }>;
+      if (!columns.some((c) => c.name === 'operator_egress')) {
+        db.exec('ALTER TABLE plugins ADD COLUMN operator_egress INTEGER NOT NULL DEFAULT 0;');
+      }
+    },
+
+    // Settings-page action buttons a plugin contributes ("Test connection", "Sync now").
+    // Descriptors only — the handler lives in the plugin's code and is invoked host-side
+    // with the CLICKING user bound, so it can read that user's own settings.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS plugin_actions (
+          plugin_id TEXT NOT NULL,
+          action_key TEXT NOT NULL,
+          label TEXT NOT NULL,
+          hint TEXT,
+          danger INTEGER NOT NULL DEFAULT 0,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (plugin_id, action_key)
+        );
+      `);
+    },
+
+    // Why a plugin's update was REFUSED by the signature check (#plugins). A refused
+    // update leaves a working plugin pinned at its old version — previously the reason
+    // lived only in a transient toast, so the plugin quietly stopped updating and the
+    // admin had to re-attempt an update to rediscover why. Record it instead.
+    //
+    // `update_block_version` is the registry version that was refused: once the registry
+    // offers something NEWER, the block describes an artifact nobody is being offered
+    // anymore, so it reads as stale and the admin can just re-attempt (the next install
+    // re-verifies and either succeeds or re-blocks with fresh values). Deliberately no
+    // `status = 'error'` — the plugin still runs fine on its old code.
+    () => {
+      for (const col of ['update_block_code TEXT', 'update_block_detail TEXT', 'update_block_version TEXT']) {
+        try {
+          db.exec(`ALTER TABLE plugins ADD COLUMN ${col};`);
+        } catch (err) {
+          console.warn('[migrations] Non-fatal migration step failed:', err);
+        }
+      }
+    },
+
+    // The semver RANGE of TREK versions a plugin declares it supports (its manifest's
+    // `trek`, e.g. ">=3.2.0 <4.0.0"). The existing `min_trek_version` only carries the
+    // lower bound, so it cannot express "stops working at 4.0" — which is precisely the
+    // case the activation gate has to catch after a TREK upgrade. Kept nullable: a plugin
+    // installed before this column existed has no range recorded, and the gate refuses to
+    // activate it rather than guessing (see TREK_VERSION_UNKNOWN).
+    () => {
+      try {
+        db.exec('ALTER TABLE plugins ADD COLUMN trek_range TEXT;');
+      } catch (err) {
+        console.warn('[migrations] Non-fatal migration step failed:', err);
+      }
+    },
+
+    // `place_regions` is a re-derivable Nominatim cache, only ever populated for a place ID
+    // that isn't already cached — so a wrong row, once written, was permanent. Region
+    // resolution now resolves a place's lat/lng directly against the bundled admin1 polygons
+    // (the same ones the client renders) instead of trusting Nominatim's address level, which
+    // could name a subdivision level the bundle doesn't carry (Barcelona's ES-B province vs
+    // the bundle's ES-CT autonomous community) and never highlight. That fix only helps
+    // places re-resolved after it, so clear the cache once and let every place re-resolve on
+    // the next Atlas load. The country_code stored alongside is cleared too, which also drops
+    // the old wrong-country rows a US-state-abbreviation address used to produce.
+    () => {
+      try {
+        db.exec('DELETE FROM place_regions');
+      } catch (err) {
+        // place_regions is created by an earlier migration; tolerate its absence on an
+        // unusual partial DB rather than aborting startup.
+        if (!(err instanceof Error) || !err.message.includes('no such table')) throw err;
+      }
+    },
+
+    // Tombstones for Atlas regions the user has explicitly removed — the region-level
+    // counterpart to hidden_countries above (#1490). A visited region is normally derived
+    // fresh from place_regions/visited_regions on every request, so "removing" it has
+    // nothing to delete; recording it here lets getVisitedRegions suppress a derived region
+    // the same way getStats already suppresses a derived country. Unlike the country-level
+    // tombstone (originally only reachable for a manually-marked or zero-count country),
+    // this also covers a region derived from real place data — e.g. one that ended up on
+    // the wrong side of a border-simplification gap and the user just wants gone.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS hidden_regions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          region_code TEXT NOT NULL,
+          country_code TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (user_id, region_code)
+        );
+      `);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_hidden_regions_user ON hidden_regions (user_id);');
+    },
   ];
 
   if (currentVersion < migrations.length) {

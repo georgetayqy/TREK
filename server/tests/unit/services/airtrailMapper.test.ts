@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalHash, mapFlightToReservation, normalizeFlight } from '../../../src/services/airtrail/airtrailMapper';
+import { canonicalHash, mapFlightToReservation, mapFlightsToMultiLegReservation, normalizeFlight } from '../../../src/services/airtrail/airtrailMapper';
 import type { AirtrailFlightRaw } from '../../../src/services/airtrail/airtrailClient';
 
 function airport(over: Partial<AirtrailFlightRaw['from']> = {}): NonNullable<AirtrailFlightRaw['from']> {
@@ -51,9 +51,15 @@ describe('airtrailMapper.normalizeFlight', () => {
       flightNumber: 'BA178',
       seatClass: 'economy',
     });
-    // The picker preview surfaces the scheduled times, not the actual ones.
+    // The picker preview prefers the scheduled times over the actual ones.
     expect(n.departure).toBe('2021-09-01T23:00:00.000+00:00');
     expect(n.arrival).toBe('2021-09-02T07:00:00.000+00:00');
+  });
+
+  it('#1336 surfaces the primary departure/arrival when there is no scheduled time', () => {
+    const n = normalizeFlight(flight({ departureScheduled: null, arrivalScheduled: null }));
+    expect(n.departure).toBe('2021-09-01T23:42:00.000+00:00');
+    expect(n.arrival).toBe('2021-09-02T07:42:00.000+00:00');
   });
 
   it('falls back to ICAO when IATA is missing and tolerates null airports', () => {
@@ -74,13 +80,24 @@ describe('airtrailMapper.mapFlightToReservation', () => {
     expect(m.reservation_end_time).toBe('2021-09-02T08:00');
   });
 
-  it('leaves the clock blank (date only) when the flight has no scheduled time', () => {
-    const m = mapFlightToReservation(flight({ departureScheduled: null, arrivalScheduled: null }));
+  it('leaves the clock blank (date only) when the flight has no time at all', () => {
+    const m = mapFlightToReservation(flight({ departure: null, arrival: null, departureScheduled: null, arrivalScheduled: null }));
     // Date is preserved from the AirTrail canonical date; no fabricated 00:00.
     expect(m.reservation_time).toBe('2021-09-01');
     expect(m.reservation_end_time).toBeNull();
     expect(m.endpoints.find(e => e.role === 'from')?.local_time).toBeNull();
     expect(m.endpoints.find(e => e.role === 'to')?.local_time).toBeNull();
+  });
+
+  it('#1336 falls back to the primary departure/arrival when AirTrail has no scheduled times', () => {
+    // Manually-entered AirTrail flights set only departure/arrival; *Scheduled stays null.
+    const m = mapFlightToReservation(flight({ departureScheduled: null, arrivalScheduled: null }));
+    // departure 23:42 UTC at JFK (EDT) = 19:42 local; arrival 07:42 UTC at LHR (BST) = 08:42.
+    expect(m.reservation_time).toBe('2021-09-01T19:42');
+    expect(m.reservation_end_time).toBe('2021-09-02T08:42');
+    expect(m.endpoints.find(e => e.role === 'from')?.local_time).toBe('19:42');
+    expect(m.endpoints.find(e => e.role === 'to')?.local_time).toBe('08:42');
+    expect(m.endpoints.find(e => e.role === 'to')?.local_date).toBe('2021-09-02');
   });
 
   it('builds two endpoints with codes, coords and timezones', () => {
@@ -142,8 +159,8 @@ describe('airtrailMapper.mapFlightToReservation', () => {
     expect(m.endpoints.find(e => e.role === 'to')).toBeDefined();
   });
 
-  it('leaves the end time null for a partial flight with no scheduled arrival', () => {
-    const m = mapFlightToReservation(flight({ arrivalScheduled: null }));
+  it('leaves the end time null for a partial flight with no arrival time at all', () => {
+    const m = mapFlightToReservation(flight({ arrival: null, arrivalScheduled: null }));
     expect(m.reservation_end_time).toBeNull();
     expect(m.reservation_time).toBe('2021-09-01T19:00');
   });
@@ -164,9 +181,17 @@ describe('airtrailMapper.canonicalHash', () => {
     expect(canonicalHash(flight())).not.toBe(
       canonicalHash(flight({ departureScheduled: '2021-09-01T22:00:00.000+00:00' })),
     );
-    // ...but a change to the actual time alone must not (TREK never shows it).
+    // ...but a change to the actual time alone must not (TREK shows the scheduled one).
     expect(canonicalHash(flight())).toBe(
       canonicalHash(flight({ departure: '2021-09-01T20:00:00.000+00:00', arrival: '2021-09-02T05:00:00.000+00:00' })),
+    );
+  });
+
+  it('#1336 tracks the primary departure when there is no scheduled time', () => {
+    // With no scheduled time, departure IS what TREK imports, so a change must re-sync.
+    const manual = flight({ departureScheduled: null, arrivalScheduled: null });
+    expect(canonicalHash(manual)).not.toBe(
+      canonicalHash(flight({ departureScheduled: null, arrivalScheduled: null, departure: '2021-09-01T20:00:00.000+00:00' })),
     );
   });
 
@@ -184,5 +209,103 @@ describe('airtrailMapper.canonicalHash', () => {
       ],
     });
     expect(canonicalHash(a)).toBe(canonicalHash(b));
+  });
+});
+
+describe('airtrailMapper.mapFlightsToMultiLegReservation (#1535)', () => {
+  const BRU = () => airport({ id: 10, icao: 'EBBR', iata: 'BRU', name: 'Brussels', lat: 50.9014, lon: 4.4844, tz: 'Europe/Brussels' });
+  const HEL = (over: Partial<AirtrailFlightRaw['from']> = {}) =>
+    airport({ id: 11, icao: 'EFHK', iata: 'HEL', name: 'Helsinki-Vantaa', lat: 60.3172, lon: 24.9633, tz: 'Europe/Helsinki', ...over });
+
+  const leg1 = (over: Partial<AirtrailFlightRaw> = {}) =>
+    flight({
+      id: 101,
+      from: BRU(),
+      to: HEL(),
+      departure: null,
+      arrival: null,
+      departureScheduled: '2021-09-01T06:00:00.000+00:00', // 08:00 CEST in Brussels
+      arrivalScheduled: '2021-09-01T09:30:00.000+00:00', // 12:30 EEST in Helsinki
+      airline: { id: 2, icao: 'FIN', iata: 'AY', name: 'Finnair' },
+      flightNumber: 'AY1502',
+      note: 'first hop',
+      seats: [{ userId: 'u1', guestName: null, seat: 'window', seatNumber: '12A', seatClass: 'economy' }],
+      ...over,
+    });
+  const leg2 = (over: Partial<AirtrailFlightRaw> = {}) =>
+    flight({
+      id: 102,
+      from: HEL(),
+      to: airport(), // JFK
+      departure: null,
+      arrival: null,
+      departureScheduled: '2021-09-01T11:00:00.000+00:00', // 14:00 EEST in Helsinki
+      arrivalScheduled: '2021-09-01T19:00:00.000+00:00', // 15:00 EDT at JFK
+      airline: { id: 2, icao: 'FIN', iata: 'AY', name: 'Finnair' },
+      flightNumber: 'AY15',
+      note: null,
+      seats: [{ userId: 'u1', guestName: null, seat: 'aisle', seatNumber: '22C', seatClass: 'economy' }],
+      ...over,
+    });
+
+  it('builds one from → stop → to chain, the stop carrying the onward departure', () => {
+    const m = mapFlightsToMultiLegReservation([leg1(), leg2()]);
+    expect(m.endpoints.map(e => [e.role, e.code, e.sequence])).toEqual([
+      ['from', 'BRU', 0],
+      ['stop', 'HEL', 1],
+      ['to', 'JFK', 2],
+    ]);
+    // The connection endpoint stores the departure of the leg LEAVING it, like
+    // the manual multi-leg form; only the final endpoint keeps its arrival.
+    expect(m.endpoints[1].local_time).toBe('14:00');
+    expect(m.endpoints[1].local_date).toBe('2021-09-01');
+    expect(m.endpoints[2].local_time).toBe('15:00');
+    expect(m.reservation_time).toBe('2021-09-01T08:00');
+    expect(m.reservation_end_time).toBe('2021-09-01T15:00');
+    expect(m.title).toBe('BRU → HEL → JFK');
+  });
+
+  it('stores per-leg details in metadata.legs and mirrors the first/last leg flat', () => {
+    const m = mapFlightsToMultiLegReservation([leg1(), leg2()]);
+    expect(m.metadata.legs).toEqual([
+      { from: 'BRU', to: 'HEL', airline: 'Finnair', flight_number: 'AY1502', dep_day_id: null, dep_time: '08:00', arr_day_id: null, arr_time: '12:30', seat: '12A' },
+      { from: 'HEL', to: 'JFK', airline: 'Finnair', flight_number: 'AY15', dep_day_id: null, dep_time: '14:00', arr_day_id: null, arr_time: '15:00', seat: '22C' },
+    ]);
+    expect(m.metadata).toMatchObject({
+      airline: 'Finnair',
+      airline_code: 'FIN',
+      flight_number: 'AY1502',
+      departure_airport: 'BRU',
+      arrival_airport: 'JFK',
+      seat: '12A',
+      airtrail_ids: ['101', '102'],
+    });
+    expect(m.notes).toBe('first hop');
+  });
+
+  it('flags needs_review but keeps the rest of the chain when the connection airport has no coordinates', () => {
+    const m = mapFlightsToMultiLegReservation([leg1({ to: HEL({ lat: null, lon: null }) }), leg2({ from: HEL({ lat: null, lon: null }) })]);
+    expect(m.needs_review).toBe(1);
+    expect(m.endpoints.map(e => [e.role, e.code])).toEqual([
+      ['from', 'BRU'],
+      ['to', 'JFK'],
+    ]);
+  });
+
+  it('files each leg on its own day via the resolver — an overnight connection must not inherit day 1', () => {
+    const overnight = leg2({
+      date: '2021-09-02',
+      departureScheduled: '2021-09-02T06:00:00.000+00:00', // 09:00 EEST next morning
+      arrivalScheduled: '2021-09-02T14:00:00.000+00:00', // 10:00 EDT
+    });
+    const dayIds: Record<string, number> = { '2021-09-01': 11, '2021-09-02': 12 };
+    const m = mapFlightsToMultiLegReservation([leg1(), overnight], d => (d ? (dayIds[d] ?? null) : null));
+    const legs = m.metadata.legs as any[];
+    expect(legs[0]).toMatchObject({ dep_day_id: 11, arr_day_id: 11 });
+    expect(legs[1]).toMatchObject({ dep_day_id: 12, arr_day_id: 12 });
+  });
+
+  it('falls back to the single-flight mapping for a one-flight chain', () => {
+    expect(mapFlightsToMultiLegReservation([flight()])).toEqual(mapFlightToReservation(flight()));
   });
 });

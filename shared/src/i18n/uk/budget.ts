@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': 'Вам нічого не винні',
   'costs.yourShare': 'Ваша частка',
   'costs.youPaid': 'Ви заплатили',
+  'costs.outstanding': 'Неврегульована сума',
+  'costs.outstandingSub': 'Витрати без платника',
+  'costs.outstandingItems': 'витрат без платника',
   'costs.expenses': 'Витрати',
   'costs.entries': '{count} записів',
   'costs.searchPlaceholder': 'Пошук витрат…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} у {to}',
   'costs.category': 'Категорія',
   'costs.whoPaid': 'Хто заплатив?',
+  'costs.multiplePayers': 'Платили кілька осіб',
+  'costs.singlePayer': 'Платила одна особа',
+  'costs.payersUnbalanced': 'Сума платежів має становити {amount}',
   'costs.splitBetween': 'Розділити порівну між',
   'costs.pickSomeone': 'Виберіть хоча б одну особу для розподілу.',
   'costs.splitSummary': 'Розділено на {count} · по {amount}',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': 'Лише в сумі — ще не врегульовано',
   'costs.tapToInclude': 'Натисніть, щоб додати',
   'costs.amount': 'Сума',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'Усі категорії',
+  'costs.filter.allDays': 'Усі дні',
+  'costs.expensesCount': '{count} витрат',
 };
-
 export default budget;

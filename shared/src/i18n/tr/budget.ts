@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': 'Size borç yok',
   'costs.yourShare': 'Sizin payınız',
   'costs.youPaid': 'Siz ödediniz',
+  'costs.outstanding': 'Bekleyen tutar',
+  'costs.outstandingSub': 'Henüz ödeyeni olmayan harcamalar',
+  'costs.outstandingItems': 'harcamanın ödeyeni yok',
   'costs.expenses': 'Harcamalar',
   'costs.entries': '{count} kayıt',
   'costs.searchPlaceholder': 'Harcamalarda ara…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '{to} cinsinden 1 {from}',
   'costs.category': 'Kategori',
   'costs.whoPaid': 'Kim ödedi?',
+  'costs.multiplePayers': 'Birden fazla kişi ödedi',
+  'costs.singlePayer': 'Tek kişi ödedi',
+  'costs.payersUnbalanced': 'Ödeyenlerin tutarları toplamı {amount} olmalıdır',
   'costs.splitBetween': 'Eşit olarak böl',
   'costs.pickSomeone': 'Paylaşmak için en az bir kişi seçin.',
   'costs.splitSummary': '{count} kişiye bölündü · her biri {amount}',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': 'Yalnızca toplamda — henüz ödenmedi',
   'costs.tapToInclude': 'Eklemek için dokun',
   'costs.amount': 'Tutar',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'Tüm kategoriler',
+  'costs.filter.allDays': 'Tüm günler',
+  'costs.expensesCount': '{count} harcama',
 };
-
 export default budget;

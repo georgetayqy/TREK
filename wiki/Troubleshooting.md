@@ -19,6 +19,46 @@ environment:
 
 ---
 
+## Can't log in after setup / ADMIN_EMAIL and ADMIN_PASSWORD seem ignored
+
+**Cause:** The initial admin account is seeded **only on the first boot, when the database has no users yet.** Three things follow from that, and each trips people up:
+
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD` apply **only on that first run**. If you first start *without* them, an admin is created with a **random** password (it is **not** `changeme`) — and adding the variables afterwards has no effect, because a user already exists. The server now logs a reminder when it ignores them.
+- The random first-run password is printed to the log **once**, in a box titled `TREK — First Run: Admin Account Created`. It is easy to miss if you read the logs later.
+- Pulling a "fresh image" does **not** reset anything — your `./data` volume still holds the old database, so first-run setup does not run again.
+
+**Fix — pick whichever applies:**
+
+**Read the first-run credentials** (only present on the very first start of an empty database):
+
+```bash
+docker compose logs | grep -A6 "First Run"
+```
+
+Log in with what it shows; you will be asked to set a new password.
+
+**Reset the admin without losing data** (locked-out, existing install):
+
+```bash
+docker exec -it trek node server/reset-admin.js
+```
+
+This resets (or creates) `admin@trek.local` and prints a generated password. Override with `-e RESET_ADMIN_EMAIL=you@example.com -e RESET_ADMIN_PASSWORD=yourpass`. You will be asked to change it on first login.
+
+**Start over with chosen credentials** (fresh install, no data to keep):
+
+```bash
+docker compose down
+rm -rf ./data        # deletes ALL TREK data — only on a throwaway/fresh install
+docker compose up -d
+```
+
+With `ADMIN_EMAIL` and `ADMIN_PASSWORD` set, the admin is created with exactly those credentials.
+
+> **Note (Docker Desktop on Windows/macOS):** SQLite's WAL mode is unreliable on bind mounts backed by the Windows/macOS filesystem and can cause silent write failures. Prefer a Docker **named volume** for `/app/data` over a host bind mount. See [Install: Docker Compose](Install-Docker-Compose#named-volumes).
+
+---
+
 ## WebSocket not connecting / real-time sync broken
 
 **Cause:** Your reverse proxy is not forwarding WebSocket upgrade headers on the `/ws` path.
@@ -102,6 +142,36 @@ Add this to the `location /` block (or the specific backup route). See [Reverse 
 ```bash
 sudo chown -R 1000:1000 ./data ./uploads
 ```
+
+---
+
+## Container won't start: "exec /usr/bin/dumb-init: operation not permitted"
+
+**Symptoms:** The container restarts in a loop and the logs show nothing but:
+
+```
+trek  | exec /usr/bin/dumb-init: operation not permitted
+trek exited with code 255 (restarting)
+```
+
+**Cause:** You are running **Docker installed from the snap** (its config lives under `/var/snap/docker/...`) *and* your compose file sets `security_opt: [no-new-privileges:true]`. The snap-packaged `dockerd` runs under its own AppArmor profile, and AppArmor refuses the `no_new_privs` privilege transition for snapped daemons. The container's very first `execve` is denied with `EPERM`, so it never starts. Confirm it in the kernel log right after a crash:
+
+```bash
+sudo dmesg -T | grep -iE 'apparmor|denied'
+# apparmor="DENIED" operation="exec" ... info="no new privs"
+```
+
+This affects **any** image, not just TREK, and is a known snap limitation ([snapd bug #1908448](https://bugs.launchpad.net/snapd/+bug/1908448)). Setting `apparmor=unconfined` on the container does **not** help — that only swaps the *container's* profile, while the denial comes from the *daemon's* (snap's) confinement, which a container-level option cannot reach.
+
+**Fix:** Install Docker from the official apt repository instead of the snap. Your data is safe as long as it lives in host bind-mounts (`./data`, `./uploads`):
+
+```bash
+sudo snap remove docker
+curl -fsSL https://get.docker.com | sudo sh   # or follow docs.docker.com/engine/install/ubuntu
+docker compose up -d
+```
+
+> **Note:** If you must stay on the snap, the only workaround is removing `no-new-privileges` from `security_opt`. The rest of the hardening (`read_only`, `cap_drop: ALL` with a minimal `cap_add`, the `noexec,nosuid` tmpfs) keeps working and carries most of the weight. See [Security Hardening](Security-Hardening).
 
 ---
 
@@ -279,9 +349,9 @@ Restart the container after adding the variable. Once set, clicking **Connect** 
 
 ---
 
-## MCP integration: "Too many requests" or "Session limit reached"
+## MCP integration: "Too many requests"
 
-**Cause:** Each user is limited to 300 MCP requests per minute and 20 concurrent sessions by default. Exceeding either limit returns a `429` response.
+**Cause:** Each user is limited to 300 MCP requests per minute by default. Exceeding the limit returns a `429` response.
 
 **Fix:** Increase the limits via environment variables:
 
@@ -289,6 +359,48 @@ Restart the container after adding the variable. Once set, clicking **Connect** 
 environment:
   - MCP_RATE_LIMIT=600          # requests per minute per user (default: 300)
   - MCP_MAX_SESSION_PER_USER=50 # concurrent sessions per user (default: 20)
+```
+
+The session limit no longer rejects requests: at the cap, the server closes the user's least-recently-active session to make room for the new one. If you are hitting the cap at all, see the next entry — the usual cause is sessions being created faster than they are reused, not genuinely parallel clients.
+
+---
+
+## MCP: a new session is created on every tool call / sessions pile up
+
+**Symptoms:** the server log shows a `Session <uuid> created` line for *every* tool call, with `Active sessions` climbing steadily. The idle sweep reports `cleaned 0` no matter how many sessions are open. On older versions the connection dies once the count reaches `MCP_MAX_SESSION_PER_USER` and only a restart brings it back.
+
+**Cause:** the client never receives — or cannot read — the `Mcp-Session-Id` response header, so it cannot send it back on the next call. Every request then looks like a brand-new connection and the server opens a fresh session for it. The `cleaned 0` sweep is a red herring: the sweep expires sessions after an hour of *inactivity* (`MCP_SESSION_TTL`), so sessions created seconds apart are nowhere near expiry.
+
+There are two reasons the header goes missing:
+
+1. **TREK 3.3.0 and earlier** did not send `Access-Control-Expose-Headers: Mcp-Session-Id`. Without it, browser-based clients — Claude.ai, Claude Desktop connectors, MCP Inspector — are forbidden by the browser from reading the session id, no matter how the proxy is configured. **Fix: upgrade** — no proxy change will help.
+2. **A reverse proxy stripping the header.** Nginx and Caddy forward it by default, so this only happens if you have a `proxy_hide_header` directive or a response-header allowlist in front of `/mcp`. See [Reverse-Proxy](Reverse-Proxy).
+
+**How to tell which:** from the machine running the proxy, ask for a session and look at the response headers.
+
+```bash
+curl -i -X POST https://trek.example.com/mcp \
+  -H "Authorization: Bearer <your-token>" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
+```
+
+A healthy response contains **both**:
+
+```
+mcp-session-id: 412d245d-1daa-4dfc-b453-eaf266673696
+access-control-expose-headers: Mcp-Session-Id,MCP-Protocol-Version,WWW-Authenticate
+```
+
+If `mcp-session-id` is missing, the proxy is stripping it. If `access-control-expose-headers` is missing, you are on an affected version — upgrade.
+
+On current versions the server also warns on every session-less request, which is the same signal:
+
+```
+[MCP] POST without mcp-session-id for user 1 — starting a new session. If this
+repeats on every tool call, the Mcp-Session-Id response header is not reaching
+the client (check that your reverse proxy forwards it).
 ```
 
 ---

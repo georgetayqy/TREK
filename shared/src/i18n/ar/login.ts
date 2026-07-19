@@ -8,7 +8,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places ومسارات وتجميع',
   'login.features.realtime': 'مزامنة فورية',
   'login.features.realtimeDesc': 'خططوا معًا عبر WebSocket',
-  'login.features.budget': 'تتبع الميزانية',
+  'login.features.budget': 'تتبع التكاليف',
   'login.features.budgetDesc': 'فئات ورسوم وتقسيم لكل شخص',
   'login.features.collab': 'تعاون',
   'login.features.collabDesc': 'عدة مستخدمين مع رحلات مشتركة',
@@ -85,5 +85,9 @@ const login: TranslationStrings = {
   'login.emailPlaceholder': 'your@email.com', // en-fallback
   'login.passkey.signIn': 'تسجيل الدخول باستخدام مفتاح المرور',
   'login.passkey.failed': 'فشل تسجيل الدخول بمفتاح المرور. يرجى المحاولة مرة أخرى.',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

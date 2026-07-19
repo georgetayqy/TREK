@@ -16,11 +16,21 @@ import {
 import {
   Plus, Edit2, Trash2, Archive, Copy, ArrowRight, MapPin,
   Plane, Hotel, Utensils, Clock, RefreshCw, ArrowRightLeft, Calendar,
-  LayoutGrid, List, Ticket, X,
+  LayoutGrid, List, Ticket, X, CalendarPlus,
 } from 'lucide-react'
+import { IcsSubscribeModal } from '../components/Planner/IcsSubscribeModal'
+import CollectionsWidget from '../components/Dashboard/CollectionsWidget'
+import PluginWidgets from '../components/Plugins/PluginWidgets'
+import PluginFrame from '../components/Plugins/PluginFrame'
+import { TripCardBadges, useTripCardBadges } from '../components/Plugins/TripCardBadges'
+import type { TripCardBadge } from '../api/client'
+import { usePluginStore } from '../store/pluginStore'
 import { formatTime, splitReservationDateTime } from '../utils/formatters'
+import { CURRENCIES } from '../components/Budget/BudgetPanel.constants'
 import { convertDistance, getDistanceUnitLabel } from '../utils/units'
 import { useSettingsStore } from '../store/settingsStore'
+import { useAddonStore } from '../store/addonStore'
+import { normalizeAppearance } from '@trek/shared'
 import '../styles/dashboard.css'
 
 const GRADIENTS = [
@@ -35,15 +45,31 @@ const GRADIENTS = [
 ]
 function tripGradient(id: number): string { return GRADIENTS[id % GRADIENTS.length] }
 
-// Day + short month for the boarding pass / cards, e.g. { d: '10', m: 'Sep' }.
-function splitDate(dateStr: string | null | undefined, locale: string): { d: string; m: string } | null {
+// Day + short month for the boarding pass / cards, plus the year — but only
+// when it isn't the current year (this year's trips stay clutter-free), e.g.
+// { d: '10', m: 'Sep', y: '' } now vs { …, y: '2024' } for an older trip.
+function splitDate(dateStr: string | null | undefined, locale: string): { d: string; m: string; y: string } | null {
   if (!dateStr) return null
   const date = new Date(dateStr + 'T00:00:00Z')
   if (isNaN(date.getTime())) return null // malformed date — render a dash, never crash
+  const otherYear = date.getUTCFullYear() !== new Date().getUTCFullYear()
   return {
     d: date.toLocaleDateString(locale, { day: 'numeric', timeZone: 'UTC' }),
     m: date.toLocaleDateString(locale, { month: 'short', timeZone: 'UTC' }),
+    y: otherYear ? date.toLocaleDateString(locale, { year: 'numeric', timeZone: 'UTC' }) : '',
   }
+}
+
+// Localized date for the cards. The year is included only when it isn't the
+// current year, and order/punctuation follow the locale (EN "Sep 10, 2026",
+// DE "10. Sep 2026" — vs a plain "Sep 10" this year), never a hard-coded layout.
+function fullDate(dateStr: string | null | undefined, locale: string): string | null {
+  if (!dateStr) return null
+  const date = new Date(dateStr + 'T00:00:00Z')
+  if (isNaN(date.getTime())) return null
+  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', timeZone: 'UTC' }
+  if (date.getUTCFullYear() !== new Date().getUTCFullYear()) opts.year = 'numeric'
+  return date.toLocaleDateString(locale, opts)
 }
 
 function buddyColor(seed: number): string {
@@ -90,7 +116,30 @@ export default function DashboardPage(): React.ReactElement {
     showForm, setShowForm, editingTrip, setEditingTrip,
     deleteTrip, setDeleteTrip, copyTrip, setCopyTrip, setTrips,
     handleCreate, handleUpdate, confirmDelete, handleArchive, handleUnarchive, confirmCopy,
+    allSubOpen, setAllSubOpen,
   } = useDashboard()
+
+  // Per-device dashboard widget visibility (from the appearance config).
+  const isMobile = useIsMobile()
+  const appearanceCfg = useSettingsStore(s => s.settings.appearance)
+  const dashCfg = normalizeAppearance(appearanceCfg).dashboard
+  const sideWidgets = isMobile ? dashCfg.mobile : dashCfg.desktop
+  const showCurrency = sideWidgets.currency
+  const showTimezones = sideWidgets.timezones
+  const showUpcoming = sideWidgets.upcomingReservations
+  // Collections is double-gated: the admin addon AND the per-user widget flag.
+  const isAddonEnabled = useAddonStore(s => s.isEnabled)
+  const showCollections = isAddonEnabled('collections') && sideWidgets.collections
+  // Desktop has a master toggle for the whole right column; off → centered layout.
+  // Only true dashboard widgets belong here — hero mounts on the boarding pass, and
+  // place-detail/day-detail widgets live inside the planner panels, not the sidebar.
+  const widgetPlugins = usePluginStore(s => s.plugins).filter(p => p.type === 'widget' && p.slot !== 'hero' && p.slot !== 'place-detail' && p.slot !== 'day-detail' && p.slot !== 'reservation-detail')
+  const sidebarVisible = (isMobile || dashCfg.desktop.sidebar) && (showCurrency || showCollections || showTimezones || showUpcoming || widgetPlugins.length > 0)
+
+  // Plugin-contributed badges on the trip cards (tripCardProvider hook). One fetch for
+  // all visible cards; only runs when at least one plugin is active. Fail-safe.
+  const anyPluginActive = usePluginStore(s => s.plugins).length > 0
+  const badgesFor = useTripCardBadges(gridTrips.map(t => t.id), anyPluginActive)
 
   return (
     <>
@@ -102,7 +151,7 @@ export default function DashboardPage(): React.ReactElement {
       {demoMode && <DemoBanner />}
       <div className="trek-dash-scroll">
         <MobileTopBar />
-        <main className="page">
+        <main className="page" data-no-sidebar={sidebarVisible ? undefined : 'true'}>
           <div className="page-main">
             {loadError && (
               <div className="dash-error" role="alert">
@@ -137,11 +186,28 @@ export default function DashboardPage(): React.ReactElement {
                     <button className={tripFilter === 'archive' ? 'on' : ''} onClick={() => setTripFilter('archive')}>{t('dashboard.archived')}</button>
                     <button className={tripFilter === 'completed' ? 'on' : ''} onClick={() => setTripFilter('completed')}>{t('dashboard.mobile.completed')}</button>
                   </div>
+                  <button
+                    className="tool-action"
+                    aria-label="Subscribe to all trips calendar"
+                    title="Subscribe to all trips"
+                    onClick={() => setAllSubOpen(true)}
+                    style={{ width: 38, height: 38, borderRadius: 11 }}
+                  >
+                    <CalendarPlus size={17} />
+                  </button>
                   <button className="tool-action" aria-label={t('dashboard.aria.toggleView')} onClick={toggleViewMode} style={{ width: 38, height: 38, borderRadius: 11 }}>
                     {viewMode === 'grid' ? <List size={17} /> : <LayoutGrid size={17} />}
                   </button>
                 </div>
               </div>
+              {allSubOpen && (
+                <IcsSubscribeModal
+                  endpoint="/api/feed/user"
+                  title="Subscribe to all trips"
+                  description="One calendar feed for all your active trips, kept in sync automatically. Excludes archived trips and trips that ended more than 90 days ago."
+                  onClose={() => setAllSubOpen(false)}
+                />
+              )}
 
               {gridTrips.length === 0 && tripFilter === 'planned' && !isLoading && !loadError && (
                 <div className="trips-empty">
@@ -156,6 +222,7 @@ export default function DashboardPage(): React.ReactElement {
                     key={trip.id}
                     trip={trip}
                     locale={locale}
+                    badges={badgesFor(trip.id)}
                     onOpen={() => navigate(`/trips/${trip.id}`)}
                     onEdit={() => { setEditingTrip(trip); setShowForm(true) }}
                     onCopy={() => setCopyTrip(trip)}
@@ -176,11 +243,15 @@ export default function DashboardPage(): React.ReactElement {
             </section>
           </div>
 
-          <aside className="page-sidebar">
-            <CurrencyTool />
-            <TimezoneTool locale={locale} />
-            <UpcomingTool items={upcoming} locale={locale} onOpen={(tripId) => navigate(`/trips/${tripId}`)} />
-          </aside>
+          {sidebarVisible && (
+            <aside className="page-sidebar">
+              {showCurrency && <CurrencyTool />}
+              {showCollections && <CollectionsWidget onOpen={() => navigate('/collections')} />}
+              {showTimezones && <TimezoneTool locale={locale} />}
+              {showUpcoming && <UpcomingTool items={upcoming} locale={locale} onOpen={(tripId) => navigate(`/trips/${tripId}`)} />}
+              <PluginWidgets plugins={widgetPlugins} tripId={spotlight ? String(spotlight.id) : null} />
+            </aside>
+          )}
         </main>
       </div>
 
@@ -234,6 +305,7 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
 }): React.ReactElement {
   const { t } = useTranslation()
   const mobile = useIsMobile()
+  const heroPlugins = usePluginStore(s => s.plugins).filter(p => p.type === 'widget' && p.slot === 'hero')
   const stop = (e: React.MouseEvent, fn: () => void) => { e.stopPropagation(); fn() }
   const status = getTripStatus(trip)
   const start = splitDate(trip.start_date, locale)
@@ -289,10 +361,10 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
       <div className="pass-cell dates-combined">
         <div className="pass-label">{t('dashboard.hero.tripDates')}</div>
         <div className="dates-row">
-          {start ? <div className="date-block"><div className="date-num mono">{start.d}</div><div className="date-month">{start.m}</div></div>
+          {start ? <div className="date-block"><div className="date-num mono">{start.d}</div><div className="date-month">{start.m}{start.y ? ` ${start.y}` : ''}</div></div>
             : <div className="date-block"><div className="date-num">—</div></div>}
           <div className="date-arrow"><ArrowRight /></div>
-          {end ? <div className="date-block"><div className="date-num mono">{end.d}</div><div className="date-month">{end.m}</div></div>
+          {end ? <div className="date-block"><div className="date-num mono">{end.d}</div><div className="date-month">{end.m}{end.y ? ` ${end.y}` : ''}</div></div>
             : <div className="date-block"><div className="date-num">—</div></div>}
         </div>
       </div>
@@ -349,7 +421,18 @@ function BoardingPassHero({ trip, bundle, locale, onOpen, onEdit, onCopy, onArch
         </div>
 
         {!mobile && (
-          <div className="hero-pass" onClick={(e) => { e.stopPropagation(); onOpen() }}>{passCells}</div>
+          <div className="hero-pass-wrap">
+            {heroPlugins.length > 0 && (
+              <div className="hero-pass-overlay" aria-hidden="true">
+                {heroPlugins.map(p => (
+                  <PluginFrame key={p.id} pluginId={p.id} tripId={String(trip.id)} title={p.name} className="hero-overlay-frame" />
+                ))}
+              </div>
+            )}
+            <div className="hero-pass" onClick={(e) => { e.stopPropagation(); onOpen() }}>
+              <div className="hero-pass-inner">{passCells}</div>
+            </div>
+          </div>
         )}
       </div>
     </section>
@@ -370,9 +453,28 @@ function formatCompactDistance(value: number): string {
   return String(rounded)
 }
 
-function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElement {
+function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElement | null {
   const { t } = useTranslation()
   const distanceUnit = useSettingsStore(s => s.settings.distance_unit) || 'metric'
+  const appearance = useSettingsStore(s => s.settings.appearance)
+  const isMobile = useIsMobile()
+  const dash = normalizeAppearance(appearance).dashboard
+
+  // Per-device widget visibility. Atlas + distance are desktop-only tiles.
+  const showAtlas = !isMobile && dash.desktop.atlas
+  const showTrips = isMobile ? dash.mobile.tripsTotal : dash.desktop.tripsTotal
+  const showDays = isMobile ? dash.mobile.daysTraveled : dash.desktop.daysTraveled
+  const showDistance = !isMobile && dash.desktop.distanceFlown
+  if (!showAtlas && !showTrips && !showDays && !showDistance) return null
+
+  // Reflow: the grid spreads the visible tiles to full width (the passport stays
+  // proportionally wider). Set as CSS vars so the responsive media queries still win.
+  const atlasTemplate =
+    [dash.desktop.atlas && '1.5fr', dash.desktop.tripsTotal && '1fr', dash.desktop.daysTraveled && '1fr', dash.desktop.distanceFlown && '1fr']
+      .filter(Boolean).join(' ') || '1fr'
+  const atlasTemplateM =
+    [dash.mobile.tripsTotal && '1fr', dash.mobile.daysTraveled && '1fr'].filter(Boolean).join(' ') || '1fr'
+
   const countries = stats?.countries || []
   const distanceKm = stats?.totalDistanceKm || 0
   const distance = convertDistance(distanceKm, distanceUnit)
@@ -382,55 +484,63 @@ function AtlasStats({ stats }: { stats: TravelStats | null }): React.ReactElemen
   const distanceLabel = getDistanceUnitLabel(distanceUnit)
 
   return (
-    <section className="atlas">
-      <div className="atlas-card passport">
-        <div className="label">{t('dashboard.atlas.countriesVisited')}</div>
-        <div className="value mono">{countries.length} <span className="unit text-[oklch(1_0_0_/_.55)]">{t('dashboard.atlas.ofTotal', { total: 195 })}</span></div>
-        <div className="passport-flags">
-          {countries.slice(0, 5).map((c, i) => (
-            <span key={i} className="flag" title={c}>
-              <img src={`https://flagcdn.com/w40/${c.toLowerCase()}.png`} alt={c} loading="lazy" />
-            </span>
-          ))}
-          {countries.length > 5 && <span className="flag more">+{countries.length - 5}</span>}
+    <section className="atlas" style={{ '--atlas-template': atlasTemplate, '--atlas-template-m': atlasTemplateM } as React.CSSProperties}>
+      {showAtlas && (
+        <div className="atlas-card passport">
+          <div className="label">{t('dashboard.atlas.countriesVisited')}</div>
+          <div className="value mono">{countries.length} <span className="unit text-[oklch(1_0_0_/_.55)]">{t('dashboard.atlas.ofTotal', { total: 195 })}</span></div>
+          <div className="passport-flags">
+            {countries.slice(0, 5).map((c, i) => (
+              <span key={i} className="flag" title={c}>
+                <img src={`https://flagcdn.com/w40/${c.toLowerCase()}.png`} alt={c} loading="lazy" />
+              </span>
+            ))}
+            {countries.length > 5 && <span className="flag more">+{countries.length - 5}</span>}
+          </div>
+          <div className="delta" />
         </div>
-        <div className="delta" />
-      </div>
+      )}
 
-      <div className="atlas-card">
-        <div className="label">{t('dashboard.atlas.tripsTotal')}</div>
-        <div className="value mono">{stats?.totalTrips ?? 0}</div>
-        <div className="delta">{t('dashboard.atlas.placesMapped', { count: stats?.totalPlaces ?? 0 })}</div>
-        <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
-          <polyline points="0,30 12,26 22,28 32,18 44,22 56,10 68,14 80,4" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
+      {showTrips && (
+        <div className="atlas-card">
+          <div className="label">{t('dashboard.atlas.tripsTotal')}</div>
+          <div className="value mono">{stats?.totalTrips ?? 0}</div>
+          <div className="delta">{t('dashboard.atlas.placesMapped', { count: stats?.totalPlaces ?? 0 })}</div>
+          <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
+            <polyline points="0,30 12,26 22,28 32,18 44,22 56,10 68,14 80,4" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+      )}
 
-      <div className="atlas-card">
-        <div className="label">{t('dashboard.atlas.daysTraveled')}</div>
-        <div className="value mono">{stats?.totalDays ?? 0} <span className="unit">{t('dashboard.atlas.daysUnit')}</span></div>
-        <div className="delta">{t('dashboard.atlas.acrossAllTrips')}</div>
-        <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
-          <path d="M0 30 Q10 24 20 26 T40 20 T60 14 T80 10" fill="none" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      </div>
+      {showDays && (
+        <div className="atlas-card">
+          <div className="label">{t('dashboard.atlas.daysTraveled')}</div>
+          <div className="value mono">{stats?.totalDays ?? 0} <span className="unit">{t('dashboard.atlas.daysUnit')}</span></div>
+          <div className="delta">{t('dashboard.atlas.acrossAllTrips')}</div>
+          <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
+            <path d="M0 30 Q10 24 20 26 T40 20 T60 14 T80 10" fill="none" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </div>
+      )}
 
-      <div className="atlas-card">
-        <div className="label">{t('dashboard.atlas.distanceFlown')}</div>
-        <div className="value mono">{distanceText} <span className="unit">{distanceLabel}</span></div>
-        <div className="delta">{t('dashboard.atlas.aroundEquator', { count: equatorTimes })}</div>
-        <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
-          <circle cx="40" cy="18" r="14" fill="none" stroke="oklch(0.88 0.01 70)" strokeWidth="2" />
-          <circle cx="40" cy="18" r="14" fill="none" strokeWidth="2" strokeDasharray="58 88" strokeLinecap="round" transform="rotate(-90 40 18)" />
-        </svg>
-      </div>
+      {showDistance && (
+        <div className="atlas-card">
+          <div className="label">{t('dashboard.atlas.distanceFlown')}</div>
+          <div className="value mono">{distanceText} <span className="unit">{distanceLabel}</span></div>
+          <div className="delta">{t('dashboard.atlas.aroundEquator', { count: equatorTimes })}</div>
+          <svg className="spark" width="80" height="36" viewBox="0 0 80 36">
+            <circle cx="40" cy="18" r="14" fill="none" stroke="oklch(0.88 0.01 70)" strokeWidth="2" />
+            <circle cx="40" cy="18" r="14" fill="none" strokeWidth="2" strokeDasharray="58 88" strokeLinecap="round" transform="rotate(-90 40 18)" />
+          </svg>
+        </div>
+      )}
     </section>
   )
 }
 
 // ── Trip card ────────────────────────────────────────────────────────────────
-function TripCard({ trip, locale, onOpen, onEdit, onCopy, onArchive, onDelete }: {
-  trip: DashboardTrip; locale: string; onOpen: () => void
+function TripCard({ trip, locale, badges, onOpen, onEdit, onCopy, onArchive, onDelete }: {
+  trip: DashboardTrip; locale: string; badges?: TripCardBadge[]; onOpen: () => void
   onEdit: () => void; onCopy: () => void; onArchive: () => void; onDelete: () => void
 }): React.ReactElement {
   const { t } = useTranslation()
@@ -470,9 +580,9 @@ function TripCard({ trip, locale, onOpen, onEdit, onCopy, onArchive, onDelete }:
         <div className="trip-dates">
           {start && end ? (
             <>
-              <span className="date-num">{start.m} {start.d}</span>
+              <span className="date-num">{fullDate(trip.start_date, locale)}</span>
               <span className="date-arrow"><ArrowRight size={11} /></span>
-              <span className="date-num">{end.m} {end.d}</span>
+              <span className="date-num">{fullDate(trip.end_date, locale)}</span>
             </>
           ) : <span>{t('dashboard.hero.noDates')}</span>}
         </div>
@@ -481,14 +591,13 @@ function TripCard({ trip, locale, onOpen, onEdit, onCopy, onArchive, onDelete }:
           <div><span className="n mono">{trip.place_count ?? 0}</span><span className="k">{t('dashboard.places')}</span></div>
           <div><span className="n mono">{trip.shared_count ?? 0}</span><span className="k">{trip.shared_count === 1 ? t('dashboard.card.buddyOne') : t('dashboard.members')}</span></div>
         </div>
+        <TripCardBadges items={badges ?? []} />
       </div>
     </article>
   )
 }
 
 // ── Currency tool (self-contained, mirrors the design's fx widget) ───────────
-const FX_FALLBACK = ['EUR', 'USD', 'GBP', 'CHF', 'JPY', 'CAD', 'AUD', 'CNY', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'TRY', 'THB', 'INR', 'BRL', 'MXN', 'ZAR']
-
 function CurrencyTool(): React.ReactElement {
   const { t } = useTranslation()
   const isLoaded = useSettingsStore(s => s.isLoaded)
@@ -521,13 +630,18 @@ function CurrencyTool(): React.ReactElement {
     const lf = localStorage.getItem('trek_fx_from')
     const lt = localStorage.getItem('trek_fx_to')
     if (!lf && !lt) return
-    if (lf) updateSetting('dashboard_fx_from', lf).catch(() => {})
-    if (lt) updateSetting('dashboard_fx_to', lt).catch(() => {})
-    localStorage.removeItem('trek_fx_from')
-    localStorage.removeItem('trek_fx_to')
+    const writes: Promise<void>[] = []
+    if (lf) writes.push(updateSetting('dashboard_fx_from', lf))
+    if (lt) writes.push(updateSetting('dashboard_fx_to', lt))
+    // Only drop the localStorage source once the server has durably stored the values, so a
+    // failed write during a (docker) upgrade can't destroy the only copy (#1311). Retry next load.
+    Promise.all(writes).then(() => {
+      localStorage.removeItem('trek_fx_from')
+      localStorage.removeItem('trek_fx_to')
+    }).catch(() => { /* keep localStorage; retry on next load */ })
   }, [isLoaded, updateSetting])
 
-  const currencies = rates ? Object.keys(rates).sort() : FX_FALLBACK
+  const currencies = rates ? Object.keys(rates).sort() : CURRENCIES
   const ccyOptions = currencies.map(c => ({ value: c, label: c }))
   const rate = rates?.[to] ?? null
   const converted = rate != null ? (parseFloat(amount.replace(',', '.')) || 0) * rate : null
@@ -600,11 +714,15 @@ function TimezoneTool({ locale }: { locale: string }): React.ReactElement {
     if (!isLoaded) return
     const raw = localStorage.getItem('trek_dashboard_tz')
     if (!raw) return
-    try {
-      const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed)) updateSetting('dashboard_timezones', parsed).catch(() => {})
-    } catch { /* ignore malformed storage */ }
-    localStorage.removeItem('trek_dashboard_tz')
+    let parsed: unknown
+    // A malformed/non-array value can never be written, so drop it now to avoid retrying forever.
+    try { parsed = JSON.parse(raw) } catch { localStorage.removeItem('trek_dashboard_tz'); return }
+    if (!Array.isArray(parsed)) { localStorage.removeItem('trek_dashboard_tz'); return }
+    // Only drop the localStorage source once the server has durably stored the value, so a failed
+    // write during a (docker) upgrade can't destroy the only copy (#1311). Retry next load.
+    updateSetting('dashboard_timezones', parsed)
+      .then(() => { localStorage.removeItem('trek_dashboard_tz') })
+      .catch(() => { /* keep localStorage; retry on next load */ })
   }, [isLoaded, updateSetting])
 
   const allZones = React.useMemo<string[]>(() => {
@@ -670,7 +788,7 @@ function UpcomingTool({ items, locale, onOpen }: {
         <div className="tool-title"><Calendar size={14} /> {t('dashboard.upcoming.title')}</div>
       </div>
       {items.length === 0 ? (
-        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>{t('dashboard.upcoming.empty')}</div>
+        <div style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', color: 'var(--ink-3)' }}>{t('dashboard.upcoming.empty')}</div>
       ) : (
         <div className="upc-list">
           {items.map(r => {

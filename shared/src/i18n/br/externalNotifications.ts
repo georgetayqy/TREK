@@ -28,6 +28,10 @@ const br: NotificationLocale = {
       title: 'Convite Vacay Fusion',
       body: `${p.actor} convidou você para fundir planos de férias. Abra o TREK para aceitar ou recusar.`,
     }),
+    collection_invite: (p) => ({
+      title: 'Convite para coleção',
+      body: `${p.actor} convidou você para compartilhar uma coleção. Abra o TREK para aceitar ou recusar.`,
+    }),
     photos_shared: (p) => ({
       title: `${p.count} fotos compartilhadas`,
       body: `${p.actor} compartilhou ${p.count} foto(s) em "${p.trip}".`,
@@ -48,6 +52,7 @@ const br: NotificationLocale = {
       title: 'Sessão Synology encerrada',
       body: 'Sua conta ou URL do Synology foi alterada. Você foi desconectado do Synology Photos.',
     }),
+    plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
   },
   passwordReset: {
     subject: 'Redefinir sua senha',

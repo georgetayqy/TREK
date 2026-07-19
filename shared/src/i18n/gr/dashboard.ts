@@ -89,9 +89,27 @@ const dashboard: TranslationStrings = {
   'dashboard.addMember': 'Προσθήκη μέλους',
   'dashboard.coverSaved': 'Η εικόνα εξωφύλλου αποθηκεύτηκε',
   'dashboard.coverUploadError': 'Αποτυχία μεταφόρτωσης',
+  'dashboard.coverSaveError': 'Αποτυχία αποθήκευσης εικόνας εξωφύλλου',
   'dashboard.coverRemoveError': 'Αποτυχία αφαίρεσης',
+  'dashboard.searchUnsplash': 'Αναζήτηση στο Unsplash',
+  'dashboard.unsplashSearchPlaceholder': 'Αναζήτηση φωτογραφιών προορισμού',
+  'dashboard.unsplashQueryRequired': 'Πληκτρολογήστε όρο αναζήτησης',
+  'dashboard.unsplashNoResults': 'Δεν βρέθηκαν εικόνες',
+  'dashboard.coverSearchError': 'Αποτυχία αναζήτησης στο Unsplash',
+  'dashboard.useUnsplashPhoto': 'Χρήση φωτογραφίας Unsplash από {photographer}',
   'dashboard.titleRequired': 'Ο τίτλος είναι υποχρεωτικός',
   'dashboard.endDateError': 'Η ημερομηνία λήξης πρέπει να είναι μετά την ημερομηνία έναρξης',
+  'dashboard.dateShiftTitle': 'Νέα ημερομηνία έναρξης',
+  'dashboard.dateShiftIntro':
+    'Αλλάξατε την ημερομηνία έναρξης αυτού του ταξιδιού. Πώς θέλετε να ακολουθήσουν τα σχέδιά σας τις νέες ημερομηνίες;',
+  'dashboard.dateShiftKeepBookings': 'Διατήρηση κρατήσεων στις ημερομηνίες τους',
+  'dashboard.dateShiftKeepBookingsDesc':
+    'Τα σχέδια ημέρας μετακινούνται με τις νέες ημερομηνίες, ενώ οι κρατήσεις και τα καταλύματα παραμένουν στις αρχικές τους ημερομηνίες, εφόσον αυτές εξακολουθούν να ανήκουν στο ταξίδι.',
+  'dashboard.dateShiftAll': 'Μετατόπιση όλων',
+  'dashboard.dateShiftAllDesc':
+    'Ολόκληρο το δρομολόγιο μετακινείται με τις νέες ημερομηνίες, συμπεριλαμβανομένων των κρατήσεων και των καταλυμάτων.',
+  'dashboard.dateShiftHint':
+    'Συμβουλή: για να μετατοπίσετε μόνο ένα μέρος του δρομολογίου σας, χρησιμοποιήστε την επιλογή "Προσθήκη ημέρας" στο ημερήσιο πλάνο.',
   'dashboard.greeting.morning': 'Καλημέρα,',
   'dashboard.greeting.afternoon': 'Καλό απόγευμα,',
   'dashboard.greeting.evening': 'Καλησπέρα,',

@@ -1,9 +1,11 @@
-import { useState } from 'react'
-import { ChevronsDownUp, ChevronsUpDown, FileDown, Undo2, ArrowUpDown } from 'lucide-react'
+import React, { useState, useRef } from 'react'
+import { ChevronsDownUp, ChevronsUpDown, FileDown, Undo2, ArrowUpDown, CalendarPlus, Route as RouteIcon } from 'lucide-react'
 import { downloadTripPDF } from '../PDF/TripPDF'
 import { DayReorderPopup } from './DayReorderPopup'
 import Tooltip from '../shared/Tooltip'
 import { useToast } from '../shared/Toast'
+import { IcsSubscribeModal } from './IcsSubscribeModal'
+import { isRoutableReservation } from '../../utils/reservationRoutes'
 import type { Trip, Day, Place, Category, AssignmentsMap, Reservation, DayNote } from '../../types'
 
 interface DayPlanSidebarToolbarProps {
@@ -14,6 +16,8 @@ interface DayPlanSidebarToolbarProps {
   categories: Category[]
   assignments: AssignmentsMap
   reservations: Reservation[]
+  allConnectionsShown?: boolean
+  onToggleAllConnections?: () => void
   dayNotes: Record<string, DayNote[]>
   t: (key: string, params?: Record<string, any>) => string
   locale: string
@@ -36,11 +40,36 @@ interface DayPlanSidebarToolbarProps {
 
 export function DayPlanSidebarToolbar({
   tripId, trip, days, places, categories, assignments, reservations, dayNotes,
-  t, locale, toast, pdfHover, setPdfHover, icsHover, setIcsHover,
+  allConnectionsShown = false, onToggleAllConnections,
+  t, locale, toast, pdfHover, setPdfHover, setIcsHover,
   expandedDays, setExpandedDays, onUndo, canUndo, undoHover, setUndoHover, lastActionLabel,
   canEditDays, onReorderDays, onAddDay,
 }: DayPlanSidebarToolbarProps) {
   const [reorderOpen, setReorderOpen] = useState(false)
+  const [subscribeOpen, setSubscribeOpen] = useState(false)
+  const icsMenuTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [icsMenuVisible, setIcsMenuVisible] = useState(false)
+
+  const showIcsMenu = () => {
+    if (icsMenuTimeoutRef.current) clearTimeout(icsMenuTimeoutRef.current)
+    setIcsMenuVisible(true)
+    setIcsHover(true)
+  }
+  const hideIcsMenu = () => {
+    icsMenuTimeoutRef.current = setTimeout(() => {
+      setIcsMenuVisible(false)
+      setIcsHover(false)
+    }, 120)
+  }
+
+  const menuItemStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 7,
+    width: '100%', padding: '7px 12px', border: 'none',
+    background: 'transparent', cursor: 'pointer',
+    fontSize: 11, fontWeight: 500, fontFamily: 'inherit',
+    color: 'var(--text-primary)', textAlign: 'left',
+    transition: 'background 0.1s',
+  }
   return (
     <div className="border-b border-edge-faint" style={{ padding: '12px 16px', flexShrink: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
@@ -63,7 +92,7 @@ export function DayPlanSidebarToolbar({
             style={{
               display: 'flex', alignItems: 'center', gap: 5,
               padding: '5px 10px', borderRadius: 8, border: 'none',
-              fontSize: 11, fontWeight: 500,
+              fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500,
               cursor: 'pointer', fontFamily: 'inherit',
             }}
           >
@@ -75,7 +104,7 @@ export function DayPlanSidebarToolbar({
               position: 'absolute', top: 'calc(100% + 6px)', right: 0,
               whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 200,
               background: 'var(--bg-card, white)', color: 'var(--text-primary, #111827)',
-              fontSize: 11, fontWeight: 500, padding: '5px 10px',
+              fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500, padding: '5px 10px',
               borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
               border: '1px solid var(--border-faint, #e5e7eb)',
             }}>
@@ -83,49 +112,83 @@ export function DayPlanSidebarToolbar({
             </div>
           )}
         </div>
-        <div style={{ position: 'relative', flexShrink: 0 }}>
+        <div
+          style={{ position: 'relative', flexShrink: 0 }}
+          onMouseEnter={showIcsMenu}
+          onMouseLeave={hideIcsMenu}
+        >
           <button
-            onClick={async () => {
-              try {
-                const res = await fetch(`/api/trips/${tripId}/export.ics`, {
-                  credentials: 'include',
-                })
-                if (!res.ok) throw new Error()
-                const blob = await res.blob()
-                const url = URL.createObjectURL(blob)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = `${trip?.title || 'trip'}.ics`
-                a.click()
-                URL.revokeObjectURL(url)
-              } catch { toast.error(t('planner.icsExportFailed')) }
-            }}
-            onMouseEnter={() => setIcsHover(true)}
-            onMouseLeave={() => setIcsHover(false)}
             style={{
               display: 'flex', alignItems: 'center', gap: 5,
               padding: '5px 10px', borderRadius: 8,
               border: '1px solid var(--border-primary)', background: 'none',
-              color: 'var(--text-muted)', fontSize: 11, fontWeight: 500,
+              color: 'var(--text-muted)', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500,
               cursor: 'pointer', fontFamily: 'inherit',
             }}
           >
             <FileDown size={13} strokeWidth={2} />
             ICS
           </button>
-          {icsHover && (
-            <div style={{
-              position: 'absolute', top: 'calc(100% + 6px)', right: 0,
-              whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 200,
-              background: 'var(--bg-card, white)', color: 'var(--text-primary, #111827)',
-              fontSize: 11, fontWeight: 500, padding: '5px 10px',
-              borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-              border: '1px solid var(--border-faint, #e5e7eb)',
-            }}>
-              {t('dayplan.icsTooltip')}
+          {icsMenuVisible && (
+            <div
+              onMouseEnter={showIcsMenu}
+              onMouseLeave={hideIcsMenu}
+              style={{
+                position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+                zIndex: 200, minWidth: 160,
+                background: 'var(--bg-card, white)',
+                borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+                border: '1px solid var(--border-faint, #e5e7eb)',
+                overflow: 'hidden',
+              }}
+            >
+              <button
+                onClick={async () => {
+                  setIcsMenuVisible(false)
+                  setIcsHover(false)
+                  try {
+                    const res = await fetch(`/api/trips/${tripId}/export.ics`, { credentials: 'include' })
+                    if (!res.ok) throw new Error()
+                    const blob = await res.blob()
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `${trip?.title || 'trip'}.ics`
+                    a.click()
+                    URL.revokeObjectURL(url)
+                  } catch { toast.error(t('planner.icsExportFailed')) }
+                }}
+                style={menuItemStyle}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover, #f3f4f6)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+              >
+                <FileDown size={12} strokeWidth={2} />
+                Download ICS
+              </button>
+              <button
+                onClick={() => {
+                  setIcsMenuVisible(false)
+                  setIcsHover(false)
+                  setSubscribeOpen(true)
+                }}
+                style={menuItemStyle}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-hover, #f3f4f6)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+              >
+                <CalendarPlus size={12} strokeWidth={2} />
+                Subscribe to calendar
+              </button>
             </div>
           )}
         </div>
+        {subscribeOpen && (
+          <IcsSubscribeModal
+            endpoint={`/api/trips/${tripId}/feed`}
+            title="Subscribe to calendar"
+            description="This link stays in sync with your trip automatically. Calendar apps re-fetch it every hour."
+            onClose={() => setSubscribeOpen(false)}
+          />
+        )}
         {(() => {
           const allExpanded = days.length > 0 && days.every(d => expandedDays.has(d.id))
           const label = allExpanded ? t('dayplan.collapseAll') : t('dayplan.expandAll')
@@ -195,7 +258,7 @@ export function DayPlanSidebarToolbar({
                 position: 'absolute', top: 'calc(100% + 6px)', right: 0,
                 whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 200,
                 background: 'var(--bg-card, white)', color: 'var(--text-primary, #111827)',
-                fontSize: 11, fontWeight: 500, padding: '5px 10px',
+                fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500, padding: '5px 10px',
                 borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                 border: '1px solid var(--border-faint, #e5e7eb)',
               }}>
@@ -236,6 +299,32 @@ export function DayPlanSidebarToolbar({
             />
           </div>
         )}
+        {onToggleAllConnections && reservations.some(isRoutableReservation) && (() => {
+          const label = t(allConnectionsShown ? 'map.hideAllConnections' : 'map.showAllConnections')
+          return (
+            <Tooltip label={label} placement="bottom">
+              <button
+                type="button"
+                onClick={onToggleAllConnections}
+                aria-label={label}
+                aria-pressed={allConnectionsShown}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 30, height: 30, borderRadius: 8,
+                  border: allConnectionsShown ? 'none' : '1px solid var(--border-primary)',
+                  background: allConnectionsShown ? '#3b82f6' : 'none',
+                  color: allConnectionsShown ? '#fff' : 'var(--text-primary)',
+                  cursor: 'pointer', fontFamily: 'inherit', padding: 0,
+                  transition: 'color 0.15s, border-color 0.15s, background 0.15s',
+                }}
+                onMouseEnter={e => { if (!allConnectionsShown) e.currentTarget.style.background = 'var(--bg-hover)' }}
+                onMouseLeave={e => { if (!allConnectionsShown) e.currentTarget.style.background = 'transparent' }}
+              >
+                <RouteIcon size={14} strokeWidth={2} />
+              </button>
+            </Tooltip>
+          )
+        })()}
       </div>
     </div>
   )

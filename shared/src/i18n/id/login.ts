@@ -8,7 +8,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places, rute & pengelompokan',
   'login.features.realtime': 'Sinkronisasi Real-Time',
   'login.features.realtimeDesc': 'Rencanakan bersama via WebSocket',
-  'login.features.budget': 'Pelacak Anggaran',
+  'login.features.budget': 'Pelacak Biaya',
   'login.features.budgetDesc': 'Kategori, grafik & biaya per orang',
   'login.features.collab': 'Kolaborasi',
   'login.features.collabDesc': 'Multi-pengguna dengan perjalanan bersama',
@@ -83,5 +83,9 @@ const login: TranslationStrings = {
   'login.resetPasswordFailed': 'Reset gagal. Tautan mungkin sudah kedaluwarsa.',
   'login.passkey.signIn': 'Masuk dengan passkey',
   'login.passkey.failed': 'Masuk dengan passkey gagal. Silakan coba lagi.',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

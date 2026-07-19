@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': '받을 돈이 없습니다',
   'costs.yourShare': '내 몫',
   'costs.youPaid': '내가 지불함',
+  'costs.outstanding': '미정산 금액',
+  'costs.outstandingSub': '아직 지불자가 없는 지출',
+  'costs.outstandingItems': '개 지출에 지불자 필요',
   'costs.expenses': '지출',
   'costs.entries': '{count}개 항목',
   'costs.searchPlaceholder': '지출 검색…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} = {to}',
   'costs.category': '카테고리',
   'costs.whoPaid': '누가 지불했나요?',
+  'costs.multiplePayers': '여러 명이 결제함',
+  'costs.singlePayer': '한 명이 결제함',
+  'costs.payersUnbalanced': '결제자 금액의 합계가 {amount} 여야 합니다',
   'costs.splitBetween': '균등 분할 대상',
   'costs.pickSomeone': '분할할 사람을 한 명 이상 선택하세요.',
   'costs.splitSummary': '{count}명 분할 · 각 {amount}',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': '합계에만 반영 — 아직 미정산',
   'costs.tapToInclude': '탭하여 포함',
   'costs.amount': '금액',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': '모든 카테고리',
+  'costs.filter.allDays': '모든 날짜',
+  'costs.expensesCount': '지출 {count}건',
 };
-
 export default budget;

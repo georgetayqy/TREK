@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': 'Nikdo vám nic nedluží',
   'costs.yourShare': 'Váš podíl',
   'costs.youPaid': 'Zaplatili jste',
+  'costs.outstanding': 'Nevyřízená částka',
+  'costs.outstandingSub': 'Výdaje zatím bez plátce',
+  'costs.outstandingItems': 'výdajů potřebuje plátce',
   'costs.expenses': 'Výdaje',
   'costs.entries': '{count} položek',
   'costs.searchPlaceholder': 'Hledat výdaje…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} v {to}',
   'costs.category': 'Kategorie',
   'costs.whoPaid': 'Kdo zaplatil?',
+  'costs.multiplePayers': 'Platilo více lidí',
+  'costs.singlePayer': 'Platil jeden člověk',
+  'costs.payersUnbalanced': 'Součet částek plátců musí být {amount}',
   'costs.splitBetween': 'Rozdělit rovným dílem mezi',
   'costs.pickSomeone': 'Vyberte alespoň jednu osobu pro rozdělení.',
   'costs.splitSummary': 'Rozděleno na {count} dílů · {amount} každý',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': 'Jen v součtu — zatím nevyrovnáno',
   'costs.tapToInclude': 'Klepnutím zahrnout',
   'costs.amount': 'Částka',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'Všechny kategorie',
+  'costs.filter.allDays': 'Všechny dny',
+  'costs.expensesCount': '{count} výdajů',
 };
-
 export default budget;

@@ -51,6 +51,16 @@ describe('DayDetailPanel', () => {
     expect(document.body).toBeInTheDocument();
   });
 
+  it('FE-PLANNER-DAYDETAIL-063: publishes its height to --day-panel-h and resets it on unmount (#1348)', () => {
+    document.documentElement.style.removeProperty('--day-panel-h');
+    const { unmount } = render(<DayDetailPanel {...defaultProps} />);
+    // The panel publishes its measured height so the map's mobile GPS button can
+    // sit above it instead of being hidden behind it.
+    expect(document.documentElement.style.getPropertyValue('--day-panel-h')).not.toBe('');
+    unmount();
+    expect(document.documentElement.style.getPropertyValue('--day-panel-h')).toBe('0px');
+  });
+
   it('FE-PLANNER-DAYDETAIL-002: returns null when day prop is null', () => {
     render(<DayDetailPanel {...defaultProps} day={null as any} />);
     expect(document.querySelector('[style*="position: fixed"]')).toBeNull();
@@ -59,6 +69,36 @@ describe('DayDetailPanel', () => {
   it('FE-PLANNER-DAYDETAIL-003: shows day title in header', () => {
     render(<DayDetailPanel {...defaultProps} />);
     expect(screen.getByText('Day in Paris')).toBeInTheDocument();
+  });
+
+  // ── Inline rename (#1065 — moved here from the sidebar pencil) ──────────────
+
+  it('FE-PLANNER-DAYDETAIL-064: pencil next to the title renames the day (Enter commits)', async () => {
+    const user = userEvent.setup();
+    const onUpdateDayTitle = vi.fn();
+    render(<DayDetailPanel {...defaultProps} onUpdateDayTitle={onUpdateDayTitle} />);
+    await user.click(screen.getByLabelText('Edit'));
+    const input = await screen.findByDisplayValue('Day in Paris');
+    await user.clear(input);
+    await user.type(input, 'New Title');
+    await user.keyboard('{Enter}');
+    expect(onUpdateDayTitle).toHaveBeenCalledWith(1, 'New Title');
+  });
+
+  it('FE-PLANNER-DAYDETAIL-065: Escape cancels the rename without saving', async () => {
+    const user = userEvent.setup();
+    const onUpdateDayTitle = vi.fn();
+    render(<DayDetailPanel {...defaultProps} onUpdateDayTitle={onUpdateDayTitle} />);
+    await user.click(screen.getByLabelText('Edit'));
+    await screen.findByDisplayValue('Day in Paris');
+    await user.keyboard('{Escape}');
+    expect(onUpdateDayTitle).not.toHaveBeenCalled();
+    expect(screen.getByText('Day in Paris')).toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-DAYDETAIL-066: no rename pencil without the onUpdateDayTitle prop', () => {
+    render(<DayDetailPanel {...defaultProps} />);
+    expect(screen.queryByLabelText('Edit')).not.toBeInTheDocument();
   });
 
   it('FE-PLANNER-DAYDETAIL-004: shows day number when title is null', () => {
@@ -521,6 +561,30 @@ describe('DayDetailPanel', () => {
     await waitFor(() => {
       const portal = document.body.querySelector('[style*="z-index: 99999"]');
       expect(portal?.textContent).toMatch(/Day in Paris|Day 2|Day 3/i);
+    });
+  });
+
+  it('FE-PLANNER-DAYDETAIL-067: hotel picker defaults check-out to the day AFTER check-in', async () => {
+    const day2 = buildDay({ id: 2, trip_id: 1, date: '2025-06-16', title: 'Day 2' });
+    const day3 = buildDay({ id: 3, trip_id: 1, date: '2025-06-17', title: 'Day 3' });
+    render(<DayDetailPanel {...defaultProps} days={[day, day2, day3]} />);
+    await userEvent.click(await screen.findByText(/Add accommodation/i));
+    await waitFor(() => {
+      const portal = document.body.querySelector('[style*="z-index: 99999"]');
+      // Closed selects render only their chosen label: check-in on the opened
+      // day, check-out on the following one — nobody stays a few hours.
+      expect(portal?.textContent).toContain('Day in Paris');
+      expect(portal?.textContent).toContain('Day 2');
+      expect(portal?.textContent).not.toContain('Day 3');
+    });
+  });
+
+  it('FE-PLANNER-DAYDETAIL-068: hotel picker falls back to a same-day range on the last trip day', async () => {
+    render(<DayDetailPanel {...defaultProps} days={[day]} />);
+    await userEvent.click(await screen.findByText(/Add accommodation/i));
+    await waitFor(() => {
+      const portal = document.body.querySelector('[style*="z-index: 99999"]');
+      expect(portal?.textContent?.match(/Day in Paris/g)).toHaveLength(2);
     });
   });
 

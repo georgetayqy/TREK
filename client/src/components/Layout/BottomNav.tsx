@@ -1,14 +1,17 @@
 import { useNavigate, useLocation, useMatch } from 'react-router-dom'
 import { useAddonStore } from '../../store/addonStore'
+import { usePluginStore } from '../../store/pluginStore'
 import { useSettingsStore } from '../../store/settingsStore'
 import { useTranslation } from '../../i18n'
-import { LayoutGrid, CalendarDays, Globe, Compass, Plus } from 'lucide-react'
+import { LayoutGrid, CalendarDays, Globe, Compass, Bookmark, Plus } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { resolvePluginIcon } from '../shared/PluginIcon'
 
 const ADDON_NAV: Record<string, { icon: LucideIcon; labelKey: string }> = {
-  vacay:   { icon: CalendarDays, labelKey: 'admin.addons.catalog.vacay.name' },
-  atlas:   { icon: Globe,        labelKey: 'admin.addons.catalog.atlas.name' },
-  journey: { icon: Compass,      labelKey: 'admin.addons.catalog.journey.name' },
+  vacay:       { icon: CalendarDays, labelKey: 'admin.addons.catalog.vacay.name' },
+  atlas:       { icon: Globe,        labelKey: 'admin.addons.catalog.atlas.name' },
+  journey:     { icon: Compass,      labelKey: 'admin.addons.catalog.journey.name' },
+  collections: { icon: Bookmark,     labelKey: 'admin.addons.catalog.collections.name' },
 }
 
 interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -25,12 +28,15 @@ function useCreateAction(): { label: string; run: () => void } {
   const onJourneyList = useMatch('/journey')
 
   if (inTrip) {
-    // On the Costs tab the "+" adds an expense; otherwise it adds a place.
-    const tripTab = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`trip-tab-${inTrip.params.id}`) : null
-    if (tripTab === 'finanzplan') {
-      return { label: t('costs.addExpense'), run: () => navigate(`/trips/${inTrip.params.id}?create=expense`) }
-    }
-    return { label: t('places.addPlace'), run: () => navigate(`/trips/${inTrip.params.id}?create=place`) }
+    // The "+" is context-aware per active tab: Bookings → reservation,
+    // Transports → transport, Costs → expense. Tabs without a create modal
+    // (lists / files / collab) fall through to adding a place. #1349
+    const id = inTrip.params.id
+    const tripTab = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(`trip-tab-${id}`) : null
+    if (tripTab === 'finanzplan') return { label: t('costs.addExpense'), run: () => navigate(`/trips/${id}?create=expense`) }
+    if (tripTab === 'buchungen') return { label: t('reservations.addManual'), run: () => navigate(`/trips/${id}?create=reservation`) }
+    if (tripTab === 'transports') return { label: t('transport.addManual'), run: () => navigate(`/trips/${id}?create=transport`) }
+    return { label: t('places.addPlace'), run: () => navigate(`/trips/${id}?create=place`) }
   }
   if (inJourney) {
     return { label: t('journey.detail.addEntry'), run: () => navigate(`/journey/${inJourney.params.id}?create=entry`) }
@@ -48,6 +54,9 @@ export default function BottomNav() {
   const dark = darkMode === true || darkMode === 'dark' || (darkMode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   const addons = useAddonStore(s => s.addons)
   const globalAddons = addons.filter(a => a.type === 'global' && a.enabled)
+  // Page plugins are reachable from the mobile tab bar too, mirroring the desktop
+  // nav pill (Navbar) — otherwise they were only reachable by typing /plugins/:id.
+  const pagePlugins = usePluginStore(s => s.plugins).filter(p => p.type === 'page')
   const location = useLocation()
   const create = useCreateAction()
 
@@ -57,6 +66,7 @@ export default function BottomNav() {
       const nav = ADDON_NAV[addon.id]
       return nav ? [{ to: `/${addon.id}`, label: t(nav.labelKey), icon: nav.icon }] : []
     }),
+    ...pagePlugins.map(p => ({ to: `/plugins/${p.id}`, label: p.name, icon: resolvePluginIcon(p.icon) })),
   ]
   // Split the items so the raised "+" sits dead centre.
   const splitAt = Math.ceil(items.length / 2)

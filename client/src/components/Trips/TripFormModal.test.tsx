@@ -1,4 +1,4 @@
-// FE-COMP-TRIPFORM-001 to FE-COMP-TRIPFORM-028
+// FE-COMP-TRIPFORM-001 to FE-COMP-TRIPFORM-031
 import { render, screen, waitFor, fireEvent } from '../../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -309,5 +309,149 @@ describe('TripFormModal', () => {
     await user.click(submitBtn.closest('button')!);
     await screen.findByText('Number of days is required');
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('FE-COMP-TRIPFORM-031: selects an Unsplash cover and saves it after trip creation', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({ trip: buildTrip({ id: 99 }) });
+    let updateBody: unknown;
+    server.use(
+      http.get('/api/trips/cover-images/search', () =>
+        HttpResponse.json({
+          photos: [{
+            id: 'unsplash-1',
+            url: 'https://images.example.com/regular.jpg',
+            thumb: 'https://images.example.com/thumb.jpg',
+            description: 'Mountain lake',
+            photographer: 'Alice',
+            link: 'https://unsplash.com/photos/unsplash-1',
+          }],
+        })
+      ),
+      http.put('/api/trips/99', async ({ request }) => {
+        updateBody = await request.json();
+        return HttpResponse.json({ trip: buildTrip({ id: 99, cover_image: 'https://images.example.com/regular.jpg' }) });
+      }),
+    );
+
+    render(<TripFormModal {...defaultProps} trip={null} onSave={onSave} />);
+    await user.type(screen.getByPlaceholderText(/Summer in Japan/i), 'Alpine Trip');
+    await user.type(screen.getByPlaceholderText('Search destination photos'), 'alps');
+    await user.click(screen.getByRole('button', { name: /Search Unsplash/i }));
+    await user.click(await screen.findByRole('button', { name: /Use Unsplash photo by Alice/i }));
+
+    const submitBtn = screen.getAllByText('Create New Trip').find(el => el.closest('button'))!;
+    await user.click(submitBtn.closest('button')!);
+
+    await waitFor(() => {
+      expect(updateBody).toMatchObject({ cover_image: 'https://images.example.com/regular.jpg' });
+    });
+  });
+
+  // The trip currency is the base every expense and settlement is netted against, and
+  // until #1543 the only way to set it was the legacy Budget addon panel.
+  it('FE-COMP-TRIPFORM-032: pre-fills the currency of the trip being edited', () => {
+    render(<TripFormModal {...defaultProps} trip={buildTrip({ id: 1, currency: 'RUB' })} />);
+    expect(screen.getByText(/^RUB/)).toBeInTheDocument();
+  });
+
+  it('FE-COMP-TRIPFORM-033: defaults a new trip to EUR and sends the currency on save', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({ trip: buildTrip({ id: 99 }) });
+    render(<TripFormModal {...defaultProps} onSave={onSave} />);
+
+    await user.type(screen.getByPlaceholderText(/Summer in Japan/i), 'Moscow 2026');
+    const submitBtn = screen.getAllByText('Create New Trip').find(el => el.closest('button'))!;
+    await user.click(submitBtn.closest('button')!);
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ currency: 'EUR' }));
+  });
+
+  // Changing the start of a dated trip must go through the date-shift choice step (#1288).
+  const changeStartDate = async (user: ReturnType<typeof userEvent.setup>, iso: string) => {
+    await user.click(screen.getAllByRole('button', { name: 'Enter date manually' })[0]);
+    const input = screen.getByPlaceholderText('DD.MM.YYYY');
+    fireEvent.change(input, { target: { value: iso } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+  };
+
+  it('FE-COMP-TRIPFORM-035: changing the start date shows the choice step and saves with keep_bookings by default', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({});
+    const trip = buildTrip({ id: 1, title: 'Dated Trip', start_date: '2025-06-01', end_date: '2025-06-05' });
+    render(<TripFormModal {...defaultProps} trip={trip} onSave={onSave} />);
+
+    await changeStartDate(user, '2025-05-31');
+    await user.click(screen.getByRole('button', { name: /Update/i }));
+
+    // The choice step appears instead of saving right away.
+    await screen.findByText('Keep bookings on their dates');
+    expect(onSave).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Update/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: '2025-05-31',
+      date_shift_mode: 'keep_bookings',
+    }));
+  });
+
+  it('FE-COMP-TRIPFORM-036: picking "Shift everything" sends shift_all', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({});
+    const trip = buildTrip({ id: 1, title: 'Dated Trip', start_date: '2025-06-01', end_date: '2025-06-05' });
+    render(<TripFormModal {...defaultProps} trip={trip} onSave={onSave} />);
+
+    await changeStartDate(user, '2025-06-02');
+    await user.click(screen.getByRole('button', { name: /Update/i }));
+    await user.click(await screen.findByRole('radio', { name: /Shift everything/i }));
+    await user.click(screen.getByRole('button', { name: /Update/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ date_shift_mode: 'shift_all' }));
+  });
+
+  it('FE-COMP-TRIPFORM-037: Back returns to the form without saving', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const trip = buildTrip({ id: 1, title: 'Dated Trip', start_date: '2025-06-01', end_date: '2025-06-05' });
+    render(<TripFormModal {...defaultProps} trip={trip} onSave={onSave} />);
+
+    await changeStartDate(user, '2025-05-30');
+    await user.click(screen.getByRole('button', { name: /Update/i }));
+    await screen.findByText('Keep bookings on their dates');
+
+    await user.click(screen.getByRole('button', { name: /Back/i }));
+    await waitFor(() => expect(screen.queryByText('Keep bookings on their dates')).not.toBeInTheDocument());
+    expect(screen.getByDisplayValue('Dated Trip')).toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('FE-COMP-TRIPFORM-038: an edit that keeps the dates saves directly without the choice step', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({});
+    const trip = buildTrip({ id: 1, title: 'Dated Trip', start_date: '2025-06-01', end_date: '2025-06-05' });
+    render(<TripFormModal {...defaultProps} trip={trip} onSave={onSave} />);
+
+    await user.click(screen.getByRole('button', { name: /Update/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(screen.queryByText('Keep bookings on their dates')).not.toBeInTheDocument();
+    expect(onSave).toHaveBeenCalledWith(expect.not.objectContaining({ date_shift_mode: expect.anything() }));
+  });
+
+  it('FE-COMP-TRIPFORM-034: picking a currency sends the new one on save', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({});
+    render(<TripFormModal {...defaultProps} trip={buildTrip({ id: 1, currency: 'EUR' })} onSave={onSave} />);
+
+    await user.click(screen.getByText(/^EUR/));
+    await user.click(await screen.findByText(/^USD/));
+
+    await user.click(screen.getByText('Update').closest('button')!);
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ currency: 'USD' }));
   });
 });

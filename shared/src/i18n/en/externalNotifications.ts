@@ -28,6 +28,10 @@ const en: NotificationLocale = {
       title: 'Vacay Fusion Invite',
       body: `${p.actor} invited you to fuse vacation plans. Open TREK to accept or decline.`,
     }),
+    collection_invite: (p) => ({
+      title: 'Collection invite',
+      body: `${p.actor} invited you to share a collection. Open TREK to accept or decline.`,
+    }),
     photos_shared: (p) => ({
       title: `${p.count} photos shared`,
       body: `${p.actor} shared ${p.count} photo(s) in "${p.trip}".`,
@@ -48,6 +52,7 @@ const en: NotificationLocale = {
       title: 'Synology session cleared',
       body: 'Your Synology account or URL changed. You have been logged out of Synology Photos.',
     }),
+    plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
   },
   passwordReset: {
     subject: 'Reset your password',

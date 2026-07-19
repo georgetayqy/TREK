@@ -1,6 +1,7 @@
 import { db } from '../db/database';
 import { BudgetItem, BudgetItemMember, BudgetItemPayer } from '../types';
 import { avatarUrl } from './avatarUrl';
+import { getRates } from './exchangeRateService';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -11,7 +12,7 @@ export { verifyTripAccess } from './tripAccess';
 
 function loadItemMembers(itemId: number | string) {
   const rows = db.prepare(`
-    SELECT bm.user_id, bm.paid, u.username, u.avatar
+    SELECT bm.user_id, bm.paid, bm.amount, COALESCE(u.display_name, u.username) AS username, u.avatar
     FROM budget_item_members bm
     JOIN users u ON bm.user_id = u.id
     WHERE bm.budget_item_id = ?
@@ -21,7 +22,7 @@ function loadItemMembers(itemId: number | string) {
 
 function loadItemPayers(itemId: number | string) {
   const rows = db.prepare(`
-    SELECT bp.user_id, bp.amount, u.username, u.avatar
+    SELECT bp.user_id, bp.amount, COALESCE(u.display_name, u.username) AS username, u.avatar
     FROM budget_item_payers bp
     JOIN users u ON bp.user_id = u.id
     WHERE bp.budget_item_id = ?
@@ -29,13 +30,23 @@ function loadItemPayers(itemId: number | string) {
   return rows.map(p => ({ ...p, avatar_url: avatarUrl(p) }));
 }
 
+function knownUserIds(userIds: number[]): Set<number> {
+  const unique = [...new Set(userIds)];
+  if (unique.length === 0) return new Set();
+  const rows = db.prepare(
+    `SELECT id FROM users WHERE id IN (${unique.map(() => '?').join(',')})`
+  ).all(...unique) as { id: number }[];
+  return new Set(rows.map(r => r.id));
+}
+
 /** Replace the payer rows of an item and keep total_price = sum of payer amounts. */
 function writeItemPayers(itemId: number | string, payers: { user_id: number; amount: number }[]) {
   db.prepare('DELETE FROM budget_item_payers WHERE budget_item_id = ?').run(itemId);
   const insert = db.prepare('INSERT OR IGNORE INTO budget_item_payers (budget_item_id, user_id, amount) VALUES (?, ?, ?)');
+  const known = knownUserIds(payers.map(p => p.user_id));
   let total = 0;
   for (const p of payers) {
-    if (!(p.amount > 0)) continue;
+    if (!(p.amount > 0) || !known.has(p.user_id)) continue;
     insert.run(itemId, p.user_id, p.amount);
     total += p.amount;
   }
@@ -60,7 +71,7 @@ export function listBudgetItems(tripId: string | number) {
 
   if (itemIds.length > 0) {
     const allMembers = db.prepare(`
-      SELECT bm.budget_item_id, bm.user_id, bm.paid, u.username, u.avatar
+      SELECT bm.budget_item_id, bm.user_id, bm.paid, bm.amount, COALESCE(u.display_name, u.username) AS username, u.avatar
       FROM budget_item_members bm
       JOIN users u ON bm.user_id = u.id
       WHERE bm.budget_item_id IN (${itemIds.map(() => '?').join(',')})
@@ -69,7 +80,7 @@ export function listBudgetItems(tripId: string | number) {
     for (const m of allMembers) {
       if (!membersByItem[m.budget_item_id]) membersByItem[m.budget_item_id] = [];
       membersByItem[m.budget_item_id].push({
-        user_id: m.user_id, paid: m.paid, username: m.username, avatar_url: avatarUrl(m),
+        user_id: m.user_id, paid: m.paid, username: m.username, avatar_url: avatarUrl(m), amount: m.amount,
       });
     }
   }
@@ -77,7 +88,7 @@ export function listBudgetItems(tripId: string | number) {
   const payersByItem: Record<number, (BudgetItemPayer & { avatar_url: string | null })[]> = {};
   if (itemIds.length > 0) {
     const allPayers = db.prepare(`
-      SELECT bp.budget_item_id, bp.user_id, bp.amount, u.username, u.avatar
+      SELECT bp.budget_item_id, bp.user_id, bp.amount, COALESCE(u.display_name, u.username) AS username, u.avatar
       FROM budget_item_payers bp
       JOIN users u ON bp.user_id = u.id
       WHERE bp.budget_item_id IN (${itemIds.map(() => '?').join(',')})
@@ -98,12 +109,125 @@ export function listBudgetItems(tripId: string | number) {
   return items;
 }
 
+/**
+ * Freeze the live FX rate at entry time into `exchange_rate` so a settled position
+ * isn't re-opened when live rates drift later (#1335 / #1445). The stored rate is
+ * "units of the item/display currency per 1 trip currency" — the settlement
+ * converts with it via `amount / rate`.
+ *
+ * Only freezes for a foreign currency with no explicit rate; degrades to live
+ * rates if the fetch fails. On update it (re)freezes only when the currency
+ * changes (checked against `budget_items`), so an unrelated edit never moves
+ * money. Callers must invoke this *before* the (synchronous) DB write — the raw
+ * create/update stay sync because better-sqlite3 transactions can't await.
+ */
+export async function freezeForeignRate(
+  tripId: string | number,
+  data: { currency?: string | null; exchange_rate?: number },
+  existingItemId?: string | number,
+  existingCurrency?: string | null,
+): Promise<void> {
+  if (data.exchange_rate != null) return; // an explicit rate from the caller wins
+  const cur = (data.currency || '').toUpperCase();
+  if (!cur) return; // currency not being set in this request
+  // Skip the re-freeze when the currency isn't actually changing, so an unrelated
+  // edit never moves money. Items resolve the prior currency from budget_items; a
+  // settlement lives in a different table, so its caller passes it in directly.
+  let prior: string | undefined;
+  if (existingCurrency !== undefined) {
+    prior = (existingCurrency || '').toUpperCase();
+  } else if (existingItemId != null) {
+    const existing = db.prepare('SELECT currency FROM budget_items WHERE id = ?')
+      .get(existingItemId) as { currency?: string } | undefined;
+    if (existing) prior = (existing.currency || '').toUpperCase();
+  }
+  if (prior !== undefined && prior === cur) return; // currency unchanged
+  const trip = db.prepare('SELECT currency FROM trips WHERE id = ?')
+    .get(tripId) as { currency?: string } | undefined;
+  const tripCur = (trip?.currency || 'EUR').toUpperCase();
+  if (cur === tripCur) return; // same as the trip currency → no conversion to freeze
+  const rates = await getRates(tripCur);
+  const r = rates?.[cur];
+  if (r && r > 0) data.exchange_rate = r;
+}
+
+/**
+ * Re-anchor a trip's money when its base currency changes (#1543).
+ *
+ * Every frozen `exchange_rate` is "units of the row's currency per 1 *trip*
+ * currency", and `currency = NULL` means "the trip's own currency" — both are
+ * relative to the trip currency, so swapping it out from under them silently
+ * corrupts the settlement: NULL rows redenominate (9 000 RUB becomes 9 000 EUR)
+ * and frozen rates keep pointing at the old base, which is exactly the mismatch
+ * that inflated #1543 by ~27x.
+ *
+ * So, before the switch: pin the implicit rows to the outgoing currency (their
+ * amounts really were in it) and re-freeze every row against the incoming one.
+ * No stored amount is rewritten — each expense keeps the figure the user typed,
+ * in the currency they typed it in, and its real-world value is preserved.
+ *
+ * Place prices follow the same NULL = "the trip's own currency" convention (that
+ * is how the PDF export and the place chips read them), so they are pinned too —
+ * otherwise a €15 museum on a trip switched to JPY starts reading as ¥15. They
+ * carry no frozen rate, so pinning the currency is all they need.
+ *
+ * Must run *before* the (synchronous) trip update, while the old currency is
+ * still in `trips`, and is a no-op when the currency isn't actually changing.
+ */
+export async function rebaseTripCurrency(
+  tripId: string | number,
+  newCurrency: string | null | undefined,
+): Promise<void> {
+  const next = (newCurrency || '').toUpperCase();
+  if (!next) return;
+  const trip = db.prepare('SELECT currency FROM trips WHERE id = ?')
+    .get(tripId) as { currency?: string } | undefined;
+  if (!trip) return;
+  const prev = (trip.currency || 'EUR').toUpperCase();
+  if (prev === next) return;
+
+  const rates = await getRates(next);
+  // A row already denominated in the new base needs no conversion (rate 1). When no
+  // live rate is available we also store 1 rather than a stale one: rate 1 means "not
+  // frozen", so the settlement falls back to live rates instead of trusting a figure
+  // anchored to a currency this trip no longer uses.
+  const rateFor = (cur: string): number => {
+    if (cur === next) return 1;
+    const r = rates?.[cur];
+    return r && r > 0 ? r : 1;
+  };
+
+  const rebase = (table: 'budget_items' | 'budget_settlements') => {
+    db.prepare(`UPDATE ${table} SET currency = ? WHERE trip_id = ? AND (currency IS NULL OR currency = '')`)
+      .run(prev, tripId);
+    const rows = db.prepare(`SELECT DISTINCT currency AS cur FROM ${table} WHERE trip_id = ? AND currency IS NOT NULL`)
+      .all(tripId) as { cur: string }[];
+    for (const { cur } of rows) {
+      db.prepare(`UPDATE ${table} SET exchange_rate = ? WHERE trip_id = ? AND currency = ?`)
+        .run(rateFor(cur.toUpperCase()), tripId, cur);
+    }
+  };
+
+  // Only priced places have anything to denominate; a currency on a free place would
+  // just be noise. `updated_at` doubles as the optimistic-concurrency token (#1135),
+  // so bumping it stops a client holding the pre-switch row from writing the pin away.
+  const pinPlaces = () => {
+    db.prepare(`
+      UPDATE places SET currency = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE trip_id = ? AND price IS NOT NULL AND (currency IS NULL OR currency = '')
+    `).run(prev, tripId);
+  };
+
+  db.transaction(() => { rebase('budget_items'); rebase('budget_settlements'); pinPlaces(); })();
+}
+
 export function createBudgetItem(
   tripId: string | number,
   data: {
     category?: string; name: string; total_price?: number;
     currency?: string | null; exchange_rate?: number;
     payers?: { user_id: number; amount: number }[]; member_ids?: number[];
+    members?: { user_id: number; amount?: number | null }[];
     persons?: number | null; days?: number | null; note?: string | null; expense_date?: string | null;
     reservation_id?: number | null;
   },
@@ -128,6 +252,11 @@ export function createBudgetItem(
   const payerTotal = (data.payers || []).reduce((a, p) => a + (p.amount > 0 ? p.amount : 0), 0);
   const total = data.payers && data.payers.length > 0 ? payerTotal : (data.total_price || 0);
 
+  const knownMembers = data.members ? knownUserIds(data.members.map(m => m.user_id)) : null;
+  const members = data.members && knownMembers ? data.members.filter(m => knownMembers.has(m.user_id)) : undefined;
+  const knownIds = data.member_ids ? knownUserIds(data.member_ids) : null;
+  const memberIds = data.member_ids && knownIds ? data.member_ids.filter(uid => knownIds.has(uid)) : undefined;
+
   const result = db.prepare(
     'INSERT INTO budget_items (trip_id, category, name, total_price, currency, exchange_rate, persons, days, note, sort_order, expense_date, reservation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(
@@ -137,7 +266,7 @@ export function createBudgetItem(
     total,
     data.currency || null,
     data.exchange_rate != null ? data.exchange_rate : 1,
-    data.member_ids ? data.member_ids.length : (data.persons != null ? data.persons : null),
+    memberIds ? memberIds.length : (data.persons != null ? data.persons : null),
     data.days !== undefined && data.days !== null ? data.days : null,
     data.note || null,
     sortOrder,
@@ -147,9 +276,12 @@ export function createBudgetItem(
 
   const itemId = result.lastInsertRowid as number;
   if (data.payers && data.payers.length > 0) writeItemPayers(itemId, data.payers);
-  if (data.member_ids && data.member_ids.length > 0) {
-    const insert = db.prepare('INSERT OR IGNORE INTO budget_item_members (budget_item_id, user_id, paid) VALUES (?, ?, 0)');
-    for (const uid of data.member_ids) insert.run(itemId, uid);
+  if (members && members.length > 0) {
+    const insert = db.prepare('INSERT OR IGNORE INTO budget_item_members (budget_item_id, user_id, paid, amount) VALUES (?, ?, 0, ?)');
+    for (const m of members) insert.run(itemId, m.user_id, m.amount !== undefined && m.amount !== null ? m.amount : null);
+  } else if (memberIds && memberIds.length > 0) {
+    const insert = db.prepare('INSERT OR IGNORE INTO budget_item_members (budget_item_id, user_id, paid, amount) VALUES (?, ?, 0, NULL)');
+    for (const uid of memberIds) insert.run(itemId, uid);
   }
 
   const item = db.prepare('SELECT * FROM budget_items WHERE id = ?').get(itemId) as BudgetItem;
@@ -185,6 +317,7 @@ export function updateBudgetItem(
     category?: string; name?: string; total_price?: number;
     currency?: string | null; exchange_rate?: number;
     payers?: { user_id: number; amount: number }[]; member_ids?: number[];
+    members?: { user_id: number; amount?: number | null }[];
     persons?: number | null; days?: number | null; note?: string | null; sort_order?: number; expense_date?: string | null;
   },
 ) {
@@ -228,11 +361,20 @@ export function updateBudgetItem(
       db.prepare('UPDATE budget_items SET total_price = ? WHERE id = ?').run(data.total_price, id);
     }
   }
-  if (data.member_ids !== undefined) {
+  if (data.members !== undefined) {
+    const known = knownUserIds(data.members.map(m => m.user_id));
+    const members = data.members.filter(m => known.has(m.user_id));
     db.prepare('DELETE FROM budget_item_members WHERE budget_item_id = ?').run(id);
-    const insert = db.prepare('INSERT OR IGNORE INTO budget_item_members (budget_item_id, user_id, paid) VALUES (?, ?, 0)');
-    for (const uid of data.member_ids) insert.run(id, uid);
-    db.prepare('UPDATE budget_items SET persons = ? WHERE id = ?').run(data.member_ids.length || null, id);
+    const insert = db.prepare('INSERT OR IGNORE INTO budget_item_members (budget_item_id, user_id, paid, amount) VALUES (?, ?, 0, ?)');
+    for (const m of members) insert.run(id, m.user_id, m.amount !== undefined && m.amount !== null ? m.amount : null);
+    db.prepare('UPDATE budget_items SET persons = ? WHERE id = ?').run(members.length || null, id);
+  } else if (data.member_ids !== undefined) {
+    const known = knownUserIds(data.member_ids);
+    const memberIds = data.member_ids.filter(uid => known.has(uid));
+    db.prepare('DELETE FROM budget_item_members WHERE budget_item_id = ?').run(id);
+    const insert = db.prepare('INSERT OR IGNORE INTO budget_item_members (budget_item_id, user_id, paid, amount) VALUES (?, ?, 0, NULL)');
+    for (const uid of memberIds) insert.run(id, uid);
+    db.prepare('UPDATE budget_items SET persons = ? WHERE id = ?').run(memberIds.length || null, id);
   }
 
   // If category changed, update category order table
@@ -286,10 +428,12 @@ export function updateMembers(id: string | number, tripId: string | number, user
 
   db.prepare('DELETE FROM budget_item_members WHERE budget_item_id = ?').run(id);
 
-  if (userIds.length > 0) {
+  const known = knownUserIds(userIds);
+  const memberIds = userIds.filter(uid => known.has(uid));
+  if (memberIds.length > 0) {
     const insert = db.prepare('INSERT OR IGNORE INTO budget_item_members (budget_item_id, user_id, paid) VALUES (?, ?, ?)');
-    for (const userId of userIds) insert.run(id, userId, existingPaid[userId] || 0);
-    db.prepare('UPDATE budget_items SET persons = ? WHERE id = ?').run(userIds.length, id);
+    for (const userId of memberIds) insert.run(id, userId, existingPaid[userId] || 0);
+    db.prepare('UPDATE budget_items SET persons = ? WHERE id = ?').run(memberIds.length, id);
   } else {
     db.prepare('UPDATE budget_items SET persons = NULL WHERE id = ?').run(id);
   }
@@ -297,6 +441,23 @@ export function updateMembers(id: string | number, tripId: string | number, user
   const members = loadItemMembers(id).map(m => ({ ...m, avatar_url: avatarUrl(m) }));
   const updated = db.prepare('SELECT * FROM budget_items WHERE id = ?').get(id) as BudgetItem;
   return { members, item: updated };
+}
+
+export function removeUserFromBudgetItems(userId: number): void {
+  const itemIds = (db.prepare('SELECT DISTINCT budget_item_id FROM budget_item_members WHERE user_id = ?')
+    .all(userId) as { budget_item_id: number }[]).map(r => r.budget_item_id);
+  if (itemIds.length === 0) {
+    return;
+  }
+
+  db.prepare('DELETE FROM budget_item_members WHERE user_id = ?').run(userId);
+
+  const remaining = db.prepare('SELECT COUNT(*) AS count FROM budget_item_members WHERE budget_item_id = ?');
+  const setPersons = db.prepare('UPDATE budget_items SET persons = ? WHERE id = ?');
+  for (const itemId of itemIds) {
+    const { count } = remaining.get(itemId) as { count: number };
+    setPersons.run(count || null, itemId);
+  }
 }
 
 export function toggleMemberPaid(id: string | number, tripId: string | number, userId: string | number, paid: boolean) {
@@ -308,7 +469,7 @@ export function toggleMemberPaid(id: string | number, tripId: string | number, u
     .run(paid ? 1 : 0, id, userId);
 
   const member = db.prepare(`
-    SELECT bm.user_id, bm.paid, u.username, u.avatar
+    SELECT bm.user_id, bm.paid, COALESCE(u.display_name, u.username) AS username, u.avatar
     FROM budget_item_members bm JOIN users u ON bm.user_id = u.id
     WHERE bm.budget_item_id = ? AND bm.user_id = ?
   `).get(id, userId) as BudgetItemMember | undefined;
@@ -322,9 +483,9 @@ export function toggleMemberPaid(id: string | number, tripId: string | number, u
 
 export function getPerPersonSummary(tripId: string | number) {
   const summary = db.prepare(`
-    SELECT bm.user_id, u.username, u.avatar,
-      SUM(bi.total_price * 1.0 / (SELECT COUNT(*) FROM budget_item_members WHERE budget_item_id = bi.id)) as total_assigned,
-      SUM(CASE WHEN bm.paid = 1 THEN bi.total_price * 1.0 / (SELECT COUNT(*) FROM budget_item_members WHERE budget_item_id = bi.id) ELSE 0 END) as total_paid,
+    SELECT bm.user_id, COALESCE(u.display_name, u.username) AS username, u.avatar,
+      SUM(COALESCE(bm.amount, bi.total_price * 1.0 / (SELECT COUNT(*) FROM budget_item_members WHERE budget_item_id = bi.id))) as total_assigned,
+      SUM(CASE WHEN bm.paid = 1 THEN COALESCE(bm.amount, bi.total_price * 1.0 / (SELECT COUNT(*) FROM budget_item_members WHERE budget_item_id = bi.id)) ELSE 0 END) as total_paid,
       COUNT(bi.id) as items_count
     FROM budget_item_members bm
     JOIN budget_items bi ON bm.budget_item_id = bi.id
@@ -336,9 +497,26 @@ export function getPerPersonSummary(tripId: string | number) {
   return summary.map(s => ({ ...s, avatar_url: avatarUrl(s) }));
 }
 
-// ---------------------------------------------------------------------------
-// Settlement calculation (greedy debt matching)
-// ---------------------------------------------------------------------------
+export function splitEqualShares(total: number, members: { user_id: number }[], itemId: number): Record<number, number> {
+  const n = members.length;
+  if (n === 0) return {};
+
+  const totalCents = Math.round(total * 100);
+  const baseCents = Math.floor(totalCents / n);
+  const remainder = totalCents % n;
+
+  const shares: Record<number, number> = {};
+  const sortedMembers = [...members].sort((a, b) => a.user_id - b.user_id);
+  const startIndex = itemId % n;
+
+  for (let i = 0; i < n; i++) {
+    const member = sortedMembers[i];
+    const hasExtraCent = ((i - startIndex + n) % n) < remainder;
+    shares[member.user_id] = (baseCents + (hasExtraCent ? 1 : 0)) / 100;
+  }
+
+  return shares;
+}
 
 export function calculateSettlement(
   tripId: string | number,
@@ -347,32 +525,61 @@ export function calculateSettlement(
   const base = (opts.base || opts.tripCurrency || 'EUR').toUpperCase();
   const tripCurrency = (opts.tripCurrency || base).toUpperCase();
   const rates = opts.rates ?? null;
-  // Amount in some currency → base. Pre-rework rows store currency = NULL, which
-  // means "the trip's own currency". rates[X] = units of X per 1 base.
-  const toBase = (amount: number, itemCurrency: string | null | undefined, itemRate?: number | null): number => {
+  // Net the whole settlement in the trip's canonical currency and convert the final
+  // totals to the display currency once, instead of netting in the (moving) display
+  // currency. Otherwise per-expense rounding shifts as live FX drifts and the greedy
+  // debt-simplifier reshuffles it into phantom third-party micro-flows (#1382). When
+  // the display currency IS the trip currency (the common case) every conversion below
+  // is the identity, so behaviour is unchanged.
+  // rates[X] = units of X per 1 base; the frozen exchange_rate is units of item-currency
+  // per 1 trip-currency. Pre-rework rows store currency = NULL = "the trip's own currency".
+  const toTrip = (amount: number, itemCurrency: string | null | undefined, itemRate?: number | null): number => {
     const cur = (itemCurrency || tripCurrency).toUpperCase();
-    if (cur === base) return amount;
-    // Prefer the FX rate frozen at entry time (#1335): a settled expense keeps the rate it
-    // was booked at, so a later live-rate drift doesn't re-open it with a few-cent residual.
-    // The stored rate is units of item-currency per 1 trip-currency, so it only applies when
-    // converting to the trip's own currency; otherwise (and for legacy rows) use live rates.
-    if (base === tripCurrency && itemRate != null && itemRate > 0 && itemRate !== 1) {
-      return amount / itemRate;
-    }
+    if (cur === tripCurrency) return amount;
+    // Prefer the FX rate frozen at entry time (#1335): a settled expense keeps the rate
+    // it was booked at, so a later live-rate drift doesn't re-open it with a residual.
+    if (itemRate != null && itemRate > 0 && itemRate !== 1) return amount / itemRate;
+    // Legacy rows without a frozen rate: convert via base with live rates.
     if (!rates) return amount;
-    const r = rates[cur];
-    return r && r > 0 ? amount / r : amount;
+    const rCur = rates[cur];
+    const rTrip = rates[tripCurrency];
+    if (rCur && rCur > 0 && rTrip && rTrip > 0) return (amount / rCur) * rTrip;
+    return amount;
+  };
+  // trip-currency → display currency, applied once to the final netted totals.
+  const toDisplay = (v: number): number =>
+    base === tripCurrency ? v : (rates && rates[tripCurrency] > 0 ? v / rates[tripCurrency] : v);
+  // A recorded settle-up amount is entered in whatever display currency the payer
+  // was viewing. New rows capture that currency and the rate frozen at settle time
+  // (#1445), so a settled position stays balanced when live rates drift — mirroring
+  // toTrip for expenses. Legacy rows (currency = NULL) have no frozen rate, so fall
+  // back to the old behaviour: assume they were entered in the current display base
+  // and convert with live rates.
+  const settleToTrip = (amount: number, sCurrency?: string | null, sRate?: number | null): number => {
+    if (sCurrency) {
+      const cur = sCurrency.toUpperCase();
+      if (cur === tripCurrency) return amount;
+      if (sRate != null && sRate > 0 && sRate !== 1) return amount / sRate;
+      // Frozen currency but no usable rate (fetch failed at settle time): live fallback.
+      if (rates) {
+        const rCur = rates[cur];
+        const rTrip = rates[tripCurrency];
+        if (rCur && rCur > 0 && rTrip && rTrip > 0) return (amount / rCur) * rTrip;
+      }
+      return amount;
+    }
+    return base === tripCurrency ? amount : (rates && rates[tripCurrency] > 0 ? amount * rates[tripCurrency] : amount);
   };
 
   const items = db.prepare('SELECT * FROM budget_items WHERE trip_id = ?').all(tripId) as BudgetItem[];
   const allMembers = db.prepare(`
-    SELECT bm.budget_item_id, bm.user_id, u.username, u.avatar
+    SELECT bm.budget_item_id, bm.user_id, bm.amount, COALESCE(u.display_name, u.username) AS username, u.avatar
     FROM budget_item_members bm
     JOIN users u ON bm.user_id = u.id
     WHERE bm.budget_item_id IN (SELECT id FROM budget_items WHERE trip_id = ?)
   `).all(tripId) as (BudgetItemMember & { budget_item_id: number })[];
   const allPayers = db.prepare(`
-    SELECT bp.budget_item_id, bp.user_id, bp.amount, u.username, u.avatar
+    SELECT bp.budget_item_id, bp.user_id, bp.amount, COALESCE(u.display_name, u.username) AS username, u.avatar
     FROM budget_item_payers bp
     JOIN users u ON bp.user_id = u.id
     WHERE bp.budget_item_id IN (SELECT id FROM budget_items WHERE trip_id = ?)
@@ -392,13 +599,19 @@ export function calculateSettlement(
     const payers = allPayers.filter(p => p.budget_item_id === item.id);
     if (members.length === 0) continue; // planning-only entry → doesn't affect balances
 
-    const paidBase = payers.reduce((a, p) => a + toBase(p.amount > 0 ? p.amount : 0, item.currency, item.exchange_rate), 0);
-    const sharePerMember = paidBase / members.length;
-
-    // Payers are credited what they actually paid (converted to base)…
-    for (const p of payers) ensure(p.user_id, p).balance += toBase(p.amount > 0 ? p.amount : 0, item.currency, item.exchange_rate);
-    // …and every split participant owes an equal share of the base total.
-    for (const m of members) ensure(m.user_id, m).balance -= sharePerMember;
+    // Payers are credited what they actually paid (converted to trip currency with
+    // the item's stored exchange rate)…
+    for (const p of payers) ensure(p.user_id, p).balance += toTrip(p.amount > 0 ? p.amount : 0, item.currency, item.exchange_rate);
+    // …and each split participant owes their share — a custom per-member amount
+    // when one is set, otherwise an equal share of the expense total.
+    const hasCustomSplit = members.some(m => m.amount !== null && m.amount !== undefined);
+    const equalShares = !hasCustomSplit ? splitEqualShares(item.total_price, members, item.id) : {};
+    for (const m of members) {
+      const memberShare = hasCustomSplit && m.amount !== null && m.amount !== undefined
+        ? toTrip(m.amount, item.currency, item.exchange_rate)
+        : toTrip(equalShares[m.user_id] || 0, item.currency, item.exchange_rate);
+      ensure(m.user_id, m).balance -= memberShare;
+    }
   }
 
   // Persisted settle-up transfers already moved money: the payer's debt shrinks,
@@ -412,8 +625,9 @@ export function calculateSettlement(
     return balances[id];
   };
   for (const s of settlements) {
-    ensureSettled(s.from_user_id, s.from_username, s.from_avatar_url).balance += s.amount;
-    ensureSettled(s.to_user_id, s.to_username, s.to_avatar_url).balance -= s.amount;
+    const inTrip = settleToTrip(s.amount, s.currency, s.exchange_rate);
+    ensureSettled(s.from_user_id, s.from_username, s.from_avatar_url).balance += inTrip;
+    ensureSettled(s.to_user_id, s.to_username, s.to_avatar_url).balance -= inTrip;
   }
 
   // Calculate optimized payment flows (greedy algorithm)
@@ -434,7 +648,7 @@ export function calculateSettlement(
       flows.push({
         from: { user_id: debtors[di].user_id, username: debtors[di].username, avatar_url: debtors[di].avatar_url },
         to: { user_id: creditors[ci].user_id, username: creditors[ci].username, avatar_url: creditors[ci].avatar_url },
-        amount: Math.round(transfer * 100) / 100,
+        amount: Math.round(toDisplay(transfer) * 100) / 100,
       });
     }
     debtors[di].amount -= transfer;
@@ -444,7 +658,7 @@ export function calculateSettlement(
   }
 
   return {
-    balances: Object.values(balances).map(b => ({ ...b, balance: Math.round(b.balance * 100) / 100 })),
+    balances: Object.values(balances).map(b => ({ ...b, balance: Math.round(toDisplay(b.balance) * 100) / 100 })),
     flows,
     settlements,
   };
@@ -456,7 +670,7 @@ export function calculateSettlement(
 
 export function listSettlements(tripId: string | number) {
   const rows = db.prepare(`
-    SELECT s.id, s.trip_id, s.from_user_id, s.to_user_id, s.amount, s.created_at, s.created_by_user_id,
+    SELECT s.id, s.trip_id, s.from_user_id, s.to_user_id, s.amount, s.currency, s.exchange_rate, s.created_at, s.created_by_user_id,
            fu.username AS from_username, fu.avatar AS from_avatar,
            tu.username AS to_username,   tu.avatar AS to_avatar
     FROM budget_settlements s
@@ -468,7 +682,8 @@ export function listSettlements(tripId: string | number) {
   return rows.map(r => ({
     id: r.id, trip_id: r.trip_id,
     from_user_id: r.from_user_id, to_user_id: r.to_user_id,
-    amount: r.amount, created_at: r.created_at, created_by_user_id: r.created_by_user_id,
+    amount: r.amount, currency: r.currency ?? null, exchange_rate: r.exchange_rate ?? 1,
+    created_at: r.created_at, created_by_user_id: r.created_by_user_id,
     from_username: r.from_username, from_avatar_url: avatarUrl({ avatar: r.from_avatar }),
     to_username: r.to_username, to_avatar_url: avatarUrl({ avatar: r.to_avatar }),
   }));
@@ -476,25 +691,39 @@ export function listSettlements(tripId: string | number) {
 
 export function createSettlement(
   tripId: string | number,
-  data: { from_user_id: number; to_user_id: number; amount: number },
+  data: { from_user_id: number; to_user_id: number; amount: number; currency?: string | null; exchange_rate?: number },
   createdByUserId?: number,
 ) {
   const result = db.prepare(
-    'INSERT INTO budget_settlements (trip_id, from_user_id, to_user_id, amount, created_by_user_id) VALUES (?, ?, ?, ?, ?)'
-  ).run(tripId, data.from_user_id, data.to_user_id, Math.round(data.amount * 100) / 100, createdByUserId ?? null);
+    'INSERT INTO budget_settlements (trip_id, from_user_id, to_user_id, amount, currency, exchange_rate, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(
+    tripId, data.from_user_id, data.to_user_id, Math.round(data.amount * 100) / 100,
+    data.currency ? data.currency.toUpperCase() : null,
+    data.exchange_rate != null ? data.exchange_rate : 1,
+    createdByUserId ?? null,
+  );
   return listSettlements(tripId).find(s => s.id === Number(result.lastInsertRowid)) || null;
 }
 
 export function updateSettlement(
   id: string | number,
   tripId: string | number,
-  data: { from_user_id: number; to_user_id: number; amount: number },
+  data: { from_user_id: number; to_user_id: number; amount: number; currency?: string | null; exchange_rate?: number },
 ) {
   const row = db.prepare('SELECT id FROM budget_settlements WHERE id = ? AND trip_id = ?').get(id, tripId);
   if (!row) return null;
-  db.prepare(
-    'UPDATE budget_settlements SET from_user_id = ?, to_user_id = ?, amount = ? WHERE id = ?'
-  ).run(data.from_user_id, data.to_user_id, Math.round(data.amount * 100) / 100, id);
+  db.prepare(`
+    UPDATE budget_settlements SET
+      from_user_id = ?, to_user_id = ?, amount = ?,
+      currency = CASE WHEN ? THEN ? ELSE currency END,
+      exchange_rate = CASE WHEN ? IS NOT NULL THEN ? ELSE exchange_rate END
+    WHERE id = ?
+  `).run(
+    data.from_user_id, data.to_user_id, Math.round(data.amount * 100) / 100,
+    data.currency !== undefined ? 1 : 0, data.currency ? data.currency.toUpperCase() : null,
+    data.exchange_rate !== undefined ? 1 : null, data.exchange_rate !== undefined ? data.exchange_rate : 1,
+    id,
+  );
   return listSettlements(tripId).find(s => s.id === Number(id)) || null;
 }
 

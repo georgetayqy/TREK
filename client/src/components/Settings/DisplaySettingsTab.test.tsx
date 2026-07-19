@@ -1,5 +1,5 @@
 // FE-COMP-DISPLAY-001 to FE-COMP-DISPLAY-027
-import { render, screen, waitFor } from '../../../tests/helpers/render';
+import { render, screen, within } from '../../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../../tests/helpers/msw/server';
@@ -25,24 +25,9 @@ describe('DisplaySettingsTab', () => {
     expect(document.body).toBeInTheDocument();
   });
 
-  it('FE-COMP-DISPLAY-002: shows Display section title', () => {
+  it('FE-COMP-DISPLAY-002: shows the language & region section title', () => {
     render(<DisplaySettingsTab />);
-    expect(screen.getByText('Display')).toBeInTheDocument();
-  });
-
-  it('FE-COMP-DISPLAY-003: shows Light mode button', () => {
-    render(<DisplaySettingsTab />);
-    expect(screen.getByText('Light')).toBeInTheDocument();
-  });
-
-  it('FE-COMP-DISPLAY-004: shows Dark mode button', () => {
-    render(<DisplaySettingsTab />);
-    expect(screen.getByText('Dark')).toBeInTheDocument();
-  });
-
-  it('FE-COMP-DISPLAY-005: shows Auto mode button', () => {
-    render(<DisplaySettingsTab />);
-    expect(screen.getByRole('button', { name: /Auto/i })).toBeInTheDocument();
+    expect(screen.getByText('Language & region')).toBeInTheDocument();
   });
 
   it('FE-COMP-DISPLAY-006: shows Language section', () => {
@@ -55,20 +40,6 @@ describe('DisplaySettingsTab', () => {
     expect(screen.getByText('Time Format')).toBeInTheDocument();
   });
 
-  it('FE-COMP-DISPLAY-008: clicking Dark mode button calls updateSetting', async () => {
-    const user = userEvent.setup();
-    const updateSetting = vi.fn().mockResolvedValue(undefined);
-    seedStore(useSettingsStore, { settings: buildSettings({ dark_mode: 'light' }), updateSetting });
-    render(<DisplaySettingsTab />);
-    await user.click(screen.getByText('Dark'));
-    expect(updateSetting).toHaveBeenCalledWith('dark_mode', 'dark');
-  });
-
-  it('FE-COMP-DISPLAY-009: shows Color Mode label', () => {
-    render(<DisplaySettingsTab />);
-    expect(screen.getByText('Color Mode')).toBeInTheDocument();
-  });
-
   it('FE-COMP-DISPLAY-010: shows 24h time format option', () => {
     render(<DisplaySettingsTab />);
     // Label is "24h (14:30)"
@@ -79,35 +50,6 @@ describe('DisplaySettingsTab', () => {
     render(<DisplaySettingsTab />);
     // Label is "12h (2:30 PM)"
     expect(screen.getByText(/12h/i)).toBeInTheDocument();
-  });
-
-  it('FE-COMP-DISPLAY-012: clicking Light mode calls updateSetting with light', async () => {
-    const user = userEvent.setup();
-    const updateSetting = vi.fn().mockResolvedValue(undefined);
-    seedStore(useSettingsStore, { settings: buildSettings({ dark_mode: 'dark' }), updateSetting });
-    render(<DisplaySettingsTab />);
-    await user.click(screen.getByText('Light'));
-    expect(updateSetting).toHaveBeenCalledWith('dark_mode', 'light');
-  });
-
-  it('FE-COMP-DISPLAY-013: clicking Auto mode button calls updateSetting with auto', async () => {
-    const user = userEvent.setup();
-    const updateSetting = vi.fn().mockResolvedValue(undefined);
-    seedStore(useSettingsStore, { settings: buildSettings({ dark_mode: 'light' }), updateSetting });
-    render(<DisplaySettingsTab />);
-    await user.click(screen.getByRole('button', { name: /Auto/i }));
-    expect(updateSetting).toHaveBeenCalledWith('dark_mode', 'auto');
-  });
-
-  it('FE-COMP-DISPLAY-014: active color mode button has border with var(--text-primary)', () => {
-    seedStore(useSettingsStore, { settings: buildSettings({ dark_mode: 'dark' }) });
-    render(<DisplaySettingsTab />);
-    const darkBtn = screen.getByRole('button', { name: /^Dark$/i });
-    const lightBtn = screen.getByRole('button', { name: /^Light$/i });
-    const autoBtn = screen.getByRole('button', { name: /Auto/i });
-    expect(darkBtn.style.border).toContain('var(--text-primary)');
-    expect(lightBtn.style.border).toContain('var(--border-primary)');
-    expect(autoBtn.style.border).toContain('var(--border-primary)');
   });
 
   it('FE-COMP-DISPLAY-015: clicking a language button calls updateSetting with that language code', async () => {
@@ -185,17 +127,44 @@ describe('DisplaySettingsTab', () => {
   it('FE-COMP-DISPLAY-025: blur booking codes On button is active when blur_booking_codes is true', () => {
     seedStore(useSettingsStore, { settings: buildSettings({ blur_booking_codes: true }) });
     render(<DisplaySettingsTab />);
-    const onButtons = screen.getAllByText(/^On$/i);
-    const blurOnBtn = onButtons[1].closest('button')!;
+    const block = screen.getByText(/blur booking codes/i).closest('div')!;
+    const blurOnBtn = within(block).getByText(/^On$/i).closest('button')!;
     expect(blurOnBtn.style.border).toContain('var(--text-primary)');
+  });
+
+  it('FE-COMP-DISPLAY-030: shows Always show booking routes next to Booking route labels', () => {
+    render(<DisplaySettingsTab />);
+    const bookingLabels = screen.getByText(/booking route labels/i);
+    const alwaysShow = screen.getByText(/always show booking routes/i);
+    expect(alwaysShow).toBeInTheDocument();
+    // Adjacent siblings within the Travel & Map section: alwaysShow's block
+    // immediately follows bookingLabels' block.
+    expect(bookingLabels.closest('div')!.nextElementSibling).toBe(alwaysShow.closest('div'));
+  });
+
+  it('FE-COMP-DISPLAY-031: always-show-routes Off button is active by default (unset)', () => {
+    render(<DisplaySettingsTab />);
+    const block = screen.getByText(/always show booking routes/i).closest('div')!;
+    const offBtn = within(block).getByText(/^Off$/i).closest('button')!;
+    expect(offBtn.style.border).toContain('var(--text-primary)');
+  });
+
+  it('FE-COMP-DISPLAY-032: clicking On for always-show-routes calls updateSetting with map_always_show_routes true', async () => {
+    const user = userEvent.setup();
+    const updateSetting = vi.fn().mockResolvedValue(undefined);
+    seedStore(useSettingsStore, { settings: buildSettings(), updateSetting });
+    render(<DisplaySettingsTab />);
+    const block = screen.getByText(/always show booking routes/i).closest('div')!;
+    await user.click(within(block).getByText(/^On$/i));
+    expect(updateSetting).toHaveBeenCalledWith('map_always_show_routes', true);
   });
 
   it('FE-COMP-DISPLAY-026: updateSetting failure shows toast error', async () => {
     const user = userEvent.setup();
     const updateSetting = vi.fn().mockRejectedValue(new Error('Server error'));
-    seedStore(useSettingsStore, { settings: buildSettings({ dark_mode: 'light' }), updateSetting });
+    seedStore(useSettingsStore, { settings: buildSettings({ temperature_unit: 'celsius' }), updateSetting });
     render(<><ToastContainer /><DisplaySettingsTab /></>);
-    await user.click(screen.getByText('Dark'));
+    await user.click(screen.getByText('°F Fahrenheit'));
     await screen.findByText('Server error');
   });
 

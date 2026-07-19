@@ -28,6 +28,10 @@ const hu: NotificationLocale = {
       title: 'Vacay Fusion meghívó',
       body: `${p.actor} meghívott a nyaralási tervek összevonásához. Nyissa meg a TREK-et az elfogadáshoz vagy elutasításhoz.`,
     }),
+    collection_invite: (p) => ({
+      title: 'Gyűjtemény meghívó',
+      body: `${p.actor} meghívott egy gyűjtemény megosztására. Nyissa meg a TREK-et az elfogadáshoz vagy elutasításhoz.`,
+    }),
     photos_shared: (p) => ({
       title: `${p.count} fotó megosztva`,
       body: `${p.actor} ${p.count} fotót osztott meg a(z) "${p.trip}" utazásban.`,
@@ -48,6 +52,7 @@ const hu: NotificationLocale = {
       title: 'Synology munkamenet törölve',
       body: 'A Synology fiókja vagy URL-je megváltozott. Kijelentkeztek a Synology Photos-ból.',
     }),
+    plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
   },
   passwordReset: {
     subject: 'Jelszó visszaállítása',

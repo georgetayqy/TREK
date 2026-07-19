@@ -8,7 +8,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places、経路、クラスタリング',
   'login.features.realtime': 'リアルタイム同期',
   'login.features.realtimeDesc': 'WebSocketで共同計画',
-  'login.features.budget': '予算管理',
+  'login.features.budget': '費用管理',
   'login.features.budgetDesc': 'カテゴリ、グラフ、人数別費用',
   'login.features.collab': 'コラボレーション',
   'login.features.collabDesc': '複数ユーザーで旅行を共有',
@@ -85,5 +85,9 @@ const login: TranslationStrings = {
   'login.resetPasswordFailed': 'リセットに失敗しました。リンクの有効期限が切れている可能性があります。',
   'login.passkey.signIn': 'パスキーでサインイン',
   'login.passkey.failed': 'パスキーでのサインインに失敗しました。もう一度お試しください。',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

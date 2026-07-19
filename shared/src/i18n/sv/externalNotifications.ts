@@ -28,6 +28,10 @@ const en: NotificationLocale = {
       title: 'Vacay sammanslagnings inbjudan',
       body: `${p.actor} bjöd in dig att slå samman semesterplaner. Öppna TREK för att acceptera eller avvisa.`,
     }),
+    collection_invite: (p) => ({
+      title: 'Inbjudan till samling',
+      body: `${p.actor} bjöd in dig att dela en samling. Öppna TREK för att acceptera eller avvisa.`,
+    }),
     photos_shared: (p) => ({
       title: `${p.count} foton delade`,
       body: `${p.actor} delade ${p.count} foto(n) i "${p.trip}".`,
@@ -48,6 +52,7 @@ const en: NotificationLocale = {
       title: 'Synology session rensad',
       body: 'Ditt Synology-konto eller din webbadress har ändrats. Du har loggats ut från Synology Photos.',
     }),
+    plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
   },
   passwordReset: {
     subject: 'Återställ ditt lösenord',
@@ -55,7 +60,8 @@ const en: NotificationLocale = {
     body: 'Vi har fått en begäran om att återställa lösenordet till ditt TREK konto. Klicka på knappen nedan för att ange ett nytt lösenord.',
     ctaIntro: 'Återställ lösenord',
     expiry: 'Den här länken upphör att gälla om 60 minuter.',
-    ignore: "Om du inte har begärt detta kan du lugnt strunta i det här e-postmeddelandet – ditt lösenord kommer inte att ändras.",
+    ignore:
+      'Om du inte har begärt detta kan du lugnt strunta i det här e-postmeddelandet – ditt lösenord kommer inte att ändras.',
   },
 };
 

@@ -63,8 +63,13 @@ export function deleteJourneyShareLink(journeyId: number, userId: number): boole
 }
 
 export function validateShareTokenForPhoto(token: string, photoId: number): { journeyId: number; ownerId: number } | null {
-  const row = db.prepare('SELECT journey_id FROM journey_share_tokens WHERE token = ?').get(token) as any;
+  const row = db.prepare('SELECT journey_id, share_gallery FROM journey_share_tokens WHERE token = ?').get(token) as any;
   if (!row) return null;
+  // Photos only ever surface (inline or in the gallery) when share_gallery is on,
+  // so the byte proxy must honour the flag server-side too — the JSON payload
+  // already strips photos when it is off. Enumerable photo ids otherwise stay
+  // fetchable after the owner disables the gallery.
+  if (!row.share_gallery) return null;
   const photo = db.prepare(`
     SELECT gp.photo_id, tkp.owner_id, gp.journey_id
     FROM journey_photos gp
@@ -77,8 +82,11 @@ export function validateShareTokenForPhoto(token: string, photoId: number): { jo
 }
 
 export function validateShareTokenForAsset(token: string, assetId: string): { ownerId: number } | null {
-  const row = db.prepare('SELECT journey_id FROM journey_share_tokens WHERE token = ?').get(token) as any;
+  const row = db.prepare('SELECT journey_id, share_gallery FROM journey_share_tokens WHERE token = ?').get(token) as any;
   if (!row) return null;
+  // Same as the unified photo proxy: no asset bytes leave the host unless the
+  // owner shared the gallery.
+  if (!row.share_gallery) return null;
   const photo = db.prepare(`
     SELECT tkp.owner_id FROM journey_photos gp
     JOIN trek_photos tkp ON tkp.id = gp.photo_id
@@ -105,7 +113,8 @@ export function getPublicJourney(token: string) {
 
   const photos = db.prepare(`
     SELECT gp.id, jep.entry_id, gp.photo_id, gp.caption, jep.sort_order, gp.shared, gp.created_at,
-           tkp.provider, tkp.asset_id, tkp.owner_id, tkp.file_path, tkp.thumbnail_path, tkp.width, tkp.height
+           tkp.provider, tkp.asset_id, tkp.owner_id, tkp.file_path, tkp.thumbnail_path, tkp.width, tkp.height,
+           tkp.media_type, tkp.duration_ms
     FROM journey_entry_photos jep
     JOIN journey_photos gp ON gp.id = jep.journey_photo_id
     JOIN trek_photos tkp ON tkp.id = gp.photo_id
@@ -120,7 +129,8 @@ export function getPublicJourney(token: string) {
 
   const gallery = db.prepare(`
     SELECT gp.id, gp.journey_id, gp.photo_id, gp.caption, gp.shared, gp.sort_order, gp.created_at,
-           tkp.provider, tkp.asset_id, tkp.owner_id, tkp.file_path, tkp.thumbnail_path, tkp.width, tkp.height
+           tkp.provider, tkp.asset_id, tkp.owner_id, tkp.file_path, tkp.thumbnail_path, tkp.width, tkp.height,
+           tkp.media_type, tkp.duration_ms
     FROM journey_photos gp
     JOIN trek_photos tkp ON tkp.id = gp.photo_id
     WHERE gp.journey_id = ?

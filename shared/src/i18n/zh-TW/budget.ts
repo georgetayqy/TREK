@@ -51,6 +51,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': '沒有人欠你',
   'costs.yourShare': '你的分攤',
   'costs.youPaid': '你支付了',
+  'costs.outstanding': '未結算金額',
+  'costs.outstandingSub': '尚無付款人的支出',
+  'costs.outstandingItems': '筆支出需要付款人',
   'costs.expenses': '支出',
   'costs.entries': '{count} 筆',
   'costs.searchPlaceholder': '搜尋支出…',
@@ -89,6 +92,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} 兌 {to}',
   'costs.category': '分類',
   'costs.whoPaid': '誰付的款？',
+  'costs.multiplePayers': '多人支付',
+  'costs.singlePayer': '一人支付',
+  'costs.payersUnbalanced': '付款人金額總和必須為 {amount}',
   'costs.splitBetween': '平均分攤給',
   'costs.pickSomeone': '至少選擇一人來分攤。',
   'costs.splitSummary': '分 {count} 份 · 每份 {amount}',
@@ -115,6 +121,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': '僅計入總額 — 尚未結算',
   'costs.tapToInclude': '點按以加入',
   'costs.amount': '金額',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': '所有類別',
+  'costs.filter.allDays': '所有日期',
+  'costs.expensesCount': '{count} 筆支出',
 };
-
 export default budget;

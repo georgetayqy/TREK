@@ -25,6 +25,7 @@ import type {
   Accommodation,
   Tag,
   Category,
+  AppearanceConfig,
 } from '@trek/shared'
 
 export type {
@@ -47,6 +48,7 @@ export type {
   Accommodation,
   Tag,
   Category,
+  AppearanceConfig,
 }
 
 export interface User {
@@ -184,11 +186,9 @@ export type DistanceUnit = 'metric' | 'imperial'
 
 export interface Settings {
   map_tile_url: string
-  default_lat: number
-  default_lng: number
-  default_zoom: number
   dark_mode: boolean | string
-  default_currency: string
+  /** Display currency for Costs. Empty/null = follow each trip's own currency. */
+  default_currency: string | null
   language: string
   temperature_unit: string
   distance_unit?: DistanceUnit
@@ -197,6 +197,7 @@ export interface Settings {
   blur_booking_codes?: boolean
   map_booking_labels?: boolean
   map_poi_pill_enabled?: boolean
+  map_always_show_routes?: boolean
   optimize_from_accommodation?: boolean
   map_provider?: 'leaflet' | 'mapbox-gl' | 'maplibre-gl'
   mapbox_access_token?: string
@@ -208,6 +209,15 @@ export interface Settings {
   dashboard_fx_from?: string
   dashboard_fx_to?: string
   dashboard_timezones?: string[]
+  // AI booking-import fallback (per-user config; used when the admin has not set
+  // instance-wide config on the llm_parsing addon). llm_api_key is masked on read.
+  llm_provider?: 'local' | 'openai' | 'anthropic'
+  llm_model?: string
+  llm_base_url?: string
+  llm_multimodal?: boolean
+  llm_api_key?: string
+  /** Per-user appearance/customization config (theming, transparency, typography, dashboard widgets). */
+  appearance?: AppearanceConfig
 }
 
 export interface AssignmentsMap {

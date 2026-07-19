@@ -17,7 +17,8 @@ export function useSettings() {
   const memoriesEnabled = addonEnabled('memories')
   const mcpEnabled = addonEnabled('mcp')
   const airtrailEnabled = addonEnabled('airtrail')
-  const hasIntegrations = memoriesEnabled || mcpEnabled || airtrailEnabled
+  const llmEnabled = addonEnabled('llm_parsing')
+  const hasIntegrations = memoriesEnabled || mcpEnabled || airtrailEnabled || llmEnabled
 
   const [appVersion, setAppVersion] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('display')
@@ -32,6 +33,14 @@ export function useSettings() {
     if (searchParams.get('mfa') === 'required') {
       setActiveTab('account')
     }
+  }, [searchParams])
+
+  // Deep link into a tab: /settings?tab=plugins. Lets one tab point at another —
+  // e.g. an unconfigured plugin notification channel sends you to where its
+  // credentials actually live, instead of just naming the place.
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    if (tab) setActiveTab(tab)
   }, [searchParams])
 
   return { hasIntegrations, appVersion, activeTab, setActiveTab }

@@ -53,6 +53,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': 'Δεν σας χρωστάει κανείς',
   'costs.yourShare': 'Το μερίδιό σας',
   'costs.youPaid': 'Πληρώσατε',
+  'costs.outstanding': 'Εκκρεμές ποσό',
+  'costs.outstandingSub': 'Έξοδα χωρίς πληρωτή ακόμη',
+  'costs.outstandingItems': 'έξοδα χρειάζονται πληρωτή',
   'costs.expenses': 'Έξοδα',
   'costs.entries': '{count} εγγραφές',
   'costs.searchPlaceholder': 'Αναζήτηση εξόδων…',
@@ -91,6 +94,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} σε {to}',
   'costs.category': 'Κατηγορία',
   'costs.whoPaid': 'Ποιος πλήρωσε;',
+  'costs.multiplePayers': 'Πλήρωσαν πολλά άτομα',
+  'costs.singlePayer': 'Πλήρωσε ένα άτομο',
+  'costs.payersUnbalanced': 'Τα ποσά των πληρωτών πρέπει να αθροίζουν σε {amount}',
   'costs.splitBetween': 'Ισόποση κατανομή μεταξύ',
   'costs.pickSomeone': 'Επιλέξτε τουλάχιστον ένα άτομο για τον διαμοιρασμό.',
   'costs.splitSummary': 'Κατανομή σε {count} μέρη · {amount} το καθένα',
@@ -117,6 +123,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': 'Μόνο στο σύνολο — δεν έχει διακανονιστεί',
   'costs.tapToInclude': 'Πατήστε για προσθήκη',
   'costs.amount': 'Ποσό',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'Όλες οι κατηγορίες',
+  'costs.filter.allDays': 'Όλες οι ημέρες',
+  'costs.expensesCount': '{count} έξοδα',
 };
-
 export default budget;

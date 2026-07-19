@@ -52,6 +52,7 @@ Requires `places:read` or `places:write` scope.
 | `list_places` | List places in a trip, optionally filtered by assignment status, category, tag, or search query. |
 | `create_place` | Add a place with name, coordinates, address, category, notes, website, phone, and optional `google_place_id` / `osm_id`. |
 | `update_place` | Update any field of an existing place including transport mode, timing, and price. |
+| `bulk_update_places` | Update many places at once, applying the same field values (e.g. category, price, transport mode) to every listed place in a single call. |
 | `delete_place` | Remove a place from a trip. Also removes all day assignments. |
 | `bulk_delete_places` | Delete multiple places by ID. Removes all day assignments. Cannot be undone. |
 | `import_places_from_url` | Import all places from a publicly shared Google Maps or Naver Maps list URL. |
@@ -104,6 +105,16 @@ Requires `reservations:write` scope.
 | `create_transport` | Create a transport booking (`flight`, `train`, `car`, `cruise`) with optional multi-stop endpoints, departure/arrival times, and confirmation details. |
 | `update_transport` | Update an existing transport booking. Pass `endpoints[]` to replace all stops. |
 | `delete_transport` | Delete a transport booking from a trip. |
+
+### Automated public transit
+
+Transit search is powered by Transitous and uses the existing `geo:read` and `reservations:write` scopes.
+
+| Tool | Scope required | Description |
+|---|---|---|
+| `search_transit_stops` | `geo:read` | Search real public-transit stops and stations, optionally biased around coordinates. |
+| `search_transit_routes` | `geo:read` | Search scheduled routes between two coordinates with time, mode, and transfer filters. Also returns `dropped`, the number of provider itineraries that failed validation and are absent from the results. |
+| `create_transit_journey` | `reservations:write` | Save a selected route as a first-class automated transit journey on a trip day. |
 
 ### Reservations
 

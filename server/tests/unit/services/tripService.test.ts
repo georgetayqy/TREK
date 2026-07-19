@@ -33,8 +33,9 @@ vi.mock('../../../src/config', () => ({
 import { createTables } from '../../../src/db/schema';
 import { runMigrations } from '../../../src/db/migrations';
 import { resetTestDb } from '../../helpers/test-db';
-import { createUser, createTrip, createReservation, createPlace, createDay, createDayAssignment, createDayNote } from '../../helpers/factories';
-import { exportICS, generateDays, deleteOldCover, updateTrip } from '../../../src/services/tripService';
+import { createUser, createTrip, createReservation, createPlace, createDay, createDayAssignment, createDayNote, addTripMember } from '../../helpers/factories';
+import { exportICS, generateDays, deleteOldCover, updateTrip, transferOwnership, createGuest, renameGuest, deleteGuest, listMembers, addMember } from '../../../src/services/tripService';
+import { createAccommodation } from '../../../src/services/dayService';
 import fs from 'fs';
 
 beforeAll(() => {
@@ -298,7 +299,51 @@ describe('exportICS', () => {
     const { ics } = exportICS(trip.id);
 
     expect(ics).toContain('DTSTART;VALUE=DATE:20250601');
+    // DTEND is exclusive — the day *after* the last day, or the trip loses a day.
+    expect(ics).toContain('DTEND;VALUE=DATE:20250608');
     expect(ics).toContain('SUMMARY:Summer Holiday');
+  });
+
+  describe('#1453 all-day DTEND is timezone-independent', () => {
+    const originalTz = process.env.TZ;
+
+    afterAll(() => {
+      process.env.TZ = originalTz;
+    });
+
+    // The old code did `new Date(date + 'T00:00:00')` — no Z, so parsed as *server-local*
+    // midnight — then setDate(+1) and .toISOString(). East of Greenwich that round-trip
+    // lands a day early, and since DTEND is exclusive the trip's last day was dropped.
+    // Only invisible in CI because containers default to TZ=UTC.
+    for (const tz of ['Europe/Berlin', 'Asia/Tokyo', 'Pacific/Kiritimati', 'America/New_York', 'UTC']) {
+      it(`TRIP-SVC-002b: DTEND is the day after the last day under TZ=${tz}`, () => {
+        process.env.TZ = tz;
+        const { user } = createUser(testDb);
+        const trip = createTrip(testDb, user.id, {
+          title: 'TZ Trip',
+          start_date: '2026-03-28',
+          end_date: '2026-03-30',
+        });
+
+        const { ics } = exportICS(trip.id);
+
+        expect(ics).toContain('DTSTART;VALUE=DATE:20260328');
+        expect(ics).toContain('DTEND;VALUE=DATE:20260331');
+      });
+    }
+
+    it('TRIP-SVC-002c: a per-day all-day summary event has the same exclusive DTEND', () => {
+      process.env.TZ = 'Asia/Tokyo';
+      const { user } = createUser(testDb);
+      const trip = createTrip(testDb, user.id, { title: 'Day Note Trip' });
+      const day = createDay(testDb, trip.id, { date: '2026-03-30', day_number: 1 });
+      createDayNote(testDb, day.id, trip.id, { text: 'Pack the bags' });
+
+      const { ics } = exportICS(trip.id);
+
+      expect(ics).toContain('DTSTART;VALUE=DATE:20260330');
+      expect(ics).toContain('DTEND;VALUE=DATE:20260331');
+    });
   });
 
   it('TRIP-SVC-003: reservation with full datetime (includes T) → DTSTART without VALUE=DATE', () => {
@@ -416,9 +461,36 @@ describe('exportICS', () => {
     const { ics } = exportICS(trip.id);
 
     expect(ics).toContain('SUMMARY:CDG → JFK');
-    expect(ics).toContain('DTSTART:20250602T090000');
-    expect(ics).toContain('DTEND:20250602T120000');
+    // Departure endpoint zone drives DTSTART, arrival zone drives DTEND, so the
+    // subscriber sees TREK's zones instead of their own (#1453).
+    expect(ics).toContain('DTSTART;TZID=Europe/Paris:20250602T090000');
+    expect(ics).toContain('DTEND;TZID=America/New_York:20250602T120000');
+    expect(ics).not.toContain('DTSTART:20250602T090000');
+    // Each referenced zone gets a VTIMEZONE definition.
+    expect(ics).toContain('BEGIN:VTIMEZONE\r\nTZID:Europe/Paris');
+    expect(ics).toContain('BEGIN:VTIMEZONE\r\nTZID:America/New_York');
     expect(ics).toContain('Route: CDG → JFK');
+  });
+
+  it('TRIP-SVC-010b: an invalid endpoint timezone degrades to floating time instead of crashing the export', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Bad TZ Trip' });
+    const reservation = createReservation(testDb, trip.id, { title: 'CDG → JFK', type: 'flight' });
+    testDb.prepare('UPDATE reservations SET reservation_time=NULL, reservation_end_time=NULL WHERE id=?').run(reservation.id);
+    const insertEp = testDb.prepare(
+      'INSERT INTO reservation_endpoints (reservation_id, role, sequence, name, code, lat, lng, timezone, local_time, local_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    // A stored/plugin-written timezone can be any string; it must never reach Intl.
+    // The bogus zone takes precedence over the coordinates (first.timezone || resolveZone).
+    insertEp.run(reservation.id, 'from', 0, 'Paris CDG', 'CDG', 49.0, 2.5, 'Not/AZone', '09:00', '2025-06-02');
+    insertEp.run(reservation.id, 'to', 1, 'New York JFK', 'JFK', 40.6, -73.8, 'garbage', '12:00', '2025-06-02');
+
+    let ics = '';
+    expect(() => { ics = exportICS(trip.id).ics; }).not.toThrow();
+    // Falls back to a floating local time (no TZID) and never emits a bogus VTIMEZONE.
+    expect(ics).toContain('DTSTART:20250602T090000');
+    expect(ics).not.toContain('TZID=Not/AZone');
+    expect(ics).not.toContain('garbage');
   });
 
   it('TRIP-SVC-011: flight endpoint with no local_date is skipped (relative Day-N trips)', () => {
@@ -436,6 +508,24 @@ describe('exportICS', () => {
     const { ics } = exportICS(trip.id);
 
     expect(ics).not.toContain('SUMMARY:Timeless Flight');
+  });
+
+  it('TRIP-SVC-012: timed assignment gets a TZID derived from the place coordinates', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { title: 'Tokyo Trip' });
+    const day = createDay(testDb, trip.id, { date: '2025-06-02' });
+    // Tokyo coordinates → Asia/Tokyo via tz-lookup.
+    const place = createPlace(testDb, trip.id, { name: 'Senso-ji', lat: 35.7148, lng: 139.7967 });
+    const assignment = createDayAssignment(testDb, day.id, place.id);
+    testDb
+      .prepare('UPDATE day_assignments SET assignment_time=? WHERE id=?')
+      .run('09:00', assignment.id);
+
+    const { ics } = exportICS(trip.id);
+
+    expect(ics).toContain('DTSTART;TZID=Asia/Tokyo:20250602T090000');
+    expect(ics).toContain('BEGIN:VTIMEZONE\r\nTZID:Asia/Tokyo');
+    expect(ics).not.toContain('DTSTART:20250602T090000');
   });
 });
 
@@ -505,5 +595,210 @@ describe('resyncReservationDays (#1288)', () => {
     updateTrip(trip.id, user.id, { start_date: '2025-06-10', end_date: '2025-06-14' }, 'user');
     const res = testDb.prepare('SELECT day_id FROM reservations WHERE id = ?').get(resId) as { day_id: number };
     expect(res.day_id).toBe(origDayId);
+  });
+});
+
+describe('resyncAccommodationDays (#1288)', () => {
+  const dayFor = (tripId: number, date: string) =>
+    (testDb.prepare('SELECT id FROM days WHERE trip_id = ? AND date = ?').get(tripId, date) as { id: number }).id;
+
+  const insertAccommodation = (tripId: number, startDayId: number, endDayId: number) => {
+    const place = createPlace(testDb, tripId, { name: 'Grand Hotel' });
+    const acc = createAccommodation(tripId, {
+      place_id: place.id, start_day_id: startDayId, end_day_id: endDayId,
+    }) as { id: number };
+    const linkedRes = testDb.prepare(
+      'SELECT id FROM reservations WHERE accommodation_id = ?',
+    ).get(acc.id) as { id: number };
+    return { accId: acc.id, linkedResId: linkedRes.id };
+  };
+
+  const getAcc = (id: number) =>
+    testDb.prepare('SELECT start_day_id, end_day_id FROM day_accommodations WHERE id = ?').get(id) as
+      { start_day_id: number; end_day_id: number };
+  const getRes = (id: number) =>
+    testDb.prepare('SELECT day_id, reservation_time FROM reservations WHERE id = ?').get(id) as
+      { day_id: number | null; reservation_time: string | null };
+
+  it('TRIP-SVC-035: extending the start keeps an accommodation on its absolute dates', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2025-06-10', end_date: '2025-06-14' });
+    const { accId, linkedResId } = insertAccommodation(trip.id, dayFor(trip.id, '2025-06-11'), dayFor(trip.id, '2025-06-13'));
+    // Add a day at the start: days re-date positionally (old 06-11 row becomes 06-10, …).
+    updateTrip(trip.id, user.id, { start_date: '2025-06-09', end_date: '2025-06-14' }, 'user');
+    const acc = getAcc(accId);
+    expect(acc.start_day_id).toBe(dayFor(trip.id, '2025-06-11'));
+    expect(acc.end_day_id).toBe(dayFor(trip.id, '2025-06-13'));
+    const res = getRes(linkedResId);
+    expect(res.day_id).toBe(acc.start_day_id);
+    expect(res.reservation_time?.slice(0, 10)).toBe('2025-06-11');
+  });
+
+  it('TRIP-SVC-036: moving the whole trip out of the old range keeps the accommodation glued to its days', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2025-06-01', end_date: '2025-06-05' });
+    const startDayId = dayFor(trip.id, '2025-06-02');
+    const endDayId = dayFor(trip.id, '2025-06-03');
+    const { accId, linkedResId } = insertAccommodation(trip.id, startDayId, endDayId);
+    updateTrip(trip.id, user.id, { start_date: '2025-07-01', end_date: '2025-07-05' }, 'user');
+    const acc = getAcc(accId);
+    expect(acc.start_day_id).toBe(startDayId);
+    expect(acc.end_day_id).toBe(endDayId);
+    // The linked reservation follows the (re-dated) start day instead of keeping a stale date snapshot.
+    const res = getRes(linkedResId);
+    expect(res.day_id).toBe(startDayId);
+    expect(res.reservation_time?.slice(0, 10)).toBe('2025-07-02');
+  });
+
+  it("TRIP-SVC-038: date_shift_mode 'shift_all' glues bookings to their days and restamps their times", () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2025-06-01', end_date: '2025-06-05' });
+    const origDayId = dayFor(trip.id, '2025-06-02');
+    const resId = Number(testDb.prepare(
+      "INSERT INTO reservations (trip_id, day_id, title, reservation_time, type, status) VALUES (?, ?, 'Dinner', '2025-06-02T19:00:00', 'restaurant', 'pending')",
+    ).run(trip.id, origDayId).lastInsertRowid);
+    const { accId } = insertAccommodation(trip.id, origDayId, dayFor(trip.id, '2025-06-03'));
+    updateTrip(trip.id, user.id, { start_date: '2025-06-03', end_date: '2025-06-07', date_shift_mode: 'shift_all' }, 'user');
+    // The booking stays on its day row (now 2025-06-04) and its time follows.
+    const res = testDb.prepare('SELECT day_id, reservation_time FROM reservations WHERE id = ?').get(resId) as
+      { day_id: number; reservation_time: string };
+    expect(res.day_id).toBe(origDayId);
+    expect(res.reservation_time).toBe('2025-06-04T19:00:00');
+    // The accommodation stays glued to its (re-dated) day rows too.
+    const acc = getAcc(accId);
+    expect(acc.start_day_id).toBe(origDayId);
+  });
+
+  it('TRIP-SVC-037: a dated hotel reservation without a linked accommodation is re-anchored like other bookings', () => {
+    const { user } = createUser(testDb);
+    const trip = createTrip(testDb, user.id, { start_date: '2025-06-01', end_date: '2025-06-05' });
+    const resId = Number(testDb.prepare(
+      "INSERT INTO reservations (trip_id, day_id, title, reservation_time, type, status) VALUES (?, ?, 'Imported hotel', ?, 'hotel', 'pending')",
+    ).run(trip.id, dayFor(trip.id, '2025-06-02'), '2025-06-02T15:00:00').lastInsertRowid);
+    updateTrip(trip.id, user.id, { start_date: '2025-06-02', end_date: '2025-06-06' }, 'user');
+    const res = testDb.prepare('SELECT day_id FROM reservations WHERE id = ?').get(resId) as { day_id: number };
+    expect(res.day_id).toBe(dayFor(trip.id, '2025-06-02'));
+  });
+});
+
+describe('transferOwnership (#973)', () => {
+  it('TRIP-SVC-020: hands the trip to a member and demotes the former owner to a member', () => {
+    const { user: owner } = createUser(testDb);
+    const { user: member } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    addTripMember(testDb, trip.id, member.id);
+
+    const result = transferOwnership(trip.id, member.id, owner.id);
+    expect(result.toEmail).toBe(member.email);
+
+    const updated = testDb.prepare('SELECT user_id FROM trips WHERE id = ?').get(trip.id) as { user_id: number };
+    expect(updated.user_id).toBe(member.id);
+
+    // New owner no longer sits in trip_members, former owner now does.
+    const memberIds = (testDb.prepare('SELECT user_id FROM trip_members WHERE trip_id = ?').all(trip.id) as { user_id: number }[]).map(r => r.user_id);
+    expect(memberIds).toContain(owner.id);
+    expect(memberIds).not.toContain(member.id);
+  });
+
+  it('TRIP-SVC-021: rejects a transfer from a non-owner', () => {
+    const { user: owner } = createUser(testDb);
+    const { user: member } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    addTripMember(testDb, trip.id, member.id);
+    // member (not the owner) attempts the transfer
+    expect(() => transferOwnership(trip.id, member.id, member.id)).toThrow();
+  });
+
+  it('TRIP-SVC-022: rejects a transfer to someone who is not a member', () => {
+    const { user: owner } = createUser(testDb);
+    const { user: stranger } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    expect(() => transferOwnership(trip.id, stranger.id, owner.id)).toThrow('New owner must be a trip member');
+  });
+
+  it('TRIP-SVC-023: rejects transferring to yourself', () => {
+    const { user: owner } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    expect(() => transferOwnership(trip.id, owner.id, owner.id)).toThrow('You already own this trip');
+  });
+});
+
+describe('guest members (#1362)', () => {
+  it('TRIP-SVC-030: createGuest adds a credential-less user joined into the trip', () => {
+    const { user: owner } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+
+    const { member } = createGuest(trip.id, '  Anna  ', owner.id);
+    expect(member.username).toBe('Anna');
+    expect(member.is_guest).toBe(true);
+
+    const row = testDb.prepare('SELECT username, email, password_hash, is_guest, role FROM users WHERE id = ?').get(member.id) as any;
+    expect(row.is_guest).toBe(1);
+    expect(row.password_hash).toBe('');
+    expect(row.email).toMatch(/@guests\.invalid$/);
+    expect(row.role).toBe('user');
+
+    // Joined as a trip member.
+    const m = testDb.prepare('SELECT id FROM trip_members WHERE trip_id = ? AND user_id = ?').get(trip.id, member.id);
+    expect(m).toBeTruthy();
+
+    // Surfaces in listMembers with is_guest=true and the typed display name.
+    const { members } = listMembers(trip.id, owner.id) as any;
+    const guest = members.find((x: any) => x.id === member.id);
+    expect(guest.username).toBe('Anna');
+    expect(guest.is_guest).toBe(true);
+  });
+
+  it('TRIP-SVC-031: the same guest name is allowed, not suffixed (#1446)', () => {
+    const { user: owner } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    const a = createGuest(trip.id, 'Sam', owner.id);
+    const b = createGuest(trip.id, 'Sam', owner.id);
+    // both keep the plain display name; only the internal (uuid) username differs
+    expect(a.member.username).toBe('Sam');
+    expect(b.member.username).toBe('Sam');
+    expect(b.member.id).not.toBe(a.member.id);
+    const usernames = testDb.prepare('SELECT username FROM users WHERE id IN (?, ?)').all(a.member.id, b.member.id) as { username: string }[];
+    expect(usernames[0].username).not.toBe(usernames[1].username);
+  });
+
+  it('TRIP-SVC-032: renameGuest updates the display name (trip-scoped, guest-only)', () => {
+    const { user: owner } = createUser(testDb);
+    const { user: other } = createUser(testDb);
+    const otherTrip = createTrip(testDb, other.id);
+    const trip = createTrip(testDb, owner.id);
+    const { member } = createGuest(trip.id, 'Bob', owner.id);
+
+    expect(renameGuest(trip.id, member.id, 'Robert')).toBe(true);
+    expect((testDb.prepare('SELECT display_name FROM users WHERE id = ?').get(member.id) as any).display_name).toBe('Robert');
+
+    // A real user cannot be renamed through the guest path…
+    expect(renameGuest(trip.id, owner.id, 'Hacked')).toBe(false);
+    // …and a guest cannot be renamed from a different trip.
+    expect(renameGuest(otherTrip.id, member.id, 'Nope')).toBe(false);
+  });
+
+  it('TRIP-SVC-033: deleteGuest removes the user (cascading membership), guest-only + trip-scoped', () => {
+    const { user: owner } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    const { member } = createGuest(trip.id, 'Carol', owner.id);
+
+    // Real members are not deletable via the guest path.
+    expect(deleteGuest(trip.id, owner.id)).toBe(false);
+
+    expect(deleteGuest(trip.id, member.id)).toBe(true);
+    expect(testDb.prepare('SELECT id FROM users WHERE id = ?').get(member.id)).toBeUndefined();
+    expect(testDb.prepare('SELECT id FROM trip_members WHERE user_id = ?').get(member.id)).toBeUndefined();
+  });
+
+  it('TRIP-SVC-034: a guest is never invitable (addMember) nor a transfer target', () => {
+    const { user: owner } = createUser(testDb);
+    const trip = createTrip(testDb, owner.id);
+    const { member } = createGuest(trip.id, 'Dora', owner.id);
+
+    // The synthetic username/email must not resolve through the invite box.
+    expect(() => addMember(trip.id, 'Dora', owner.id, owner.id)).toThrow('User not found');
+    // Ownership can never be handed to a guest.
+    expect(() => transferOwnership(trip.id, member.id, owner.id)).toThrow('Cannot transfer ownership to a guest');
   });
 });

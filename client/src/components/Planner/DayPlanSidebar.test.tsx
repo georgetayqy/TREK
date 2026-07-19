@@ -1,6 +1,9 @@
 // FE-PLANNER-DAYPLAN-001 to FE-PLANNER-DAYPLAN-042
 import { render, screen, waitFor, fireEvent } from '../../../tests/helpers/render'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
+import { server } from '../../../tests/helpers/msw/server'
+import { clearExchangeRateCache } from '../../hooks/useExchangeRates'
 import { useAuthStore } from '../../store/authStore'
 import { useTripStore } from '../../store/tripStore'
 import { useSettingsStore } from '../../store/settingsStore'
@@ -48,6 +51,13 @@ vi.mock('../Map/RouteCalculator', () => ({
   calculateRoute: vi.fn().mockResolvedValue({ distanceText: '5 km', durationText: '1h', coordinates: [] }),
   generateGoogleMapsUrl: vi.fn().mockReturnValue('https://maps.google.com/...'),
   optimizeRoute: vi.fn().mockImplementation((places) => places),
+  // One leg per waypoint gap; the connector between two stops reads distanceText.
+  calculateRouteWithLegs: vi.fn().mockImplementation((waypoints) => Promise.resolve({
+    distanceText: '2 km', durationText: '10 min',
+    legs: Array.from({ length: Math.max(0, (waypoints?.length ?? 0) - 1) }, () => ({
+      distanceText: '2 km', durationText: '10 min', drivingText: '10 min', walkingText: '25 min',
+    })),
+  })),
 }))
 
 // PlaceAvatar needs IntersectionObserver
@@ -122,6 +132,10 @@ beforeEach(() => {
   resetAllStores()
   vi.clearAllMocks()
   sessionStorage.clear()
+  localStorage.clear()
+  // Cost totals fetch FX rates for their base currency; keep the suite hermetic.
+  clearExchangeRateCache()
+  server.use(http.get('https://api.frankfurter.dev/v2/rates', () => HttpResponse.json([])))
   // Reset mutable day-notes state
   mockDayNotesState.noteUi = {}
   mockDayNotesState.dayNotes = {}
@@ -290,41 +304,139 @@ describe('DayPlanSidebar', () => {
     expect(screen.getByText('Louvre Museum')).toBeInTheDocument()
   })
 
-  // ── Day title editing ───────────────────────────────────────────────────
+  // ── Transit search button (#1065 — replaced the rename pencil; renaming
+  //    moved next to the day name in the day detail panel) ─────────────────
 
-  it('FE-PLANNER-DAYPLAN-015: clicking edit button enters edit mode', async () => {
+  it('FE-PLANNER-DAYPLAN-015: transit button opens the route search for the day', async () => {
     const user = userEvent.setup()
-    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Original Title' })
-    render(<DayPlanSidebar {...makeDefaultProps({ days: [day] })} />)
-    await user.click(screen.getByLabelText('Edit'))
-    await waitFor(() => {
-      expect(screen.getByDisplayValue('Original Title')).toBeInTheDocument()
-    })
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const onPlanTransit = vi.fn()
+    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], onPlanTransit })} />)
+    await user.click(screen.getByLabelText('Public transit'))
+    expect(onPlanTransit).toHaveBeenCalledWith(10)
   })
 
-  it('FE-PLANNER-DAYPLAN-016: pressing Enter commits title', async () => {
-    const user = userEvent.setup()
-    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Original Title' })
-    const onUpdateDayTitle = vi.fn()
-    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], onUpdateDayTitle })} />)
-    // Enter edit mode
-    await user.click(screen.getByLabelText('Edit'))
-    const input = await screen.findByDisplayValue('Original Title')
-    await user.clear(input)
-    await user.type(input, 'New Title')
-    await user.keyboard('{Enter}')
-    expect(onUpdateDayTitle).toHaveBeenCalledWith(10, 'New Title')
+  it('FE-PLANNER-DAYPLAN-016: transit button is absent without the onPlanTransit prop', () => {
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    render(<DayPlanSidebar {...makeDefaultProps({ days: [day] })} />)
+    expect(screen.queryByLabelText('Public transit')).not.toBeInTheDocument()
   })
 
-  it('FE-PLANNER-DAYPLAN-017: pressing Escape cancels edit', async () => {
-    const user = userEvent.setup()
+  it('FE-PLANNER-DAYPLAN-017: the day header no longer has a rename pencil (#1065)', () => {
     const day = buildDay({ id: 10, date: '2025-06-01', title: 'Original Title' })
-    render(<DayPlanSidebar {...makeDefaultProps({ days: [day] })} />)
-    await user.click(screen.getByLabelText('Edit'))
-    const input = await screen.findByDisplayValue('Original Title')
-    await user.keyboard('{Escape}')
-    expect(screen.queryByDisplayValue('Original Title')).not.toBeInTheDocument()
-    expect(screen.getByText('Original Title')).toBeInTheDocument()
+    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], onPlanTransit: vi.fn() })} />)
+    expect(screen.queryByLabelText('Edit')).not.toBeInTheDocument()
+  })
+
+  it('FE-PLANNER-DAYPLAN-104: a transit journey renders line chips and opens its itinerary view, not the edit form (#1065)', async () => {
+    const user = userEvent.setup()
+    const onEditTransport = vi.fn()
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const res = {
+      ...buildReservation({
+        id: 300, type: 'transit', title: 'Fernsehturm → Zoo',
+        reservation_time: '2025-06-01T08:30:00', day_id: 10,
+      }),
+      metadata: {
+        transit: {
+          provider: 'transitous', duration: 1800, transfers: 1, walk_seconds: 240,
+          legs: [
+            { mode: 'WALK', duration: 240, from: { name: 'Start' }, to: { name: 'Alexanderplatz' } },
+            { mode: 'SUBWAY', line: 'U2', line_color: '#FF3300', line_text_color: '#FFFFFF', headsign: 'Ruhleben', duration: 1440, stops: 6, from: { name: 'Alexanderplatz', time: '08:36' }, to: { name: 'Zoo', time: '09:00' } },
+          ],
+        },
+      },
+    }
+    const onOpenTransit = vi.fn()
+    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], reservations: [res as any], onEditTransport, onOpenTransit })} />)
+    // Line chip + transfer summary render inline in the timeline row; the
+    // title uses an arrow icon, so its parts are separate text nodes.
+    expect(screen.getByText('U2')).toBeInTheDocument()
+    // Transfer counts stay out of the compact row — the chips say it all.
+    expect(screen.queryByText(/1 transfers/)).not.toBeInTheDocument()
+    // Clicking the row opens the journey view — not the edit form.
+    await user.click(screen.getByText('Fernsehturm'))
+    expect(onEditTransport).not.toHaveBeenCalled()
+    expect(onOpenTransit).toHaveBeenCalledWith(expect.objectContaining({ id: 300 }))
+  })
+
+  it('FE-PLANNER-DAYPLAN-105: the transit row folds its itinerary out inline (#1065)', async () => {
+    const user = userEvent.setup()
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const res = {
+      ...buildReservation({ id: 301, type: 'transit', title: 'A → B', reservation_time: '2025-06-01T08:30:00', day_id: 10 }),
+      metadata: {
+        transit: {
+          provider: 'transitous', duration: 1800, transfers: 1, walk_seconds: 240,
+          legs: [
+            { mode: 'WALK', duration: 240, from: { name: 'Start' }, to: { name: 'Alexanderplatz' } },
+            { mode: 'SUBWAY', line: 'U2', line_color: '#FF3300', headsign: 'Ruhleben', duration: 1440, stops: 6, from: { name: 'Alexanderplatz', time: '08:36', track: '2' }, to: { name: 'Zoo', time: '09:00' } },
+          ],
+        },
+      },
+      endpoints: [
+        { role: 'from', sequence: 0, name: 'A', code: null, lat: 1, lng: 2, timezone: null, local_date: null, local_time: null },
+        { role: 'to', sequence: 1, name: 'B', code: null, lat: 3, lng: 4, timezone: null, local_date: null, local_time: null },
+      ],
+    }
+    const onToggleConnection = vi.fn()
+    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], reservations: [res as any], onOpenTransit: vi.fn(), onToggleConnection, visibleConnectionIds: [] })} />)
+    // No map-connections toggle on transit rows — the expander replaces it.
+    expect(screen.queryByTitle(/connections/i)).not.toBeInTheDocument()
+    // Collapsed: no stop names beyond the chips.
+    expect(screen.queryByText('Alexanderplatz')).not.toBeInTheDocument()
+    await user.click(screen.getByLabelText('Expand'))
+    expect(await screen.findByText('Alexanderplatz')).toBeInTheDocument()
+    expect(screen.getByText(/Platform 2/)).toBeInTheDocument()
+    await user.click(screen.getByLabelText('Collapse'))
+    expect(screen.queryByText('Alexanderplatz')).not.toBeInTheDocument()
+  })
+
+  it('FE-PLANNER-DAYPLAN-106: the toolbar button shows "show all" and calls onToggleAllConnections when not all routes are shown', async () => {
+    const user = userEvent.setup()
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const res1 = {
+      ...buildReservation({ id: 401, type: 'flight' }),
+      endpoints: [
+        { role: 'from', sequence: 0, name: 'A', code: null, lat: 1, lng: 2, timezone: null, local_time: null, local_date: null },
+        { role: 'to', sequence: 1, name: 'B', code: null, lat: 3, lng: 4, timezone: null, local_time: null, local_date: null },
+      ],
+    }
+    const onToggleAllConnections = vi.fn()
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days: [day], reservations: [res1 as any],
+      visibleConnectionIds: [], onToggleConnection: vi.fn(),
+      allConnectionsShown: false, onToggleAllConnections,
+    })} />)
+    await user.click(screen.getByLabelText('Show all booking routes'))
+    expect(onToggleAllConnections).toHaveBeenCalledTimes(1)
+  })
+
+  it('FE-PLANNER-DAYPLAN-107: the toolbar button reads "hide" once allConnectionsShown is true, and calls onToggleAllConnections on click', async () => {
+    const user = userEvent.setup()
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const res1 = {
+      ...buildReservation({ id: 401, type: 'flight' }),
+      endpoints: [
+        { role: 'from', sequence: 0, name: 'A', code: null, lat: 1, lng: 2, timezone: null, local_time: null, local_date: null },
+        { role: 'to', sequence: 1, name: 'B', code: null, lat: 3, lng: 4, timezone: null, local_time: null, local_date: null },
+      ],
+    }
+    const onToggleAllConnections = vi.fn()
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days: [day], reservations: [res1 as any],
+      visibleConnectionIds: [401], onToggleConnection: vi.fn(),
+      allConnectionsShown: true, onToggleAllConnections,
+    })} />)
+    await user.click(screen.getByLabelText('Hide all booking routes'))
+    expect(onToggleAllConnections).toHaveBeenCalledTimes(1)
+  })
+
+  it('FE-PLANNER-DAYPLAN-108: the toolbar button is absent when the trip has no routable reservation', () => {
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], reservations: [], onToggleAllConnections: vi.fn() })} />)
+    expect(screen.queryByLabelText('Show all booking routes')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Hide all booking routes')).not.toBeInTheDocument()
   })
 
   // ── Day info button ─────────────────────────────────────────────────────
@@ -543,6 +655,50 @@ describe('DayPlanSidebar', () => {
     expect(screen.getByText('Total Cost')).toBeInTheDocument()
   })
 
+  it('FE-PLANNER-DAYPLAN-037b: converts foreign-currency prices into the display currency (#1561)', async () => {
+    server.use(http.get('https://api.frankfurter.dev/v2/rates', ({ request }) => {
+      expect(new URL(request.url).searchParams.get('base')).toBe('USD')
+      return HttpResponse.json([{ quote: 'NOK', rate: 10 }]) // 10 NOK per 1 USD
+    }))
+    seedStore(useSettingsStore, { settings: { time_format: '24h', default_currency: 'USD' } } as any)
+    const placeUsd = buildPlace({ id: 1, name: 'Hotel', price: 25, currency: 'USD' } as any)
+    const placeNok = buildPlace({ id: 2, name: 'Museum', price: 250, currency: null } as any) // implicit trip currency
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days: [day],
+      places: [placeUsd, placeNok],
+      assignments: { '10': [
+        buildAssignment({ id: 1, day_id: 10, order_index: 0, place: placeUsd }),
+        buildAssignment({ id: 2, day_id: 10, order_index: 1, place: placeNok }),
+      ] },
+      trip: buildTrip({ id: 1, currency: 'NOK' }),
+    })} />)
+    // $25 + 250 NOK / 10 = $50, marked as approximate; footer and day header agree.
+    await waitFor(() => expect(screen.getByText('≈ $50.00')).toBeInTheDocument())
+    expect(screen.getByText('≈ $50')).toBeInTheDocument()
+  })
+
+  it('FE-PLANNER-DAYPLAN-037c: falls back to a per-currency breakdown when rates are unavailable (#1561)', async () => {
+    server.use(http.get('https://api.frankfurter.dev/v2/rates', () => HttpResponse.error()))
+    const placeUsd = buildPlace({ id: 1, name: 'Hotel', price: 2730.27, currency: 'USD' } as any)
+    const placeNok = buildPlace({ id: 2, name: 'Museum', price: 2500, currency: 'NOK' } as any)
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days: [day],
+      places: [placeUsd, placeNok],
+      assignments: { '10': [
+        buildAssignment({ id: 1, day_id: 10, order_index: 0, place: placeUsd }),
+        buildAssignment({ id: 2, day_id: 10, order_index: 1, place: placeNok }),
+      ] },
+      trip: buildTrip({ id: 1, currency: 'NOK' }),
+    })} />)
+    // The USD amount must never be folded into a NOK-labeled number (the #1561 bug):
+    // footer keeps each currency separate, base (NOK) first.
+    await waitFor(() => expect(screen.getByText(/kr.*\+.*\$2,730\.27|2\s?500,00\s?kr.*\+/)).toBeInTheDocument())
+    expect(screen.queryByText(/≈/)).toBeNull()
+    expect(screen.queryByText(/5\s?230/)).toBeNull()
+  })
+
   // ── Route tools (Optimize / Google Maps) ────────────────────────────────
 
   it('FE-PLANNER-DAYPLAN-038: optimize button calls onReorder with 3 geo-places', async () => {
@@ -635,20 +791,7 @@ describe('DayPlanSidebar', () => {
     await waitFor(() => expect(onReorder).toHaveBeenCalledWith(10, expect.any(Array)))
   })
 
-  // ── Title blur commits ───────────────────────────────────────────────────
-
-  it('FE-PLANNER-DAYPLAN-042: blurring title input commits the edit', async () => {
-    const user = userEvent.setup()
-    const onUpdateDayTitle = vi.fn()
-    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Old Title' })
-    render(<DayPlanSidebar {...makeDefaultProps({ days: [day], onUpdateDayTitle })} />)
-    await user.click(screen.getByLabelText('Edit'))
-    const input = await screen.findByDisplayValue('Old Title')
-    await user.clear(input)
-    await user.type(input, 'New Title')
-    fireEvent.blur(input)
-    await waitFor(() => expect(onUpdateDayTitle).toHaveBeenCalledWith(10, 'New Title'))
-  })
+  // Day-title renaming moved to DayDetailPanel (#1065) — covered there.
 
   // ── ICS export button ────────────────────────────────────────────────────
 
@@ -909,7 +1052,7 @@ describe('DayPlanSidebar', () => {
 
   // ── ICS export click ─────────────────────────────────────────────────
 
-  it('FE-PLANNER-DAYPLAN-058: clicking ICS button calls fetch for .ics export', async () => {
+  it('FE-PLANNER-DAYPLAN-058: ICS menu "Download ICS" calls fetch for .ics export', async () => {
     const user = userEvent.setup()
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
@@ -919,7 +1062,10 @@ describe('DayPlanSidebar', () => {
     const createObjURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock')
     const revokeObjURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     render(<DayPlanSidebar {...makeDefaultProps()} />)
-    await user.click(screen.getByText('ICS').closest('button')!)
+    // The ICS button now opens a hover menu (Download / Subscribe) instead of
+    // downloading on direct click.
+    await user.hover(screen.getByText('ICS').closest('button')!)
+    await user.click(await screen.findByText('Download ICS'))
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/api/trips/1/export.ics', expect.any(Object)))
     fetchSpy.mockRestore()
     createObjURL.mockRestore()
@@ -1550,14 +1696,14 @@ describe('DayPlanSidebar', () => {
 
   // ── ICS hover tooltip ─────────────────────────────────────────────────────
 
-  it('FE-PLANNER-DAYPLAN-090: hovering ICS button shows tooltip', async () => {
+  it('FE-PLANNER-DAYPLAN-090: hovering ICS button shows the download/subscribe menu', async () => {
     const user = userEvent.setup()
     render(<DayPlanSidebar {...makeDefaultProps()} />)
-    const icsBtn = screen.getByRole('button', { name: /ICS/i })
+    const icsBtn = screen.getByText('ICS').closest('button')!
     await user.hover(icsBtn)
     await waitFor(() => {
-      const tooltips = document.querySelectorAll('[style*="pointer-events: none"]')
-      expect(tooltips.length).toBeGreaterThan(0)
+      expect(screen.getByText('Download ICS')).toBeInTheDocument()
+      expect(screen.getByText('Subscribe to calendar')).toBeInTheDocument()
     })
   })
 
@@ -1780,5 +1926,136 @@ describe('DayPlanSidebar', () => {
     const optimizeBtn = screen.getByRole('button', { name: /optimize/i })
     await user.click(optimizeBtn)
     await waitFor(() => expect(onReorder).toHaveBeenCalledWith(10, expect.any(Array)))
+  })
+
+  it('FE-PLANNER-DAYPLAN-101: mobile Route toggle shows inline leg distances without selecting the day (#1374)', async () => {
+    const user = userEvent.setup()
+    const onSelectDay = vi.fn()
+    const onToggleRoute = vi.fn()
+    const places = [
+      buildPlace({ id: 1, name: 'A', lat: 48.85, lng: 2.35 }),
+      buildPlace({ id: 2, name: 'B', lat: 48.86, lng: 2.36 }),
+    ]
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const assigns = {
+      '10': [
+        buildAssignment({ id: 1, day_id: 10, order_index: 0, place: places[0] }),
+        buildAssignment({ id: 2, day_id: 10, order_index: 1, place: places[1] }),
+      ],
+    }
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days: [day], places, assignments: assigns, selectedDayId: null,
+      showRouteToolsWhenExpanded: true, onSelectDay, onToggleRoute,
+    })} />)
+    // Distances are hidden until the user asks for them.
+    expect(screen.queryByText('2 km')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Route' }))
+    // The leg distance appears inline…
+    expect(await screen.findByText('2 km')).toBeInTheDocument()
+    // …and the day was never selected, so on mobile the sheet stays open.
+    expect(onSelectDay).not.toHaveBeenCalled()
+    expect(onToggleRoute).not.toHaveBeenCalled()
+  })
+
+  it('FE-PLANNER-DAYPLAN-102: mobile Route toggle hides the distances again on second tap (#1374)', async () => {
+    const user = userEvent.setup()
+    const places = [
+      buildPlace({ id: 1, name: 'A', lat: 48.85, lng: 2.35 }),
+      buildPlace({ id: 2, name: 'B', lat: 48.86, lng: 2.36 }),
+    ]
+    const day = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const assigns = {
+      '10': [
+        buildAssignment({ id: 1, day_id: 10, order_index: 0, place: places[0] }),
+        buildAssignment({ id: 2, day_id: 10, order_index: 1, place: places[1] }),
+      ],
+    }
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days: [day], places, assignments: assigns, selectedDayId: null, showRouteToolsWhenExpanded: true,
+    })} />)
+    const routeBtn = screen.getByRole('button', { name: 'Route' })
+    await user.click(routeBtn)
+    expect(await screen.findByText('2 km')).toBeInTheDocument()
+    await user.click(routeBtn)
+    await waitFor(() => expect(screen.queryByText('2 km')).not.toBeInTheDocument())
+  })
+
+  it('FE-PLANNER-DAYPLAN-103: two route-toggled days keep separate leg distances despite id overlap (#1374)', async () => {
+    const user = userEvent.setup()
+    const { calculateRouteWithLegs } = await import('../Map/RouteCalculator')
+    // Distance derived from the first waypoint's latitude, so each day yields a
+    // distinct text. With a flat (non-per-day) leg map, the shared first-place id (5)
+    // would let the last day overwrite the other — this guards that regression.
+    vi.mocked(calculateRouteWithLegs as any).mockImplementation((wp: any) => {
+      const lat = wp?.[0]?.lat ?? 0
+      const txt = `${Math.round(lat * 100)} m`
+      return Promise.resolve({
+        distanceText: txt, durationText: '1 min',
+        legs: Array.from({ length: Math.max(0, (wp?.length ?? 0) - 1) }, () => ({
+          distanceText: txt, durationText: '1 min', drivingText: '1 min', walkingText: '1 min',
+        })),
+      })
+    })
+    const dayA = buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' })
+    const dayB = buildDay({ id: 11, date: '2025-06-02', title: 'Day 2' })
+    // Both days start with an assignment whose id is 5 (the leg is keyed on the first
+    // place's id) — the collision the per-day nesting must keep apart.
+    const assigns = {
+      '10': [
+        buildAssignment({ id: 5, day_id: 10, order_index: 0, place: buildPlace({ id: 1, name: 'A1', lat: 10.0, lng: 2.0 }) }),
+        buildAssignment({ id: 6, day_id: 10, order_index: 1, place: buildPlace({ id: 2, name: 'A2', lat: 10.01, lng: 2.01 }) }),
+      ],
+      '11': [
+        buildAssignment({ id: 5, day_id: 11, order_index: 0, place: buildPlace({ id: 3, name: 'B1', lat: 20.0, lng: 3.0 }) }),
+        buildAssignment({ id: 7, day_id: 11, order_index: 1, place: buildPlace({ id: 4, name: 'B2', lat: 20.01, lng: 3.01 }) }),
+      ],
+    }
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days: [dayA, dayB],
+      places: [], assignments: assigns, selectedDayId: null, showRouteToolsWhenExpanded: true,
+    })} />)
+    const routeBtns = screen.getAllByRole('button', { name: 'Route' })
+    await user.click(routeBtns[0]) // Day 1
+    await user.click(routeBtns[1]) // Day 2
+    // Each day shows its own distance, not the other's — proves per-day isolation.
+    expect(await screen.findByText('1000 m')).toBeInTheDocument()
+    expect(await screen.findByText('2000 m')).toBeInTheDocument()
+  })
+
+  it('FE-PLANNER-DAYPLAN-106: leg distance survives a car rental on its middle days (#1504)', async () => {
+    const user = userEvent.setup()
+    const { calculateRouteWithLegs } = await import('../Map/RouteCalculator')
+    vi.mocked(calculateRouteWithLegs as any).mockImplementation((wp: any) => Promise.resolve({
+      distanceText: '2 km', durationText: '10 min',
+      legs: Array.from({ length: Math.max(0, (wp?.length ?? 0) - 1) }, () => ({
+        distanceText: '2 km', durationText: '10 min', drivingText: '10 min', walkingText: '25 min',
+      })),
+    }))
+    // A rental spanning days 10–12: on day 11 (middle) its row is not rendered in
+    // the timeline, so the through-leg between the places around it must stay keyed
+    // to the place — re-keying it to the hidden car row would drop the distance.
+    const car = {
+      ...buildReservation({ id: 400, type: 'car', title: 'Rental car', day_id: 10 }),
+      end_day_id: 12,
+      day_positions: { 11: 0.5 },
+    }
+    const days = [
+      buildDay({ id: 10, date: '2025-06-01', title: 'Day 1' }),
+      buildDay({ id: 11, date: '2025-06-02', title: 'Day 2' }),
+      buildDay({ id: 12, date: '2025-06-03', title: 'Day 3' }),
+    ]
+    const assigns = {
+      '11': [
+        buildAssignment({ id: 1, day_id: 11, order_index: 0, place: buildPlace({ id: 1, name: 'A', lat: 48.85, lng: 2.35 }) }),
+        buildAssignment({ id: 2, day_id: 11, order_index: 1, place: buildPlace({ id: 2, name: 'B', lat: 48.86, lng: 2.36 }) }),
+      ],
+    }
+    render(<DayPlanSidebar {...makeDefaultProps({
+      days, places: [], assignments: assigns, reservations: [car as any],
+      selectedDayId: null, showRouteToolsWhenExpanded: true,
+    })} />)
+    // Only day 2 has places, so it renders the sole Route toggle.
+    await user.click(screen.getByRole('button', { name: 'Route' }))
+    expect(await screen.findByText('2 km')).toBeInTheDocument()
   })
 })

@@ -1,4 +1,4 @@
-import type { AssignmentsMap } from '../types'
+import type { AssignmentsMap, Day } from '../types'
 
 // Collapses verbose Nominatim display_name strings (e.g. "Place, 1, Road, Neighbourhood,
 // City, County, State, Country, Postcode, Country") into "Place, Postcode, Country".
@@ -33,10 +33,20 @@ export function formatLocationName(raw: string | null | undefined): string {
   return result.join(', ')
 }
 
-const ZERO_DECIMAL_CURRENCIES = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'HUF'])
+// Currencies whose smallest unit isn't 1/100. Most currencies use 2 decimals;
+// these two sets cover the exceptions in the supported set (see CURRENCIES).
+// HUF is kept zero-decimal by app convention even though ISO lists 2.
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  'JPY', 'KRW', 'VND', 'CLP', 'ISK', 'HUF',
+  'BIF', 'DJF', 'GNF', 'KMF', 'PYG', 'RWF', 'UGX', 'VUV', 'XAF', 'XOF', 'XPF',
+])
+const THREE_DECIMAL_CURRENCIES = new Set(['BHD', 'IQD', 'JOD', 'KWD', 'LYD', 'OMR', 'TND'])
 
 export function currencyDecimals(currency: string): number {
-  return ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) ? 0 : 2
+  const cur = currency.toUpperCase()
+  if (ZERO_DECIMAL_CURRENCIES.has(cur)) return 0
+  if (THREE_DECIMAL_CURRENCIES.has(cur)) return 3
+  return 2
 }
 
 // Each currency formats in its own home convention (symbol position, grouping and
@@ -52,9 +62,9 @@ const CURRENCY_LOCALE: Record<string, string> = {
   PHP: 'en-PH', SGD: 'en-SG', KRW: 'ko-KR', CNY: 'zh-CN', HKD: 'en-HK',
   TWD: 'zh-TW', ZAR: 'en-ZA', AED: 'en-AE', SAR: 'en-SA', ILS: 'he-IL',
   EGP: 'en-EG', MAD: 'fr-MA', HUF: 'hu-HU', RON: 'ro-RO', BGN: 'bg-BG',
-  HRK: 'hr-HR', ISK: 'is-IS', RUB: 'ru-RU', UAH: 'uk-UA', BDT: 'en-BD',
-  LKR: 'en-LK', VND: 'vi-VN', CLP: 'es-CL', COP: 'es-CO', PEN: 'es-PE',
-  ARS: 'es-AR',
+  HRK: 'hr-HR', ISK: 'is-IS', RUB: 'ru-RU', UAH: 'uk-UA', KGS: 'ru-KG',
+  BDT: 'en-BD', LKR: 'en-LK', VND: 'vi-VN', CLP: 'es-CL', COP: 'es-CO',
+  PEN: 'es-PE', ARS: 'es-AR',
 }
 
 export function currencyLocale(currency: string): string {
@@ -93,11 +103,15 @@ export function formatMoney(
 
 export function formatDate(dateStr: string | null | undefined, locale: string, timeZone?: string): string | null {
   if (!dateStr) return null
+  const date = new Date(dateStr + 'T00:00:00Z')
   const opts: Intl.DateTimeFormatOptions = {
     weekday: 'short', day: 'numeric', month: 'short',
     timeZone: timeZone || 'UTC',
   }
-  return new Date(dateStr + 'T00:00:00Z').toLocaleDateString(locale, opts)
+  // Show the year only when it isn't the current year, so this year's dates stay
+  // compact while older/future ones are unambiguous.
+  if (date.getUTCFullYear() !== new Date().getUTCFullYear()) opts.year = 'numeric'
+  return date.toLocaleDateString(locale, opts)
 }
 
 export function formatTime(timeStr: string | null | undefined, locale: string, timeFormat: string): string {
@@ -129,8 +143,87 @@ export function splitReservationDateTime(value?: string | null): { date: string 
   return { date: null, time: null }
 }
 
-export function dayTotalCost(dayId: number, assignments: AssignmentsMap, currency: string): string | null {
+/**
+ * Resolve a date (YYYY-MM-DD or an ISO timestamp) to a trip day id: exact match, else the
+ * nearest day so an out-of-range booking still lands on one. Returns '' when there is no
+ * usable date or the trip has no days — callers read that as "no day selected".
+ */
+export function resolveDayId(days: Day[], value: string | null | undefined): Day['id'] | '' {
+  const date = value ? String(value).slice(0, 10) : ''
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || days.length === 0) return ''
+  const exact = days.find(d => d.date === date)
+  if (exact) return exact.id
+  const target = new Date(date).getTime()
+  let best: Day['id'] | '' = ''
+  let bestDiff = Infinity
+  for (const d of days) {
+    if (!d.date) continue
+    const diff = Math.abs(new Date(d.date).getTime() - target)
+    if (diff < bestDiff) { bestDiff = diff; best = d.id }
+  }
+  return best
+}
+
+export type MoneyEntry = { amount: number; currency: string }
+
+/**
+ * Formats a sum of amounts that may span several currencies. Callers must resolve
+ * each entry's currency beforehand (`place.currency || trip.currency`) — a null
+ * place currency means the TRIP currency, which is not necessarily `base`.
+ *
+ * With usable rates (frankfurter convention: rates[X] = units of X per 1 base),
+ * everything is converted into `base` and prefixed with "≈" when a conversion
+ * actually happened. When any needed rate is missing, falls back to an honest
+ * per-currency breakdown ("2 500 kr + $2,730.27") — never a raw foreign amount
+ * labeled with the base currency.
+ */
+export function formatMoneySum(
+  entries: MoneyEntry[],
+  base: string,
+  locale: string,
+  rates?: Record<string, number> | null,
+  opts?: { decimals?: number },
+): string | null {
+  const baseCur = (base || 'EUR').toUpperCase()
+  const groups = new Map<string, number>()
+  for (const e of entries) {
+    if (!Number.isFinite(e.amount) || e.amount <= 0) continue
+    const cur = (e.currency || baseCur).toUpperCase()
+    groups.set(cur, (groups.get(cur) || 0) + e.amount)
+  }
+  if (groups.size === 0) return null
+
+  const foreign = [...groups.keys()].filter(c => c !== baseCur)
+  if (foreign.length === 0) return formatMoney(groups.get(baseCur)!, baseCur, locale, opts)
+
+  if (foreign.every(c => (rates?.[c] ?? 0) > 0)) {
+    const total = [...groups.entries()].reduce(
+      (s, [cur, amount]) => s + (cur === baseCur ? amount : amount / rates![cur]),
+      0,
+    )
+    return `≈ ${formatMoney(total, baseCur, locale, opts)}`
+  }
+
+  // Breakdown: base first, then the rest in stable code order.
+  const parts = [
+    ...(groups.has(baseCur) ? [baseCur] : []),
+    ...foreign.sort(),
+  ]
+  return parts.map(cur => formatMoney(groups.get(cur)!, cur, locale, opts)).join(' + ')
+}
+
+export function dayTotalCost(
+  dayId: number,
+  assignments: AssignmentsMap,
+  base: string,
+  tripCurrency: string,
+  locale: string,
+  rates?: Record<string, number> | null,
+): string | null {
   const da = assignments[String(dayId)] || []
-  const total = da.reduce((s, a) => s + (parseFloat(String(a.place?.price ?? '')) || 0), 0)
-  return total > 0 ? `${total.toFixed(0)} ${currency}` : null
+  const entries = da.map(a => ({
+    amount: parseFloat(String(a.place?.price ?? '')) || 0,
+    currency: a.place?.currency || tripCurrency,
+  }))
+  return formatMoneySum(entries, base, locale, rates, { decimals: 0 })
 }

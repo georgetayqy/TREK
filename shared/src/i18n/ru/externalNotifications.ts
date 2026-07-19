@@ -28,6 +28,10 @@ const ru: NotificationLocale = {
       title: 'Приглашение Vacay Fusion',
       body: `${p.actor} приглашает вас объединить планы отпуска. Откройте TREK для подтверждения.`,
     }),
+    collection_invite: (p) => ({
+      title: 'Приглашение в коллекцию',
+      body: `${p.actor} приглашает вас поделиться коллекцией. Откройте TREK для подтверждения.`,
+    }),
     photos_shared: (p) => ({
       title: `${p.count} фото`,
       body: `${p.actor} поделился ${p.count} фото в "${p.trip}".`,
@@ -48,6 +52,7 @@ const ru: NotificationLocale = {
       title: 'Сессия Synology сброшена',
       body: 'Ваш аккаунт или URL Synology изменился. Вы вышли из Synology Photos.',
     }),
+    plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
   },
   passwordReset: {
     subject: 'Сброс пароля',

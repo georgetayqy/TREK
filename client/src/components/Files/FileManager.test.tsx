@@ -15,6 +15,24 @@ vi.mock('../../api/authUrl', () => ({
   getAuthUrl: vi.fn().mockResolvedValue('http://localhost/signed-url'),
 }));
 
+// Mock the blob download/open helpers so we can assert wallet passes are
+// downloaded (#1447) rather than opened in the in-app PDF preview.
+vi.mock('../../utils/fileDownload', () => ({
+  openFile: vi.fn().mockResolvedValue(undefined),
+  downloadFile: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { openFile as openFileInTab } from '../../utils/fileDownload';
+
+// Markdown pipeline mocked to render its children verbatim (the unified/ESM
+// pipeline is heavy in jsdom) — we only assert the markdown text reaches the modal.
+vi.mock('react-markdown', () => ({
+  default: ({ children }: { children: string }) => <span data-testid="md">{children}</span>,
+}));
+vi.mock('remark-gfm', () => ({ default: () => ({}) }));
+vi.mock('remark-breaks', () => ({ default: () => ({}) }));
+vi.mock('rehype-sanitize', () => ({ default: () => ({}) }));
+
 // Mock filesApi
 vi.mock('../../api/client', async (importOriginal) => {
   const original = (await importOriginal()) as any;
@@ -287,6 +305,36 @@ describe('FileManager', () => {
       const headers = screen.getAllByText('report.pdf');
       expect(headers.length).toBeGreaterThanOrEqual(2); // in list + in modal header
     });
+  });
+
+  it('FE-COMP-FILEMANAGER-034: markdown file click opens an inline rendered preview (#1345)', async () => {
+    server.use(http.get('http://localhost/signed-url', () => HttpResponse.text('# Hello heading\n\nworld body')));
+    const files = [buildFile({ id: 1, mime_type: 'text/markdown', original_name: 'notes.md' })];
+    render(<FileManager {...defaultProps} files={files} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByText('notes.md'));
+
+    await waitFor(() => {
+      const md = screen.getByTestId('md');
+      expect(md).toBeInTheDocument();
+      expect(md.textContent).toContain('Hello heading');
+    });
+  });
+
+  it('FE-COMP-FILEMANAGER-035: pkpass click downloads via blob helper, not the PDF preview (#1447)', async () => {
+    const files = [buildFile({ id: 1, mime_type: 'application/octet-stream', original_name: 'boarding.pkpass', url: '/uploads/trips/1/boarding.pkpass' })];
+    render(<FileManager {...defaultProps} files={files} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByText('boarding.pkpass'));
+
+    // Blob helper is called with the file url + name — the OS hands it to Wallet
+    await waitFor(() => {
+      expect(openFileInTab).toHaveBeenCalledWith('/uploads/trips/1/boarding.pkpass', 'boarding.pkpass');
+    });
+    // No PDF preview modal — the filename appears only once (in the list row)
+    expect(screen.getAllByText('boarding.pkpass').length).toBe(1);
   });
 
   it('FE-COMP-FILEMANAGER-015: file with uploader name shows avatar chip initials', () => {

@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': 'Вам ничего не должны',
   'costs.yourShare': 'Ваша доля',
   'costs.youPaid': 'Вы заплатили',
+  'costs.outstanding': 'Неурегулированная сумма',
+  'costs.outstandingSub': 'Расходы без плательщика',
+  'costs.outstandingItems': 'расходов без плательщика',
   'costs.expenses': 'Расходы',
   'costs.entries': '{count} записей',
   'costs.searchPlaceholder': 'Поиск расходов…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} в {to}',
   'costs.category': 'Категория',
   'costs.whoPaid': 'Кто заплатил?',
+  'costs.multiplePayers': 'Платили несколько человек',
+  'costs.singlePayer': 'Платил один человек',
+  'costs.payersUnbalanced': 'Сумма платежей должна составлять {amount}',
   'costs.splitBetween': 'Поделить поровну между',
   'costs.pickSomeone': 'Выберите хотя бы одного человека для разделения.',
   'costs.splitSummary': 'Разделено на {count} · по {amount}',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': 'Только в сумме — ещё не урегулировано',
   'costs.tapToInclude': 'Нажмите, чтобы добавить',
   'costs.amount': 'Сумма',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'Все категории',
+  'costs.filter.allDays': 'Все дни',
+  'costs.expensesCount': 'Расходов: {count}',
 };
-
 export default budget;

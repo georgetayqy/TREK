@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': 'لا شيء مستحق لك',
   'costs.yourShare': 'حصتك',
   'costs.youPaid': 'أنت دفعت',
+  'costs.outstanding': 'مبلغ غير مسدَّد',
+  'costs.outstandingSub': 'مصاريف بلا دافع بعد',
+  'costs.outstandingItems': 'مصاريف بحاجة إلى دافع',
   'costs.expenses': 'المصروفات',
   'costs.entries': '{count} إدخالات',
   'costs.searchPlaceholder': 'ابحث في المصروفات…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} بـ {to}',
   'costs.category': 'الفئة',
   'costs.whoPaid': 'من دفع؟',
+  'costs.multiplePayers': 'دفع عدة أشخاص',
+  'costs.singlePayer': 'دفع شخص واحد',
+  'costs.payersUnbalanced': 'يجب أن يكون مجموع مبالغ الدافعين {amount}',
   'costs.splitBetween': 'تقسيم بالتساوي بين',
   'costs.pickSomeone': 'اختر شخصًا واحدًا على الأقل للتقسيم معه.',
   'costs.splitSummary': 'تقسيم على {count} · {amount} لكل واحد',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': 'في الإجمالي فقط — لم تتم التسوية بعد',
   'costs.tapToInclude': 'اضغط للتضمين',
   'costs.amount': 'المبلغ',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'كل الفئات',
+  'costs.filter.allDays': 'كل الأيام',
+  'costs.expensesCount': '{count} مصروف',
 };
-
 export default budget;

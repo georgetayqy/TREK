@@ -15,6 +15,8 @@ interface MemoPlaceRowProps {
   selectedDayId: number | null
   canEditPlaces: boolean
   isMobile: boolean
+  /** Primary pointer is coarse — HTML5 drag would swallow the scroll gesture (#1432). */
+  isTouch: boolean
   t: (key: string, params?: Record<string, any>) => string
   onPlaceClick: (id: number | null) => void
   onContextMenu: (e: React.MouseEvent, place: Place) => void
@@ -26,18 +28,20 @@ interface MemoPlaceRowProps {
 
 export const MemoPlaceRow = React.memo(function MemoPlaceRow({
   place, category: cat, isSelected, isPlanned, inDay, isChecked,
-  selectMode, selectedDayId, canEditPlaces, isMobile, t,
+  selectMode, selectedDayId, canEditPlaces, isMobile, isTouch, t,
   onPlaceClick, onContextMenu, onAssignToDay, toggleSelected, setDayPickerPlace, registerPlaceRow,
 }: MemoPlaceRowProps) {
   const hasGeometry = Boolean(place.route_geometry)
+  const dragDisabled = isMobile || isTouch
   return (
     <div
       key={place.id}
       ref={element => registerPlaceRow(place.id, element)}
       aria-selected={isSelected}
       data-place-id={place.id}
-      draggable={!selectMode}
+      draggable={!selectMode && !dragDisabled}
       onDragStart={e => {
+        if (dragDisabled) { e.preventDefault(); return }
         e.dataTransfer.setData('placeId', String(place.id))
         e.dataTransfer.effectAllowed = 'copy'
         window.__dragData = { placeId: String(place.id) }
@@ -55,7 +59,7 @@ export const MemoPlaceRow = React.memo(function MemoPlaceRow({
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '9px 14px 9px 16px',
-        cursor: selectMode ? 'pointer' : 'grab',
+        cursor: selectMode || dragDisabled ? 'pointer' : 'grab',
         background: isChecked ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : isSelected ? 'var(--border-faint)' : 'transparent',
         borderBottom: '1px solid var(--border-faint)',
         transition: 'background 0.1s',
@@ -82,13 +86,13 @@ export const MemoPlaceRow = React.memo(function MemoPlaceRow({
             const CatIcon = getCategoryIcon(cat.icon)
             return <span title={cat.name} style={{ display: 'inline-flex', flexShrink: 0 }}><CatIcon size={11} strokeWidth={2} color={cat.color || '#6366f1'} /></span>
           })()}
-          <span className="text-content" style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.2 }}>
+          <span className="text-content" style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.2 }}>
             {place.name}
           </span>
         </div>
         {(place.description || place.address || cat?.name) && (
           <div style={{ marginTop: 2 }}>
-            <span className="text-content-faint" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', lineHeight: 1.2 }}>
+            <span className="text-content-faint" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', lineHeight: 1.2 }}>
               {place.description || place.address || cat?.name}
             </span>
           </div>

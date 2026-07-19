@@ -17,7 +17,10 @@ const mockDb = vi.hoisted(() => {
 
 vi.mock('../../../src/db/database', () => mockDb);
 
-import { calculateSettlement, updateSettlement } from '../../../src/services/budgetService';
+const mockRates = vi.hoisted(() => ({ getRates: vi.fn() }));
+vi.mock('../../../src/services/exchangeRateService', () => mockRates);
+
+import { calculateSettlement, updateSettlement, freezeForeignRate } from '../../../src/services/budgetService';
 import type { BudgetItem, BudgetItemMember, BudgetItemPayer } from '../../../src/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -36,10 +39,24 @@ function makePayer(budget_item_id: number, user_id: number, amount: number, user
   return { budget_item_id, user_id, amount, username, avatar: null } as BudgetItemPayer & { budget_item_id: number };
 }
 
+// A raw budget_settlements row as listSettlements reads it (joined usernames/avatars).
+function makeSettlementRow(
+  id: number, from_user_id: number, to_user_id: number, amount: number,
+  currency: string | null = null, exchange_rate = 1,
+) {
+  return {
+    id, trip_id: 1, from_user_id, to_user_id, amount, currency, exchange_rate,
+    created_at: '2026-01-01', created_by_user_id: from_user_id,
+    from_username: `u${from_user_id}`, from_avatar: null,
+    to_username: `u${to_user_id}`, to_avatar: null,
+  };
+}
+
 function setupDb(
   items: BudgetItem[],
   members: (BudgetItemMember & { budget_item_id: number })[],
   payers: (BudgetItemPayer & { budget_item_id: number })[] = [],
+  settlements: ReturnType<typeof makeSettlementRow>[] = [],
 ) {
   mockDb.db.prepare.mockImplementation((sql: string) => {
     if (sql.includes('SELECT * FROM budget_items')) {
@@ -51,7 +68,9 @@ function setupDb(
     if (sql.includes('budget_item_payers')) {
       return { all: vi.fn(() => payers), get: vi.fn(), run: vi.fn() };
     }
-    // budget_settlements and anything else → empty
+    if (sql.includes('budget_settlements')) {
+      return { all: vi.fn(() => settlements), get: vi.fn(), run: vi.fn() };
+    }
     return { all: vi.fn(() => []), get: vi.fn(), run: vi.fn() };
   });
 }
@@ -236,6 +255,186 @@ describe('calculateSettlement', () => {
     // 120 / 1.2 (live) = 100 EUR; Bob owes 50 — unchanged behaviour for pre-#1335 rows.
     expect(bob.balance).toBeCloseTo(-50, 2);
   });
+
+  it('#1445 a settle-up transfer with a frozen currency+rate keeps the position balanced when rates drift', () => {
+    // Trip currency EUR; Bob viewed in USD (display) and owes Alice 50 EUR = 62.50 USD
+    // at the settle-time rate of 1.25 USD/EUR. He records that 62.50 USD transfer, which
+    // freezes currency=USD, exchange_rate=1.25. Live rates have since drifted (now the
+    // recompute passes EUR=0.5 per 1 USD), but the frozen transfer still nets to -50+50=0.
+    setupDb(
+      [makeItem(1, 100)], // trip-currency expense (currency NULL)
+      [makeMember(1, 1, 'alice'), makeMember(1, 2, 'bob')],
+      [makePayer(1, 1, 100, 'alice')],
+      [makeSettlementRow(1, 2, 1, 62.5, 'USD', 1.25)],
+    );
+    const result = calculateSettlement(1, { base: 'USD', tripCurrency: 'EUR', rates: { USD: 1, EUR: 0.5 } });
+    const bob = result.balances.find(b => b.user_id === 2)!;
+    expect(bob.balance).toBeCloseTo(0, 2); // settled — no residual re-opens
+  });
+
+  it('#1445 a legacy settle-up transfer (currency NULL) still converts with live rates', () => {
+    // Same shape, but the transfer predates the fix (currency NULL). It is re-converted
+    // to trip currency with live rates, so a drift re-opens the position — unchanged
+    // legacy behaviour that normalises once the row is re-edited.
+    setupDb(
+      [makeItem(1, 100)],
+      [makeMember(1, 1, 'alice'), makeMember(1, 2, 'bob')],
+      [makePayer(1, 1, 100, 'alice')],
+      [makeSettlementRow(1, 2, 1, 62.5, null, 1)],
+    );
+    const result = calculateSettlement(1, { base: 'USD', tripCurrency: 'EUR', rates: { USD: 1, EUR: 0.5 } });
+    const bob = result.balances.find(b => b.user_id === 2)!;
+    // settleToTrip(62.5) = 62.5 * 0.5 = 31.25 EUR; balance -50 + 31.25 = -18.75 EUR → reopens.
+    expect(Math.abs(bob.balance)).toBeGreaterThan(1);
+  });
+
+  // ── Multi-payer (#1426 regression): several people front one bill ──────────
+  // The UI could only send one payer between 3.2.0 and this fix, but the ledger
+  // has credited each payer individually since 3.1.0. These pin that.
+
+  it('2 payers, 3 members: each payer is credited what they actually paid', () => {
+    // $90 bill split 3 ways ($30 each). Alice and Bob each fronted $45.
+    // Alice: +45 - 30 = +15. Bob: +45 - 30 = +15. Carol: -30.
+    setupDb(
+      [makeItem(1, 90)],
+      [makeMember(1, 1, 'alice'), makeMember(1, 2, 'bob'), makeMember(1, 3, 'carol')],
+      [makePayer(1, 1, 45, 'alice'), makePayer(1, 2, 45, 'bob')],
+    );
+    const result = calculateSettlement(1);
+    const balance = (uid: number) => result.balances.find(b => b.user_id === uid)!.balance;
+
+    expect(balance(1)).toBeCloseTo(15, 2);
+    expect(balance(2)).toBeCloseTo(15, 2);
+    expect(balance(3)).toBeCloseTo(-30, 2);
+  });
+
+  it('2 payers with unequal amounts: credits follow the actual amounts paid', () => {
+    // $100 bill split 2 ways ($50 each). Alice fronted $70, Bob fronted $30.
+    // Alice: +70 - 50 = +20. Bob: +30 - 50 = -20. Bob owes Alice $20.
+    setupDb(
+      [makeItem(1, 100)],
+      [makeMember(1, 1, 'alice'), makeMember(1, 2, 'bob')],
+      [makePayer(1, 1, 70, 'alice'), makePayer(1, 2, 30, 'bob')],
+    );
+    const result = calculateSettlement(1);
+    const balance = (uid: number) => result.balances.find(b => b.user_id === uid)!.balance;
+
+    expect(balance(1)).toBeCloseTo(20, 2);
+    expect(balance(2)).toBeCloseTo(-20, 2);
+    expect(result.flows).toHaveLength(1);
+    expect(result.flows[0].from.user_id).toBe(2);
+    expect(result.flows[0].to.user_id).toBe(1);
+    expect(result.flows[0].amount).toBeCloseTo(20, 2);
+  });
+
+  it('multi-payer balances sum to zero (no money invented or destroyed)', () => {
+    // The invariant that makes settle-up trustworthy: credits == debits.
+    setupDb(
+      [makeItem(1, 90), makeItem(2, 55)],
+      [
+        makeMember(1, 1, 'alice'), makeMember(1, 2, 'bob'), makeMember(1, 3, 'carol'),
+        makeMember(2, 1, 'alice'), makeMember(2, 3, 'carol'),
+      ],
+      [
+        makePayer(1, 1, 45, 'alice'), makePayer(1, 2, 45, 'bob'),
+        makePayer(2, 2, 25, 'bob'), makePayer(2, 3, 30, 'carol'),
+      ],
+    );
+    const result = calculateSettlement(1);
+    const sum = result.balances.reduce((a, b) => a + b.balance, 0);
+
+    expect(sum).toBeCloseTo(0, 2);
+  });
+
+  it('3 payers on one bill: an odd total still splits to the cent', () => {
+    // $100.01 split 3 ways. splitEqualShares distributes the remainder cent,
+    // so debits must still exactly cancel the $100.01 of credits.
+    setupDb(
+      [makeItem(1, 100.01)],
+      [makeMember(1, 1, 'alice'), makeMember(1, 2, 'bob'), makeMember(1, 3, 'carol')],
+      [makePayer(1, 1, 33.34, 'alice'), makePayer(1, 2, 33.34, 'bob'), makePayer(1, 3, 33.33, 'carol')],
+    );
+    const result = calculateSettlement(1);
+    const sum = result.balances.reduce((a, b) => a + b.balance, 0);
+
+    expect(sum).toBeCloseTo(0, 2);
+  });
+});
+
+// ── freezeForeignRate (write-path FX freeze, #1445) ───────────────────────────
+
+describe('freezeForeignRate', () => {
+  const tripRow = (currency: string) => ({
+    get: vi.fn(() => ({ currency })), all: vi.fn(), run: vi.fn(),
+  });
+
+  it('freezes the live rate for a foreign currency into exchange_rate', async () => {
+    mockDb.db.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('FROM trips')) return tripRow('EUR');
+      return { get: vi.fn(), all: vi.fn(() => []), run: vi.fn() };
+    });
+    mockRates.getRates.mockResolvedValue({ EUR: 1, USD: 1.25 });
+    const data: { currency?: string | null; exchange_rate?: number } = { currency: 'usd' };
+    await freezeForeignRate(1, data);
+    expect(mockRates.getRates).toHaveBeenCalledWith('EUR');
+    expect(data.exchange_rate).toBe(1.25);
+  });
+
+  it('leaves the rate unset when the currency equals the trip currency', async () => {
+    mockDb.db.prepare.mockImplementation((sql: string) =>
+      sql.includes('FROM trips') ? tripRow('EUR') : { get: vi.fn(), all: vi.fn(() => []), run: vi.fn() });
+    const data: { currency?: string | null; exchange_rate?: number } = { currency: 'EUR' };
+    await freezeForeignRate(1, data);
+    expect(mockRates.getRates).not.toHaveBeenCalled();
+    expect(data.exchange_rate).toBeUndefined();
+  });
+
+  it('respects an explicit exchange_rate from the caller', async () => {
+    const data: { currency?: string | null; exchange_rate?: number } = { currency: 'USD', exchange_rate: 2 };
+    await freezeForeignRate(1, data);
+    expect(mockRates.getRates).not.toHaveBeenCalled();
+    expect(data.exchange_rate).toBe(2);
+  });
+
+  it('degrades to live rates (no freeze) when the rate fetch fails', async () => {
+    mockDb.db.prepare.mockImplementation((sql: string) =>
+      sql.includes('FROM trips') ? tripRow('EUR') : { get: vi.fn(), all: vi.fn(() => []), run: vi.fn() });
+    mockRates.getRates.mockResolvedValue(null);
+    const data: { currency?: string | null; exchange_rate?: number } = { currency: 'USD' };
+    await freezeForeignRate(1, data);
+    expect(data.exchange_rate).toBeUndefined();
+  });
+
+  it('does not re-freeze on update when the currency is unchanged', async () => {
+    mockDb.db.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('FROM budget_items')) return { get: vi.fn(() => ({ currency: 'USD' })), all: vi.fn(), run: vi.fn() };
+      if (sql.includes('FROM trips')) return tripRow('EUR');
+      return { get: vi.fn(), all: vi.fn(() => []), run: vi.fn() };
+    });
+    const data: { currency?: string | null; exchange_rate?: number } = { currency: 'USD' };
+    await freezeForeignRate(1, data, 9);
+    expect(mockRates.getRates).not.toHaveBeenCalled();
+    expect(data.exchange_rate).toBeUndefined();
+  });
+
+  it('does not re-freeze a settlement edit when its stored currency is unchanged (#1445)', async () => {
+    mockDb.db.prepare.mockImplementation((sql: string) =>
+      sql.includes('FROM trips') ? tripRow('EUR') : { get: vi.fn(), all: vi.fn(() => []), run: vi.fn() });
+    const data: { currency?: string | null; exchange_rate?: number } = { currency: 'USD' };
+    // the settlement already holds USD — pass it as existingCurrency → keep the frozen rate
+    await freezeForeignRate(1, data, undefined, 'USD');
+    expect(mockRates.getRates).not.toHaveBeenCalled();
+    expect(data.exchange_rate).toBeUndefined();
+  });
+
+  it('re-freezes a settlement edit when its currency actually changes', async () => {
+    mockDb.db.prepare.mockImplementation((sql: string) =>
+      sql.includes('FROM trips') ? tripRow('EUR') : { get: vi.fn(), all: vi.fn(() => []), run: vi.fn() });
+    mockRates.getRates.mockResolvedValue({ EUR: 1, USD: 1.25 });
+    const data: { currency?: string | null; exchange_rate?: number } = { currency: 'USD' };
+    await freezeForeignRate(1, data, undefined, 'GBP'); // was GBP → now USD → re-freeze
+    expect(data.exchange_rate).toBe(1.25);
+  });
 });
 
 // ── updateSettlement ──────────────────────────────────────────────────────────
@@ -269,7 +468,9 @@ describe('updateSettlement', () => {
     });
 
     const res = updateSettlement(7, 1, { from_user_id: 2, to_user_id: 1, amount: 10.126 });
-    expect(run).toHaveBeenCalledWith(2, 1, 10.13, 7);
+    // from, to, rounded amount, currency-flag(0)/value(null), rate-flag(null)/value(1), id.
+    // No currency/exchange_rate passed → both CASE guards keep the existing columns.
+    expect(run).toHaveBeenCalledWith(2, 1, 10.13, 0, null, null, 1, 7);
     expect(res).toMatchObject({ id: 7, from_user_id: 2, to_user_id: 1, amount: 10.13 });
   });
 });

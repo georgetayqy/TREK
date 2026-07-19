@@ -2,7 +2,7 @@
  * Unit tests for the unified notificationService.send().
  * Covers NSVC-001 to NSVC-014.
  */
-import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 
 const { testDb, dbMock } = vi.hoisted(() => {
   const Database = require('better-sqlite3');
@@ -59,6 +59,7 @@ import { runMigrations } from '../../../src/db/migrations';
 import { resetTestDb } from '../../helpers/test-db';
 import { createUser, createAdmin, setAppSetting, setNotificationChannels, disableNotificationPref } from '../../helpers/factories';
 import { send } from '../../../src/services/notificationService';
+import { setPluginChannelSource, type ExternalChannel } from '../../../src/services/notifications/channelRegistry';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -242,6 +243,28 @@ describe('send() — recipient resolution', () => {
     expect(recipients).toContain(member1.id);
     expect(recipients).toContain(member2.id);
     expect(recipients).not.toContain(actor.id);
+  });
+
+  it('NSVC-007b — guests are never notified, on trip or user scope (#1362)', async () => {
+    const { user: owner } = createUser(testDb);
+    const { user: member } = createUser(testDb);
+    setNotificationChannels(testDb, 'none');
+
+    const tripId = (testDb.prepare('INSERT INTO trips (title, user_id) VALUES (?, ?)').run('Trip', owner.id)).lastInsertRowid as number;
+    testDb.prepare('INSERT INTO trip_members (trip_id, user_id) VALUES (?, ?)').run(tripId, member.id);
+    // A guest joined into the trip — assignable, but has no inbox.
+    const guestId = (testDb.prepare("INSERT INTO users (username, email, password_hash, role, is_guest) VALUES ('Guest', 'guest-x@guests.invalid', '', 'user', 1)").run()).lastInsertRowid as number;
+    testDb.prepare('INSERT INTO trip_members (trip_id, user_id) VALUES (?, ?)').run(tripId, guestId);
+
+    await send({ event: 'booking_change', actorId: owner.id, scope: 'trip', targetId: tripId, params: { trip: 'Trip', actor: 'Owner', booking: 'Hotel', type: 'hotel', tripId: String(tripId) } });
+    let recipients = (testDb.prepare('SELECT recipient_id FROM notifications').all() as { recipient_id: number }[]).map(r => r.recipient_id);
+    expect(recipients).toContain(member.id);
+    expect(recipients).not.toContain(guestId);
+
+    // Even a direct user-scope notification (e.g. a todo assigned to the guest) is dropped.
+    await send({ event: 'vacay_invite', actorId: owner.id, scope: 'user', targetId: guestId, params: { actor: 'owner@test.com', planId: '1' } });
+    recipients = (testDb.prepare('SELECT recipient_id FROM notifications').all() as { recipient_id: number }[]).map(r => r.recipient_id);
+    expect(recipients).not.toContain(guestId);
   });
 
   it('NSVC-008 — user scope sends to exactly one user', async () => {
@@ -525,5 +548,119 @@ describe('send() — ntfy channel dispatch', () => {
     expect(ntfyCalls.length).toBeGreaterThan(0);
     expect(ntfyCalls[0][1].headers['Priority']).toBe('4'); // version_available = high priority
     expect(ntfyCalls[0][1].headers['Tags']).toContain('package');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Plugin notification channels (hook:notification-channel)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('send() — plugin notification channels', () => {
+  const sendSpy = vi.fn();
+
+  function installPluginChannel(over: Partial<ExternalChannel> = {}): void {
+    sendSpy.mockClear();
+    sendSpy.mockResolvedValue(undefined);
+    setPluginChannelSource(() => [
+      {
+        id: 'plugin:gotify',
+        source: 'plugin',
+        label: 'Gotify',
+        supportsEvent: (e: string) => e !== 'version_available' && e !== 'synology_session_cleared',
+        isConfiguredFor: () => true,
+        sendToUser: sendSpy,
+        ...over,
+      } as ExternalChannel,
+    ]);
+  }
+
+  afterEach(() => setPluginChannelSource(null));
+
+  it('NSVC-PLUG-001 — delivers to a plugin channel the admin enabled', async () => {
+    const { user } = createUser(testDb);
+    installPluginChannel();
+    setNotificationChannels(testDb, 'plugin:gotify');
+
+    await send({ event: 'trip_invite', actorId: null, scope: 'user', targetId: user.id, params: { trip: 'Rome', actor: 'Alice', invitee: 'Bob', tripId: '1' } });
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const [recipientId, msg] = sendSpy.mock.calls[0];
+    expect(recipientId).toBe(user.id);
+    // The host renders the text — a channel plugin never touches i18n.
+    expect(msg.event).toBe('trip_invite');
+    expect(msg.title).toBeTruthy();
+    expect(msg.body).toContain('Rome');
+  });
+
+  it('NSVC-PLUG-002 — delivers with NOTHING in notification_channels: enabling the plugin IS the opt-in', async () => {
+    const { user } = createUser(testDb);
+    installPluginChannel();
+    setNotificationChannels(testDb, 'none');
+
+    await send({ event: 'trip_invite', actorId: null, scope: 'user', targetId: user.id, params: { trip: 'Rome', actor: 'Alice', invitee: 'Bob', tripId: '1' } });
+
+    // A built-in always exists in the code, so it needs an explicit switch. A plugin
+    // channel only exists because an admin installed and enabled that plugin — and
+    // nothing can write a `plugin:` id into this CSV anyway, so requiring a second
+    // opt-in meant the channel could never be turned on at all.
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('NSVC-PLUG-003 — skipped when the user opted out of this event on it', async () => {
+    const { user } = createUser(testDb);
+    installPluginChannel();
+    setNotificationChannels(testDb, 'plugin:gotify');
+    disableNotificationPref(testDb, user.id, 'trip_invite', 'plugin:gotify');
+
+    await send({ event: 'trip_invite', actorId: null, scope: 'user', targetId: user.id, params: { trip: 'Rome', actor: 'Alice', invitee: 'Bob', tripId: '1' } });
+
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it('NSVC-PLUG-004 — skipped when the user has not set their credentials', async () => {
+    const { user } = createUser(testDb);
+    installPluginChannel({ isConfiguredFor: () => false });
+    setNotificationChannels(testDb, 'plugin:gotify');
+
+    await send({ event: 'trip_invite', actorId: null, scope: 'user', targetId: user.id, params: { trip: 'Rome', actor: 'Alice', invitee: 'Bob', tripId: '1' } });
+
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it('NSVC-PLUG-005 — a throwing plugin channel does not stop in-app or email delivery', async () => {
+    const { user } = createUser(testDb);
+    installPluginChannel({ sendToUser: vi.fn().mockRejectedValue(new Error('gotify is down')) });
+    setSmtp();
+    setNotificationChannels(testDb, 'email,plugin:gotify');
+    sendMailMock.mockClear();
+
+    await send({ event: 'trip_invite', actorId: null, scope: 'user', targetId: user.id, params: { trip: 'Rome', actor: 'Alice', invitee: 'Bob', tripId: '1' } });
+
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+    expect(getInAppNotifications(user.id).length).toBe(1);
+  });
+
+  it('NSVC-PLUG-006 — never receives an admin-scoped event', async () => {
+    createAdmin(testDb);
+    // Even if a (malicious) channel claims to support it, ADMIN_SCOPED_EVENTS is
+    // gated host-side: only a channel that bypasses the toggle (email) delivers those.
+    installPluginChannel({ supportsEvent: () => true });
+    setNotificationChannels(testDb, 'plugin:gotify');
+
+    await send({ event: 'version_available', actorId: null, scope: 'admin', targetId: 0, params: { version: '3.0.0' } });
+
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it('NSVC-PLUG-007 — a channel that narrows its events only gets those', async () => {
+    const { user } = createUser(testDb);
+    installPluginChannel({ supportsEvent: (e: string) => e === 'booking_change' });
+    setNotificationChannels(testDb, 'plugin:gotify');
+
+    await send({ event: 'trip_invite', actorId: null, scope: 'user', targetId: user.id, params: { trip: 'Rome', actor: 'Alice', invitee: 'Bob', tripId: '1' } });
+    expect(sendSpy).not.toHaveBeenCalled();
+
+    await send({ event: 'booking_change', actorId: null, scope: 'user', targetId: user.id, params: { trip: 'Rome', actor: 'Alice', tripId: '1' } });
+    expect(sendSpy).toHaveBeenCalledTimes(1);
   });
 });

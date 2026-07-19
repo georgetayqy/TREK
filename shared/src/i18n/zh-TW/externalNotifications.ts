@@ -28,6 +28,10 @@ const zhTW: NotificationLocale = {
       title: 'Vacay 融合邀請',
       body: `${p.actor} 邀請您合併假期計畫。開啟 TREK 以接受或拒絕。`,
     }),
+    collection_invite: (p) => ({
+      title: '收藏邀請',
+      body: `${p.actor} 邀請您共享收藏。開啟 TREK 以接受或拒絕。`,
+    }),
     photos_shared: (p) => ({
       title: `已分享 ${p.count} 張照片`,
       body: `${p.actor} 在「${p.trip}」中分享了 ${p.count} 張照片。`,
@@ -48,6 +52,7 @@ const zhTW: NotificationLocale = {
       title: 'Synology 工作階段已清除',
       body: '您的 Synology 帳戶或 URL 已變更，您已登出 Synology Photos。',
     }),
+    plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
   },
   passwordReset: {
     subject: '重設您的密碼',

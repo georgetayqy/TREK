@@ -15,9 +15,11 @@
 - [[Login and Registration|Login-and-Registration]]
 - [[OIDC SSO|OIDC-SSO]]
 - [[Two-Factor Authentication|Two-Factor-Authentication]]
+- [[Passkeys]]
 - [[Password Reset|Password-Reset]]
 - [[User Settings|User-Settings]]
-- [[Display Settings|Display-Settings]]
+- [[General Settings|Display-Settings]]
+- [[Appearance Settings|Appearance-Settings]]
 - [[Map Settings|Map-Settings]]
 - [[Notifications]]
 - [[Offline Mode and PWA|Offline-Mode-and-PWA]]
@@ -36,14 +38,17 @@
 
 ## Travel Management
 - [[Reservations and Bookings|Reservations-and-Bookings]]
+- [[AI Booking Import|AI-Booking-Import]]
 - [[Transport: Flights, Trains, Cars|Transport-Flights-Trains-Cars]]
 - [[Accommodations]]
-- [[Budget Tracking|Budget-Tracking]]
+- [[Costs|Budget-Tracking]]
+- [[Currencies]]
 - [[Packing Lists|Packing-Lists]]
 - [[Packing Templates|Packing-Templates]]
 - [[Todos and Tasks|Todos-and-Tasks]]
 - [[Documents and Files|Documents-and-Files]]
 - [[Tags and Categories|Tags-and-Categories]]
+- [[Calendar Feeds|Calendar-Feeds]]
 
 ## Photos & Media
 - [[Photo Providers|Photo-Providers]]
@@ -63,7 +68,15 @@
 - [[Vacay]]
 - [[Atlas]]
 - [[Journey Journal|Journey-Journal]]
+- [[Collections]]
 - [[Dashboard Widgets|Dashboard-Widgets]]
+
+## Plugins
+- [[Plugins Overview|Plugins]]
+- [[Plugin Development|Plugin-Development]]
+- [[Plugin Cookbook|Plugin-Cookbook]]
+- [[Plugin Permissions|Plugin-Permissions]]
+- [[Publishing a Plugin|Plugin-Publishing]]
 
 ## AI / MCP
 - [[MCP Overview|MCP-Overview]]
@@ -80,6 +93,7 @@
 - [[Admin: Categories|Admin-Categories]]
 - [[Admin: Packing Templates|Admin-Packing-Templates]]
 - [[Admin: Permissions|Admin-Permissions]]
+- [[Admin: Plugins|Admin-Plugins]]
 - [[Admin: MCP Tokens|Admin-MCP-Tokens]]
 - [[Admin: GitHub Releases|Admin-GitHub-Releases]]
 
@@ -92,6 +106,7 @@
 - [[Security Hardening|Security-Hardening]]
 
 ## Help
+- [[In-App Help|In-App-Help]]
 - [[FAQ]]
 - [[Troubleshooting]]
 

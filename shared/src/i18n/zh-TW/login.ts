@@ -8,7 +8,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places、路線和聚類',
   'login.features.realtime': '即時同步',
   'login.features.realtimeDesc': '透過 WebSocket 協同規劃',
-  'login.features.budget': '預算跟蹤',
+  'login.features.budget': '費用追蹤',
   'login.features.budgetDesc': '分類、圖表和人均費用',
   'login.features.collab': '協作',
   'login.features.collabDesc': '多使用者共享旅行',
@@ -82,5 +82,9 @@ const login: TranslationStrings = {
   'login.demoHint': '試用演示——無需註冊',
   'login.passkey.signIn': '使用 Passkey 登入',
   'login.passkey.failed': 'Passkey 登入失敗，請重試。',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

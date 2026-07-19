@@ -5,15 +5,18 @@ import { useTripStore } from '../../store/tripStore'
 import { useAddonStore } from '../../store/addonStore'
 import Modal from '../shared/Modal'
 import CustomSelect from '../shared/CustomSelect'
+import AddressInput from './AddressInput'
 import { Hotel, Utensils, Ticket, FileText, Users, Paperclip, X, ExternalLink, Link2 } from 'lucide-react'
 import { useToast } from '../shared/Toast'
 import { useTranslation } from '../../i18n'
 import { CustomDatePicker } from '../shared/CustomDateTimePicker'
 import CustomTimePicker from '../shared/CustomTimePicker'
 import { openFile } from '../../utils/fileDownload'
+import { resolveDayId } from '../../utils/formatters'
 import type { Day, Place, Reservation, TripFile, AssignmentsMap, Accommodation, BudgetItem } from '../../types'
 import { BookingCostsSection } from './BookingCostsSection'
 import type { BookingExpenseRequest } from './BookingCostsSection.types'
+import type { BookingReviewDraft } from './parsedItemToDraft'
 import { typeToCostCategory } from '@trek/shared'
 
 const TYPE_OPTIONS = [
@@ -64,9 +67,12 @@ interface ReservationModalProps {
   accommodations?: Accommodation[]
   defaultAssignmentId?: number | null
   onOpenExpense?: (req: BookingExpenseRequest) => void
+  // Pre-fill a brand-new booking from a parsed import item (review-before-save).
+  // Distinct from `reservation`: the form is populated but stays in create mode.
+  prefill?: BookingReviewDraft | null
 }
 
-export function ReservationModal({ isOpen, onClose, onSave, reservation, days, places, assignments, selectedDayId, files = [], onFileUpload, onFileDelete, accommodations = [], defaultAssignmentId = null, onOpenExpense }: ReservationModalProps) {
+export function ReservationModal({ isOpen, onClose, onSave, reservation, days, places, assignments, selectedDayId, files = [], onFileUpload, onFileDelete, accommodations = [], defaultAssignmentId = null, onOpenExpense, prefill = null }: ReservationModalProps) {
   const { id: tripId } = useParams<{ id: string }>()
   const loadFiles = useTripStore(s => s.loadFiles)
   const toast = useToast()
@@ -81,13 +87,15 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
   const [form, setForm] = useState({
     title: '', type: 'other', status: 'pending',
     reservation_time: '', reservation_end_time: '', end_date: '', location: '', confirmation_number: '',
-    notes: '', assignment_id: '' as string | number, accommodation_id: '' as string | number,
+    notes: '', url: '', assignment_id: '' as string | number, accommodation_id: '' as string | number,
+    place_id: '' as string | number,
     meta_check_in_time: '', meta_check_in_end_time: '', meta_check_out_time: '',
     hotel_place_id: '' as string | number, hotel_start_day: '' as string | number, hotel_end_day: '' as string | number,
+    hotel_address: '',
   })
   const [isSaving, setIsSaving] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)
-  const [pendingFiles, setPendingFiles] = useState([])
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [showFilePicker, setShowFilePicker] = useState(false)
   const [linkedFileIds, setLinkedFileIds] = useState<number[]>([])
 
@@ -97,6 +105,16 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
   )
 
   useEffect(() => {
+    // Match an existing place by name (exact, then loose contains) for hotels.
+    const matchPlaceId = (name: string | undefined): string | number => {
+      const n = (name || '').trim().toLowerCase()
+      if (!n) return ''
+      const exact = places.find(p => p.name?.trim().toLowerCase() === n)
+      if (exact) return exact.id
+      const loose = places.find(p => p.name && (p.name.toLowerCase().includes(n) || n.includes(p.name.toLowerCase())))
+      return loose?.id ?? ''
+    }
+
     if (reservation) {
       const meta = typeof reservation.metadata === 'string' ? JSON.parse(reservation.metadata || '{}') : (reservation.metadata || {})
       const rawEnd = reservation.reservation_end_time || ''
@@ -109,6 +127,7 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
         endDate = rawEnd
         endTime = ''
       }
+      const editAcc = accommodations.find(a => a.id == reservation.accommodation_id)
       setForm({
         title: reservation.title || '',
         type: reservation.type || 'other',
@@ -119,26 +138,64 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
         location: reservation.location || '',
         confirmation_number: reservation.confirmation_number || '',
         notes: reservation.notes || '',
+        url: reservation.url || '',
         assignment_id: reservation.assignment_id || '',
         accommodation_id: reservation.accommodation_id || '',
+        place_id: reservation.place_id || '',
         meta_check_in_time: meta.check_in_time || '',
         meta_check_in_end_time: meta.check_in_end_time || '',
         meta_check_out_time: meta.check_out_time || '',
-        hotel_place_id: (() => { const acc = accommodations.find(a => a.id == reservation.accommodation_id); return acc?.place_id || '' })(),
-        hotel_start_day: (() => { const acc = accommodations.find(a => a.id == reservation.accommodation_id); return acc?.start_day_id || '' })(),
-        hotel_end_day: (() => { const acc = accommodations.find(a => a.id == reservation.accommodation_id); return acc?.end_day_id || '' })(),
+        hotel_place_id: editAcc?.place_id || '',
+        hotel_start_day: editAcc?.start_day_id || '',
+        hotel_end_day: editAcc?.end_day_id || '',
+        // The linked place carries the address; reservations saved without a
+        // place (or before the accommodation existed) keep it in location.
+        hotel_address: places.find(p => p.id == editAcc?.place_id)?.address || reservation.location || '',
       })
+    } else if (prefill) {
+      // Review-before-save: populate from a parsed import item, stay in create mode.
+      const meta = (prefill.metadata && typeof prefill.metadata === 'object' ? prefill.metadata : {}) as Record<string, string>
+      const rawEnd = typeof prefill.reservation_end_time === 'string' ? prefill.reservation_end_time : ''
+      let endDate = ''
+      let endTime = rawEnd
+      if (rawEnd.includes('T')) { endDate = rawEnd.split('T')[0]; endTime = rawEnd.split('T')[1]?.slice(0, 5) || '' }
+      else if (/^\d{4}-\d{2}-\d{2}$/.test(rawEnd)) { endDate = rawEnd; endTime = '' }
+      setForm({
+        title: prefill.title || '',
+        type: prefill.type || 'other',
+        status: prefill.status || 'pending',
+        reservation_time: typeof prefill.reservation_time === 'string' ? prefill.reservation_time.slice(0, 16) : '',
+        reservation_end_time: endTime,
+        end_date: endDate,
+        location: prefill.location || '',
+        confirmation_number: prefill.confirmation_number || '',
+        notes: prefill.notes || '',
+        url: (prefill as { url?: string }).url || '',
+        assignment_id: defaultAssignmentId ?? '',
+        accommodation_id: '',
+        place_id: '',
+        meta_check_in_time: meta.check_in_time || '',
+        meta_check_in_end_time: meta.check_in_end_time || '',
+        meta_check_out_time: meta.check_out_time || '',
+        hotel_place_id: matchPlaceId(prefill._venue?.name || prefill.title),
+        hotel_start_day: resolveDayId(days, prefill._accommodation?.check_in),
+        hotel_end_day: resolveDayId(days, prefill._accommodation?.check_out),
+        hotel_address: prefill._venue?.address || '',
+      })
+      // Seed the booking's Files with the document this item was parsed from.
+      setPendingFiles(prefill._sourceFiles ?? [])
     } else {
       setForm({
         title: '', type: 'other', status: 'pending',
         reservation_time: '', reservation_end_time: '', end_date: '', location: '', confirmation_number: '',
-        notes: '', assignment_id: defaultAssignmentId ?? '', accommodation_id: '',
+        notes: '', url: '', assignment_id: defaultAssignmentId ?? '', accommodation_id: '', place_id: '',
         meta_check_in_time: '', meta_check_in_end_time: '', meta_check_out_time: '',
-        hotel_place_id: '', hotel_start_day: '', hotel_end_day: '',
+        hotel_place_id: '', hotel_start_day: '', hotel_end_day: '', hotel_address: '',
       })
       setPendingFiles([])
     }
-  }, [reservation, isOpen, selectedDayId, defaultAssignmentId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reservation, prefill, isOpen, selectedDayId, defaultAssignmentId, days, places, accommodations])
 
   // Re-hydrate hotel day range when the accommodations prop arrives after the modal opens
   // (race: tripAccommodations fetch may complete after isOpen fires, leaving hotel fields empty)
@@ -148,9 +205,10 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
     if (!acc) return
     setForm(prev => {
       if (prev.hotel_place_id !== '' || prev.hotel_start_day !== '' || prev.hotel_end_day !== '') return prev
-      return { ...prev, hotel_place_id: acc.place_id, hotel_start_day: acc.start_day_id, hotel_end_day: acc.end_day_id }
+      const accPlace = places.find(p => p.id == acc.place_id)
+      return { ...prev, hotel_place_id: acc.place_id, hotel_start_day: acc.start_day_id, hotel_end_day: acc.end_day_id, hotel_address: accPlace?.address || prev.hotel_address }
     })
-  }, [accommodations, isOpen, reservation])
+  }, [accommodations, isOpen, reservation, places])
 
   const set = (field, value) => setForm(prev => ({ ...prev, [field]: value }))
 
@@ -186,23 +244,49 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
         title: form.title, type: form.type, status: form.status,
         reservation_time: form.type === 'hotel' ? null : (form.reservation_time || null),
         reservation_end_time: form.type === 'hotel' ? null : (combinedEndTime || null),
-        location: form.location, confirmation_number: form.confirmation_number,
+        // Hotels show the address field instead of location — persist it on the
+        // reservation itself so it survives even without days/place (#1496).
+        location: form.type === 'hotel' ? form.hotel_address : form.location,
+        confirmation_number: form.confirmation_number,
         notes: form.notes,
+        url: form.url,
         assignment_id: (form.type === 'hotel' && !form.accommodation_id) ? null : (form.assignment_id || null),
         accommodation_id: form.type === 'hotel' ? (form.accommodation_id || null) : null,
+        // Hotels link a place through the accommodation record; every other type links
+        // the picked trip place/activity directly on the reservation (#1353).
+        place_id: form.type === 'hotel' ? null : (form.place_id || null),
         metadata: Object.keys(metadata).length > 0 ? metadata : null,
         endpoints: [],
         needs_review: false,
       }
-      if (form.type === 'hotel' && form.hotel_start_day && form.hotel_end_day) {
+      if (form.type === 'hotel' && (form.hotel_start_day || form.hotel_end_day)) {
         saveData.create_accommodation = {
           place_id: form.hotel_place_id || null,
-          start_day_id: form.hotel_start_day,
-          end_day_id: form.hotel_end_day,
+          // No existing place picked but we have an address/name (e.g. a reviewed
+          // import) → the save handler geocodes it and creates the place.
+          venue: (!form.hotel_place_id && (form.hotel_address || form.title))
+            ? { name: form.title, address: form.hotel_address || null }
+            : null,
+          // The typed address, so the save handler can write it through to a
+          // linked place — an edited address used to be silently dropped (#1496).
+          address: form.hotel_address || null,
+          // Tolerate a single resolved end of the range (a one-night stay or a date
+          // that only matched one trip day) so the accommodation is still created.
+          start_day_id: form.hotel_start_day || form.hotel_end_day,
+          end_day_id: form.hotel_end_day || form.hotel_start_day,
           check_in: form.meta_check_in_time || null,
           check_in_end: form.meta_check_in_end_time || null,
           check_out: form.meta_check_out_time || null,
           confirmation: form.confirmation_number || null,
+        }
+      }
+      // Imported booking → auto-create the linked cost from the parsed price (what the
+      // old direct import did). Only on create (not edit) and only when there's a price.
+      if (!reservation && prefill && isBudgetEnabled) {
+        const pmeta = prefill.metadata && typeof prefill.metadata === 'object' ? (prefill.metadata as Record<string, unknown>) : {}
+        const price = Number(pmeta.price)
+        if (Number.isFinite(price) && price > 0) {
+          saveData.create_budget_entry = { total_price: price, category: typeToCostCategory(form.type) }
         }
       }
       const saved = await onSave(saveData)
@@ -233,6 +317,13 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
   const handleRemoveExpense = async (item: BudgetItem) => {
     try { await deleteBudgetItem(Number(tripId), item.id) } catch { toast.error(t('common.unknownError')) }
   }
+
+  // On an import review (not yet saved), preview the parsed price as the cost that will be linked.
+  const prefillMeta = prefill?.metadata && typeof prefill.metadata === 'object' ? (prefill.metadata as Record<string, unknown>) : null
+  const prefillPrice = Number(prefillMeta?.price)
+  const pendingExpense = !reservation && Number.isFinite(prefillPrice) && prefillPrice > 0
+    ? { total_price: prefillPrice, currency: (prefillMeta?.priceCurrency as string | null) ?? null, category: typeToCostCategory(form.type) }
+    : null
 
   const handleFileChange = async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0]
@@ -277,10 +368,10 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
       size="2xl"
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button type="button" onClick={onClose} className="text-content-muted" style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'none', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+          <button type="button" onClick={onClose} className="text-content-muted" style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', cursor: 'pointer', fontFamily: 'inherit' }}>
             {t('common.cancel')}
           </button>
-          <button type="button" onClick={handleSubmit} disabled={isSaving || !form.title.trim() || isEndBeforeStart} className="bg-[var(--text-primary)] text-[var(--bg-primary)]" style={{ padding: '8px 20px', borderRadius: 10, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: isSaving || !form.title.trim() || isEndBeforeStart ? 0.5 : 1 }}>
+          <button type="button" onClick={handleSubmit} disabled={isSaving || !form.title.trim() || isEndBeforeStart} className="bg-[var(--text-primary)] text-[var(--bg-primary)]" style={{ padding: '8px 20px', borderRadius: 10, border: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: isSaving || !form.title.trim() || isEndBeforeStart ? 0.5 : 1 }}>
             {isSaving ? t('common.saving') : reservation ? t('common.update') : t('common.add')}
           </button>
         </div>
@@ -296,7 +387,7 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
               <button key={value} type="button" onClick={() => set('type', value)} className={form.type === value ? 'bg-[var(--text-primary)] text-[var(--bg-primary)]' : 'bg-surface-card text-content-muted'} style={{
                 display: 'flex', alignItems: 'center', gap: 4,
                 padding: '5px 10px', borderRadius: 99, border: '1px solid',
-                fontSize: 11, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s',
+                fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.12s',
                 borderColor: form.type === value ? 'var(--text-primary)' : 'var(--border-primary)',
               }}>
                 <Icon size={11} /> {t(labelKey)}
@@ -385,16 +476,45 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
               </div>
             </div>
             {isEndBeforeStart && (
-              <div className="text-[#ef4444]" style={{ fontSize: 11, marginTop: -6 }}>{t('reservations.validation.endBeforeStart')}</div>
+              <div className="text-[#ef4444]" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', marginTop: -6 }}>{t('reservations.validation.endBeforeStart')}</div>
             )}
           </>
         )}
 
         {/* Location */}
+        {/* Link an existing trip place/activity to any non-hotel booking (#1353). Hotels
+            keep their own accommodation-based place picker below. */}
+        {form.type !== 'hotel' && (
+          <div>
+            <label className={labelClass}>{t('reservations.meta.linkPlace')}</label>
+            <CustomSelect
+              value={form.place_id}
+              onChange={value => {
+                const p = places.find(pl => pl.id === value)
+                setForm(prev => {
+                  const next = { ...prev, place_id: value }
+                  if (value && p) {
+                    if (!prev.title) next.title = p.name
+                    if (!prev.location && p.address) next.location = p.address
+                  }
+                  return next
+                })
+              }}
+              placeholder={t('reservations.meta.pickPlace')}
+              options={[
+                { value: '', label: '—' },
+                ...places.map(p => ({ value: p.id, label: p.name })),
+              ]}
+              searchable
+              size="sm"
+            />
+          </div>
+        )}
+
         {form.type !== 'hotel' && (
           <div>
             <label className={labelClass}>{t('reservations.locationAddress')}</label>
-            <input type="text" value={form.location} onChange={e => set('location', e.target.value)}
+            <AddressInput value={form.location} onChange={v => set('location', v)}
               placeholder={t('reservations.locationPlaceholder')} className={inputClass} />
           </div>
         )}
@@ -432,11 +552,11 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
                     const p = places.find(pl => pl.id === value)
                     setForm(prev => {
                       const next = { ...prev, hotel_place_id: value }
-                      if (!value) {
-                        next.location = ''
-                      } else if (p) {
+                      if (value && p) {
                         if (!prev.title) next.title = p.name
-                        if (!prev.location && p.address) next.location = p.address
+                        // Show the picked hotel's address; keep a hand-typed one
+                        // if the place has none.
+                        next.hotel_address = p.address || prev.hotel_address
                       }
                       return next
                     })
@@ -497,6 +617,11 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
                 />
               </div>
             </div>
+            <div>
+              <label className={labelClass}>{t('reservations.locationAddress')}</label>
+              <AddressInput value={form.hotel_address} onChange={v => set('hotel_address', v)}
+                placeholder={t('reservations.locationPlaceholder')} className={inputClass} />
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className={labelClass}>{t('reservations.meta.checkIn')}</label>
@@ -514,6 +639,16 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
           </>
         )}
 
+        {/* Link */}
+        <div>
+          <label className={labelClass}>{t('reservations.urlLabel')}</label>
+          <div className="relative">
+            <Link2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-content-muted pointer-events-none" />
+            <input type="url" value={form.url} onChange={e => set('url', e.target.value)}
+              placeholder={t('reservations.urlPlaceholder')} className={inputClass} style={{ paddingLeft: 34 }} />
+          </div>
+        </div>
+
         {/* Notes */}
         <div>
           <label className={labelClass}>{t('reservations.notes')}</label>
@@ -529,7 +664,7 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
             {attachedFiles.map(f => (
               <div key={f.id} className="bg-surface-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderRadius: 8 }}>
                 <FileText size={12} className="text-content-muted" style={{ flexShrink: 0 }} />
-                <span className="text-content-secondary" style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_name}</span>
+                <span className="text-content-secondary" style={{ flex: 1, fontSize: 'calc(12px * var(--fs-scale-body, 1))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_name}</span>
                 <a href="#" onClick={(e) => { e.preventDefault(); openFile(f.url).catch(() => {}) }} className="text-content-faint" style={{ display: 'flex', flexShrink: 0, cursor: 'pointer' }}><ExternalLink size={11} /></a>
                 <button type="button" onClick={async () => {
                   if (f.reservation_id === reservation?.id) {
@@ -550,19 +685,19 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
             {pendingFiles.map((f, i) => (
               <div key={i} className="bg-surface-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderRadius: 8 }}>
                 <FileText size={12} className="text-content-muted" style={{ flexShrink: 0 }} />
-                <span className="text-content-secondary" style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                <span className="text-content-secondary" style={{ flex: 1, fontSize: 'calc(12px * var(--fs-scale-body, 1))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
                 <button type="button" onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))}
                   className="text-content-faint" style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 0, flexShrink: 0 }}>
                   <X size={11} />
                 </button>
               </div>
             ))}
-            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt,image/*" style={{ display: 'none' }} onChange={handleFileChange} />
+            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.txt,.pkpass,.pkpasses,image/*,application/vnd.apple.pkpass,application/vnd.apple.pkpasses" style={{ display: 'none' }} onChange={handleFileChange} />
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {onFileUpload && <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadingFile} className="text-content-faint" style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px',
                 border: '1px dashed var(--border-primary)', borderRadius: 8, background: 'none',
-                fontSize: 11, cursor: uploadingFile ? 'default' : 'pointer', fontFamily: 'inherit',
+                fontSize: 'calc(11px * var(--fs-scale-caption, 1))', cursor: uploadingFile ? 'default' : 'pointer', fontFamily: 'inherit',
               }}>
                 <Paperclip size={11} />
                 {uploadingFile ? t('reservations.uploading') : t('reservations.attachFile')}
@@ -572,7 +707,7 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
                   <button type="button" onClick={() => setShowFilePicker(v => !v)} className="text-content-faint" style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px',
                     border: '1px dashed var(--border-primary)', borderRadius: 8, background: 'none',
-                    fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
+                    fontSize: 'calc(11px * var(--fs-scale-caption, 1))', cursor: 'pointer', fontFamily: 'inherit',
                   }}>
                     <Link2 size={11} /> {t('reservations.linkExisting')}
                   </button>
@@ -594,7 +729,7 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
                           className="text-content-secondary"
                           style={{
                             display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '6px 10px',
-                            background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit',
+                            background: 'none', border: 'none', cursor: 'pointer', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontFamily: 'inherit',
                             borderRadius: 7, textAlign: 'left',
                           }}
                           onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-tertiary)'}
@@ -615,6 +750,7 @@ export function ReservationModal({ isOpen, onClose, onSave, reservation, days, p
         {isBudgetEnabled && (
           <BookingCostsSection
             reservationId={reservation?.id ?? null}
+            pendingExpense={pendingExpense}
             onCreate={handleCreateExpense}
             onEdit={handleEditExpense}
             onRemove={handleRemoveExpense}

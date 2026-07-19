@@ -5,11 +5,13 @@ import backup from './backup';
 import budget from './budget';
 import categories from './categories';
 import collab from './collab';
+import collection from './collection';
 import common from './common';
 import dashboard from './dashboard';
 import day from './day';
 import dayplan from './dayplan';
 import files from './files';
+import help from './help';
 import inspector from './inspector';
 import journey from './journey';
 import login from './login';
@@ -53,6 +55,7 @@ const locale = {
   ...login,
   ...register,
   ...vacay,
+  ...collection,
   ...atlas,
   ...trip,
   ...places,
@@ -82,5 +85,6 @@ const locale = {
   ...oauth,
   ...system_notice,
   ...transport,
+  ...help,
 };
 export default locale;

@@ -42,8 +42,7 @@ const dashboard: TranslationStrings = {
   'dashboard.status.past': 'Passé',
   'dashboard.status.daysLeft': '{count} jours restants',
   'dashboard.toast.loadError': 'Impossible de charger les voyages',
-  'dashboard.loadErrorBanner':
-    "Impossible de joindre le serveur. Vos voyages sont en sécurité — veuillez réessayer.",
+  'dashboard.loadErrorBanner': 'Impossible de joindre le serveur. Vos voyages sont en sécurité — veuillez réessayer.',
   'dashboard.retry': 'Réessayer',
   'dashboard.toast.created': 'Voyage créé avec succès !',
   'dashboard.toast.createError': 'Impossible de créer le voyage',
@@ -77,9 +76,27 @@ const dashboard: TranslationStrings = {
   'dashboard.addMember': 'Ajouter un membre',
   'dashboard.coverSaved': 'Image de couverture enregistrée',
   'dashboard.coverUploadError': "Échec de l'import",
+  'dashboard.coverSaveError': "Impossible d'enregistrer l'image de couverture",
   'dashboard.coverRemoveError': 'Échec de la suppression',
+  'dashboard.searchUnsplash': 'Rechercher sur Unsplash',
+  'dashboard.unsplashSearchPlaceholder': 'Rechercher des photos de destination',
+  'dashboard.unsplashQueryRequired': 'Saisissez un terme de recherche',
+  'dashboard.unsplashNoResults': 'Aucune image trouvée',
+  'dashboard.coverSearchError': 'Échec de la recherche Unsplash',
+  'dashboard.useUnsplashPhoto': 'Utiliser la photo Unsplash de {photographer}',
   'dashboard.titleRequired': 'Le titre est obligatoire',
   'dashboard.endDateError': 'La date de fin doit être postérieure à la date de début',
+  'dashboard.dateShiftTitle': 'Nouvelle date de début',
+  'dashboard.dateShiftIntro':
+    'Vous avez modifié la date de début de ce voyage. Comment vos plans doivent-ils suivre les nouvelles dates ?',
+  'dashboard.dateShiftKeepBookings': 'Conserver les réservations à leurs dates',
+  'dashboard.dateShiftKeepBookingsDesc':
+    "Les plans journaliers suivent les nouvelles dates, tandis que les réservations et hébergements restent à leurs dates d'origine tant que celles-ci font toujours partie du voyage.",
+  'dashboard.dateShiftAll': 'Tout décaler',
+  'dashboard.dateShiftAllDesc':
+    "L'itinéraire entier suit les nouvelles dates, y compris les réservations et hébergements.",
+  'dashboard.dateShiftHint':
+    "Astuce : pour ne décaler qu'une partie de votre itinéraire, utilisez plutôt « Ajouter un jour » dans le planificateur.",
   'dashboard.greeting.morning': 'Bonjour,',
   'dashboard.greeting.afternoon': 'Bon après-midi,',
   'dashboard.greeting.evening': 'Bonsoir,',

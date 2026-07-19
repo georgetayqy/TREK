@@ -8,9 +8,10 @@ import { listDays, listAccommodations } from '../../services/dayService';
 import { listPlaces } from '../../services/placeService';
 import { listItems as listPackingItems } from '../../services/packingService';
 import { listItems as listTodoItems } from '../../services/todoService';
-import { listBudgetItems } from '../../services/budgetService';
+import { listBudgetItems, rebaseTripCurrency } from '../../services/budgetService';
 import { listReservations } from '../../services/reservationService';
 import { listFiles } from '../../services/fileService';
+import { searchUnsplashPhotos, getUnsplashKey } from '../../services/unsplashService';
 
 /**
  * Thin Nest wrapper around the existing trip service + the per-domain list
@@ -49,11 +50,19 @@ export class TripsService {
     return tripSvc.getTripRaw(tripId);
   }
 
+  searchCoverImages(query: string, userId: number) {
+    return searchUnsplashPhotos(query, 9, getUnsplashKey(userId));
+  }
+
   getOwner(tripId: string) {
     return tripSvc.getTripOwner(tripId);
   }
 
-  update(tripId: string, userId: number, body: Parameters<typeof tripSvc.updateTrip>[2], role: string) {
+  async update(tripId: string, userId: number, body: Parameters<typeof tripSvc.updateTrip>[2], role: string) {
+    // Re-anchor the budget while the outgoing currency is still on the trip row,
+    // otherwise the frozen FX rates and the currency-less expenses that inherit the
+    // trip's base are left pointing at a currency that no longer exists (#1543).
+    await rebaseTripCurrency(tripId, body.currency);
     return tripSvc.updateTrip(tripId, userId, body, role);
   }
 
@@ -88,6 +97,22 @@ export class TripsService {
 
   removeMember(tripId: string, targetId: number): void {
     tripSvc.removeMember(tripId, targetId);
+  }
+
+  transferOwnership(tripId: string, newOwnerId: number, currentOwnerId: number) {
+    return tripSvc.transferOwnership(tripId, newOwnerId, currentOwnerId);
+  }
+
+  createGuest(tripId: string, name: string, invitedBy: number) {
+    return tripSvc.createGuest(tripId, name, invitedBy);
+  }
+
+  renameGuest(tripId: string, guestUserId: number, name: string): boolean {
+    return tripSvc.renameGuest(tripId, guestUserId, name);
+  }
+
+  deleteGuest(tripId: string, guestUserId: number): boolean {
+    return tripSvc.deleteGuest(tripId, guestUserId);
   }
 
   exportICS(tripId: string) {

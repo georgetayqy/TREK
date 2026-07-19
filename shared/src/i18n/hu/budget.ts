@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': 'Senki sem tartozik neked',
   'costs.yourShare': 'A te részed',
   'costs.youPaid': 'Te fizettél',
+  'costs.outstanding': 'Rendezetlen összeg',
+  'costs.outstandingSub': 'Fizető nélküli költségek',
+  'costs.outstandingItems': 'költség fizetőre vár',
   'costs.expenses': 'Költségek',
   'costs.entries': '{count} bejegyzés',
   'costs.searchPlaceholder': 'Költségek keresése…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} ennyi: {to}',
   'costs.category': 'Kategória',
   'costs.whoPaid': 'Ki fizetett?',
+  'costs.multiplePayers': 'Többen fizettek',
+  'costs.singlePayer': 'Egy személy fizetett',
+  'costs.payersUnbalanced': 'A fizetők összegeinek {amount} értéket kell kiadniuk',
   'costs.splitBetween': 'Egyenlően elosztva köztük',
   'costs.pickSomeone': 'Válassz legalább egy személyt a megosztáshoz.',
   'costs.splitSummary': '{count} fő közt megosztva · egyenként {amount}',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': 'Csak az összegben — még nincs rendezve',
   'costs.tapToInclude': 'Koppintson a hozzáadáshoz',
   'costs.amount': 'Összeg',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'Összes kategória',
+  'costs.filter.allDays': 'Összes nap',
+  'costs.expensesCount': '{count} kiadás',
 };
-
 export default budget;

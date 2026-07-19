@@ -16,11 +16,14 @@ import { createEphemeralToken } from './ephemeralTokens';
 import { revokeUserSessions } from '../mcp';
 import { startTripReminders } from '../scheduler';
 import { deleteUserCompletely } from './userCleanupService';
+import { emitUserDeleted } from '../plugin-user-lifecycle';
 import { getFlightDistanceKm } from './distanceService';
+import { getCountryFromCoords, getHiddenCountries } from './atlasService';
 import { verifyJwtAndLoadUser } from '../middleware/auth';
 import { User } from '../types';
 import { DEMO_EMAIL_PRIMARY, isDemoEmail } from './demo';
 import { avatarUrl } from './avatarUrl';
+import { joinTripAsMember } from './tripMembership';
 import { isPasskeyConfigured } from './webauthnConfig';
 
 export { avatarUrl };
@@ -277,7 +280,7 @@ export function getPendingMfaSecret(userId: number): string | null {
 // ---------------------------------------------------------------------------
 
 export function getAppConfig(authenticatedUser: { id: number } | null) {
-  const userCount = (db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
+  const userCount = (db.prepare('SELECT COUNT(*) as count FROM users WHERE COALESCE(is_guest, 0) = 0').get() as { count: number }).count;
   const isDemo = process.env.DEMO_MODE?.toLowerCase() === 'true';
   const toggles = resolveAuthToggles();
   const version: string = process.env.APP_VERSION ?? require('../../package.json').version;
@@ -378,7 +381,7 @@ export function registerUser(body: {
   const email = typeof body.email === 'string' ? body.email.trim() : '';
   const { password, invite_token } = body;
 
-  const userCount = (db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
+  const userCount = (db.prepare('SELECT COUNT(*) as count FROM users WHERE COALESCE(is_guest, 0) = 0').get() as { count: number }).count;
 
   let validInvite: any = null;
   if (invite_token) {
@@ -406,7 +409,8 @@ export function registerUser(body: {
     return { error: 'Invalid email format', status: 400 };
   }
 
-  const existingUser = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)').get(email, username);
+  // Ignore guests (#1362): their synthetic username/email must never block a real signup.
+  const existingUser = db.prepare('SELECT id FROM users WHERE (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)) AND COALESCE(is_guest, 0) = 0').get(email, username);
   if (existingUser) {
     return { error: 'Registration failed. Please try different credentials.', status: 409 };
   }
@@ -429,6 +433,11 @@ export function registerUser(body: {
       ).get(validInvite.id);
       if (!updated) {
         console.warn(`[Auth] Invite token ${validInvite.token.slice(0, 8)}... exceeded max_uses due to race condition`);
+      }
+      // Trip-bound invite (#1402): auto-add the freshly registered user to the
+      // trip. Idempotent + owner-safe; no-ops if the bound trip was since deleted.
+      if (validInvite.trip_id) {
+        joinTripAsMember(Number(validInvite.trip_id), Number(result.lastInsertRowid), validInvite.created_by ?? null);
       }
     }
 
@@ -469,7 +478,9 @@ export function loginUser(body: {
     return { error: 'Email and password are required', status: 400 };
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)').get(email) as User | undefined;
+  // Guests (#1362) carry a synthetic email but must never authenticate — treat a
+  // matched guest row exactly like an unknown email (dummy-hash timing preserved).
+  const user = db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND COALESCE(is_guest, 0) = 0').get(email) as User | undefined;
 
   // Always run bcrypt — even for unknown/OIDC-only users — so response time
   // does not reveal whether the email exists in the database (CWE-203/208).
@@ -596,6 +607,7 @@ export function deleteAccount(userId: number, userEmail: string, userRole: strin
     }
   }
   deleteUserCompletely(userId);
+  emitUserDeleted(userId); // let plugins erase their own per-user data
   return { success: true };
 }
 
@@ -612,34 +624,35 @@ export function updateMapsKey(userId: number, maps_api_key: string | null | unde
 
 export function updateApiKeys(
   userId: number,
-  body: { maps_api_key?: string; openweather_api_key?: string }
+  body: { maps_api_key?: string; openweather_api_key?: string; unsplash_api_key?: string }
 ) {
-  const current = db.prepare('SELECT maps_api_key, openweather_api_key FROM users WHERE id = ?').get(userId) as Pick<User, 'maps_api_key' | 'openweather_api_key'> | undefined;
+  const current = db.prepare('SELECT maps_api_key, openweather_api_key, unsplash_api_key FROM users WHERE id = ?').get(userId) as Pick<User, 'maps_api_key' | 'openweather_api_key' | 'unsplash_api_key'> | undefined;
 
   db.prepare(
-    'UPDATE users SET maps_api_key = ?, openweather_api_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    'UPDATE users SET maps_api_key = ?, openweather_api_key = ?, unsplash_api_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
   ).run(
     body.maps_api_key !== undefined ? maybe_encrypt_api_key(body.maps_api_key) : current!.maps_api_key,
     body.openweather_api_key !== undefined ? maybe_encrypt_api_key(body.openweather_api_key) : current!.openweather_api_key,
+    body.unsplash_api_key !== undefined ? maybe_encrypt_api_key(body.unsplash_api_key) : current!.unsplash_api_key,
     userId
   );
 
   const updated = db.prepare(
-    'SELECT id, username, email, role, maps_api_key, openweather_api_key, avatar, mfa_enabled FROM users WHERE id = ?'
-  ).get(userId) as Pick<User, 'id' | 'username' | 'email' | 'role' | 'maps_api_key' | 'openweather_api_key' | 'avatar' | 'mfa_enabled'> | undefined;
+    'SELECT id, username, email, role, maps_api_key, openweather_api_key, unsplash_api_key, avatar, mfa_enabled FROM users WHERE id = ?'
+  ).get(userId) as Pick<User, 'id' | 'username' | 'email' | 'role' | 'maps_api_key' | 'openweather_api_key' | 'unsplash_api_key' | 'avatar' | 'mfa_enabled'> | undefined;
 
   const u = updated ? { ...updated, mfa_enabled: !!(updated.mfa_enabled === 1 || updated.mfa_enabled === true) } : undefined;
   return {
     success: true,
-    user: { ...u, maps_api_key: mask_stored_api_key(u?.maps_api_key), openweather_api_key: mask_stored_api_key(u?.openweather_api_key), avatar_url: avatarUrl(updated || {}) },
+    user: { ...u, maps_api_key: mask_stored_api_key(u?.maps_api_key), openweather_api_key: mask_stored_api_key(u?.openweather_api_key), unsplash_api_key: mask_stored_api_key(u?.unsplash_api_key), avatar_url: avatarUrl(updated || {}) },
   };
 }
 
 export function updateSettings(
   userId: number,
-  body: { maps_api_key?: string; openweather_api_key?: string; username?: string; email?: string }
+  body: { maps_api_key?: string; openweather_api_key?: string; unsplash_api_key?: string; username?: string; email?: string }
 ): { error?: string; status?: number; success?: boolean; user?: Record<string, unknown> } {
-  const { maps_api_key, openweather_api_key, username, email } = body;
+  const { maps_api_key, openweather_api_key, unsplash_api_key, username, email } = body;
 
   if (username !== undefined) {
     const trimmed = username.trim();
@@ -649,7 +662,7 @@ export function updateSettings(
     if (!/^[a-zA-Z0-9_.-]+$/.test(trimmed)) {
       return { error: 'Username can only contain letters, numbers, underscores, dots and hyphens', status: 400 };
     }
-    const conflict = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ?').get(trimmed, userId);
+    const conflict = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND id != ? AND COALESCE(is_guest, 0) = 0').get(trimmed, userId);
     if (conflict) return { error: 'Username already taken', status: 409 };
   }
 
@@ -658,7 +671,7 @@ export function updateSettings(
     if (!trimmed || !EMAIL_REGEX.test(trimmed)) {
       return { error: 'Invalid email format', status: 400 };
     }
-    const conflict = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND id != ?').get(trimmed, userId);
+    const conflict = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND id != ? AND COALESCE(is_guest, 0) = 0').get(trimmed, userId);
     if (conflict) return { error: 'Email already taken', status: 409 };
   }
 
@@ -667,6 +680,7 @@ export function updateSettings(
 
   if (maps_api_key !== undefined) { updates.push('maps_api_key = ?'); params.push(maybe_encrypt_api_key(maps_api_key)); }
   if (openweather_api_key !== undefined) { updates.push('openweather_api_key = ?'); params.push(maybe_encrypt_api_key(openweather_api_key)); }
+  if (unsplash_api_key !== undefined) { updates.push('unsplash_api_key = ?'); params.push(maybe_encrypt_api_key(unsplash_api_key)); }
   if (username !== undefined) { updates.push('username = ?'); params.push(username.trim()); }
   if (email !== undefined) { updates.push('email = ?'); params.push(email.trim()); }
 
@@ -677,26 +691,27 @@ export function updateSettings(
   }
 
   const updated = db.prepare(
-    'SELECT id, username, email, role, maps_api_key, openweather_api_key, avatar, mfa_enabled FROM users WHERE id = ?'
-  ).get(userId) as Pick<User, 'id' | 'username' | 'email' | 'role' | 'maps_api_key' | 'openweather_api_key' | 'avatar' | 'mfa_enabled'> | undefined;
+    'SELECT id, username, email, role, maps_api_key, openweather_api_key, unsplash_api_key, avatar, mfa_enabled FROM users WHERE id = ?'
+  ).get(userId) as Pick<User, 'id' | 'username' | 'email' | 'role' | 'maps_api_key' | 'openweather_api_key' | 'unsplash_api_key' | 'avatar' | 'mfa_enabled'> | undefined;
 
   const u = updated ? { ...updated, mfa_enabled: !!(updated.mfa_enabled === 1 || updated.mfa_enabled === true) } : undefined;
   return {
     success: true,
-    user: { ...u, maps_api_key: mask_stored_api_key(u?.maps_api_key), openweather_api_key: mask_stored_api_key(u?.openweather_api_key), avatar_url: avatarUrl(updated || {}) },
+    user: { ...u, maps_api_key: mask_stored_api_key(u?.maps_api_key), openweather_api_key: mask_stored_api_key(u?.openweather_api_key), unsplash_api_key: mask_stored_api_key(u?.unsplash_api_key), avatar_url: avatarUrl(updated || {}) },
   };
 }
 
 export function getSettings(userId: number): { error?: string; status?: number; settings?: Record<string, unknown> } {
   const user = db.prepare(
-    'SELECT role, maps_api_key, openweather_api_key FROM users WHERE id = ?'
-  ).get(userId) as Pick<User, 'role' | 'maps_api_key' | 'openweather_api_key'> | undefined;
+    'SELECT role, maps_api_key, openweather_api_key, unsplash_api_key FROM users WHERE id = ?'
+  ).get(userId) as Pick<User, 'role' | 'maps_api_key' | 'openweather_api_key' | 'unsplash_api_key'> | undefined;
   if (user?.role !== 'admin') return { error: 'Admin access required', status: 403 };
 
   return {
     settings: {
       maps_api_key: decrypt_api_key(user.maps_api_key),
       openweather_api_key: decrypt_api_key(user.openweather_api_key),
+      unsplash_api_key: decrypt_api_key(user.unsplash_api_key),
     },
   };
 }
@@ -707,7 +722,9 @@ export function getSettings(userId: number): { error?: string; status?: number; 
 
 export async function saveAvatar(userId: number, filename: string) {
   const current = db.prepare('SELECT avatar FROM users WHERE id = ?').get(userId) as { avatar: string | null } | undefined;
-  if (current && current.avatar) {
+  // Only a locally uploaded file has something to clean up. An OIDC picture URL
+  // (#1399) has no file on disk, so skip the rm — path.join on a URL is meaningless.
+  if (current?.avatar && !/^https:\/\//i.test(current.avatar)) {
     // Fire-and-forget: leftover files are harmless; the DB update is
     // the source of truth for which avatar is current.
     const oldPath = path.join(avatarDir, current.avatar);
@@ -722,7 +739,8 @@ export async function saveAvatar(userId: number, filename: string) {
 
 export async function deleteAvatar(userId: number) {
   const current = db.prepare('SELECT avatar FROM users WHERE id = ?').get(userId) as { avatar: string | null } | undefined;
-  if (current && current.avatar) {
+  // An OIDC picture URL (#1399) has no local file — only rm an uploaded one.
+  if (current?.avatar && !/^https:\/\//i.test(current.avatar)) {
     const filePath = path.join(avatarDir, current.avatar);
     await fs.promises.rm(filePath, { force: true }).catch(() => {});
   }
@@ -735,8 +753,10 @@ export async function deleteAvatar(userId: number) {
 // ---------------------------------------------------------------------------
 
 export function listUsers(excludeUserId: number) {
+  // The global user directory feeds the trip member-add / contributor pickers —
+  // guests (#1362) are trip-scoped and must never be selectable here.
   const users = db.prepare(
-    'SELECT id, username, avatar FROM users WHERE id != ? ORDER BY username ASC'
+    'SELECT id, username, avatar FROM users WHERE id != ? AND COALESCE(is_guest, 0) = 0 ORDER BY username ASC'
   ).all(excludeUserId) as Pick<User, 'id' | 'username' | 'avatar'>[];
   return users.map(u => ({ ...u, avatar_url: avatarUrl(u) }));
 }
@@ -977,6 +997,29 @@ export function getTravelStats(userId: number) {
   `).all(userId, userId) as { country_code: string }[];
   placeRegionCodes.forEach(r => { if (r.country_code) countryCodes.add(r.country_code.toUpperCase()); });
 
+  // Transport bookings don't create a place row, so their geocoded endpoints never
+  // reached place_regions — a country reached only by a flight/train (no lodging or
+  // planned place there) was never counted as visited (#1366). Resolve each endpoint
+  // coordinate to a country and fold it in too.
+  // Only 'from'/'to' legs count as actually reached — a 'stop' is an intermediate
+  // connection/layover (e.g. a plane change) the traveler never really visited (#1486).
+  const endpoints = db.prepare(`
+    SELECT DISTINCT e.lat, e.lng
+    FROM reservation_endpoints e
+    JOIN reservations r ON e.reservation_id = r.id
+    JOIN trips t ON r.trip_id = t.id
+    LEFT JOIN trip_members tm ON t.id = tm.trip_id
+    WHERE (t.user_id = ? OR tm.user_id = ?) AND e.role IN ('from', 'to')
+  `).all(userId, userId) as { lat: number; lng: number }[];
+  for (const e of endpoints) {
+    const code = getCountryFromCoords(e.lat, e.lng);
+    if (code) countryCodes.add(code.toUpperCase());
+  }
+
+  // Countries the user removed in Atlas stay removed on the dashboard too, so the
+  // passport card and the Atlas map agree (#1490).
+  for (const code of getHiddenCountries(userId)) countryCodes.delete(code.toUpperCase());
+
   return {
     countries: [...countryCodes],
     cities: [...cities],
@@ -1201,7 +1244,8 @@ export function requestPasswordReset(rawEmail: string, createdIp: string | null)
     return { tokenForDelivery: null, userId: null, userEmail: null, reason: 'no_user' };
   }
 
-  const user = db.prepare('SELECT id, email, password_hash, oidc_sub FROM users WHERE email = ?').get(email) as
+  // A guest (#1362) must never receive a reset link — treat its synthetic email as unknown.
+  const user = db.prepare('SELECT id, email, password_hash, oidc_sub FROM users WHERE email = ? AND COALESCE(is_guest, 0) = 0').get(email) as
     | { id: number; email: string; password_hash: string | null; oidc_sub: string | null }
     | undefined;
 

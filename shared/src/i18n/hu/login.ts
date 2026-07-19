@@ -9,7 +9,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places, útvonalak és csoportosítás',
   'login.features.realtime': 'Valós idejű szinkron',
   'login.features.realtimeDesc': 'Közös tervezés WebSocket-en keresztül',
-  'login.features.budget': 'Költségvetés-követés',
+  'login.features.budget': 'Költségkövetés',
   'login.features.budgetDesc': 'Kategóriák, diagramok és személyenkénti költségek',
   'login.features.collab': 'Együttműködés',
   'login.features.collabDesc': 'Többfelhasználós, megosztott utazásokkal',
@@ -86,5 +86,9 @@ const login: TranslationStrings = {
   'login.resetPasswordFailed': 'A visszaállítás nem sikerült. A link lehet, hogy lejárt.',
   'login.passkey.signIn': 'Bejelentkezés passkey-jel',
   'login.passkey.failed': 'A passkey-bejelentkezés sikertelen. Kérjük, próbáld újra.',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

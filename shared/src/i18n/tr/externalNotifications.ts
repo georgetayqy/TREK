@@ -28,6 +28,10 @@ const tr: NotificationLocale = {
       title: 'Vacay Fusion Daveti',
       body: `${p.actor} sizi tatil planlarını birleştirmeye davet etti. Kabul etmek veya reddetmek için TREK'i açın.`,
     }),
+    collection_invite: (p) => ({
+      title: 'Koleksiyon daveti',
+      body: `${p.actor} sizi bir koleksiyonu paylaşmaya davet etti. Kabul etmek veya reddetmek için TREK’i açın.`,
+    }),
     photos_shared: (p) => ({
       title: `${p.count} fotoğraf paylaşıldı`,
       body: `${p.actor}, "${p.trip}" içinde ${p.count} fotoğraf paylaştı.`,
@@ -48,6 +52,7 @@ const tr: NotificationLocale = {
       title: 'Synology oturumu temizlendi',
       body: 'Synology hesabınız veya URL değişti. Synology Photos oturumunuz kapatıldı.',
     }),
+    plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
   },
   passwordReset: {
     subject: 'Şifrenizi sıfırlayın',

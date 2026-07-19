@@ -8,7 +8,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places, rotas e agrupamento',
   'login.features.realtime': 'Sincronização em tempo real',
   'login.features.realtimeDesc': 'Planejem juntos via WebSocket',
-  'login.features.budget': 'Controle de orçamento',
+  'login.features.budget': 'Controle de custos',
   'login.features.budgetDesc': 'Categorias, gráficos e custo por pessoa',
   'login.features.collab': 'Colaboração',
   'login.features.collabDesc': 'Vários usuários com viagens compartilhadas',
@@ -84,5 +84,9 @@ const login: TranslationStrings = {
   'login.resetPasswordFailed': 'Falha na redefinição. O link pode ter expirado.',
   'login.passkey.signIn': 'Entrar com uma passkey',
   'login.passkey.failed': 'Falha ao entrar com passkey. Tente novamente.',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

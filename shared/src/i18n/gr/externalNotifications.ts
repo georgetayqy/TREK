@@ -28,6 +28,10 @@ const gr: NotificationLocale = {
       title: 'Πρόσκληση συγχώνευσης διακοπών',
       body: `Ο/Η ${p.actor} σας προσκάλεσε να συγχωνεύσετε τα σχέδια διακοπών σας. Ανοίξτε το TREK για να αποδεχτείτε ή να απορρίψετε.`,
     }),
+    collection_invite: (p) => ({
+      title: 'Πρόσκληση σε συλλογή',
+      body: `Ο/Η ${p.actor} σας προσκάλεσε να μοιραστείτε μια συλλογή. Ανοίξτε το TREK για να αποδεχτείτε ή να απορρίψετε.`,
+    }),
     photos_shared: (p) => ({
       title: `${p.count} φωτογραφίες κοινοποιήθηκαν`,
       body: `Ο/Η ${p.actor} κοινοποίησε ${p.count} φωτογραφία/ες στο "${p.trip}".`,
@@ -48,6 +52,7 @@ const gr: NotificationLocale = {
       title: 'Η σύνδεση Synology τερματίστηκε',
       body: 'Ο λογαριασμός σας Synology ή το URL άλλαξε. Έχετε αποσυνδεθεί από το Synology Photos.',
     }),
+    plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
   },
   passwordReset: {
     subject: 'Επαναφορά κωδικού πρόσβασης',

@@ -8,7 +8,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places, trasy a shlukování bodů',
   'login.features.realtime': 'Synchronizace v reálném čase',
   'login.features.realtimeDesc': 'Plánujte společně přes WebSocket',
-  'login.features.budget': 'Sledování rozpočtu',
+  'login.features.budget': 'Sledování nákladů',
   'login.features.budgetDesc': 'Kategorie, grafy a náklady na osobu',
   'login.features.collab': 'Spolupráce',
   'login.features.collabDesc': 'Více uživatelů se sdílenými cestami',
@@ -84,5 +84,9 @@ const login: TranslationStrings = {
   'login.resetPasswordFailed': 'Obnovení se nezdařilo. Odkaz mohl vypršet.',
   'login.passkey.signIn': 'Přihlásit se pomocí přístupového klíče',
   'login.passkey.failed': 'Přihlášení přístupovým klíčem se nezdařilo. Zkuste to prosím znovu.',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

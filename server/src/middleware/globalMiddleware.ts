@@ -82,6 +82,14 @@ export function applyGlobalMiddleware(
   // answer OPTIONS without Access-Control-Allow-Origin before the SDK's own cors() runs.
   // All /.well-known/* paths get open CORS so clients probing openid-configuration or the
   // RFC 8414 path-suffixed AS metadata form don't get CORS-blocked (they get 404 JSON instead).
+  //
+  // `exposedHeaders` is load-bearing, not cosmetic. Without Access-Control-Expose-Headers the
+  // Fetch spec forbids a browser-context client (Claude Desktop connectors, Claude.ai, MCP
+  // Inspector) from *reading* Mcp-Session-Id off the initialize response — so it can never echo
+  // the header back, every request looks like a fresh initialize, and the server mints a new
+  // session per tool call until the per-user cap wedges the connection. Same reasoning for
+  // WWW-Authenticate, which carries the RFC 9728 resource-metadata challenge that drives
+  // OAuth discovery.
   app.use(
     (req: Request, _res: Response, next: NextFunction) => {
       if (
@@ -91,7 +99,11 @@ export function applyGlobalMiddleware(
         req.path === '/oauth/userinfo' ||
         req.path === '/mcp'
       ) {
-        cors({ origin: '*', credentials: false })(req, _res, next);
+        cors({
+          origin: '*',
+          credentials: false,
+          exposedHeaders: ['Mcp-Session-Id', 'MCP-Protocol-Version', 'WWW-Authenticate'],
+        })(req, _res, next);
       } else {
         next();
       }
@@ -123,7 +135,10 @@ export function applyGlobalMiddleware(
         // 'self' so same-origin file previews can embed PDFs via <object>/<embed>
         // (Firefox/Chrome enforce object-src; 'none' broke inline PDF previews there).
         objectSrc: ["'self'"],
-        frameSrc: ["'none'"],
+        // 'self' so the app can embed same-origin, sandboxed plugin frames
+        // (/plugin-frame/*). Those frames are sandboxed WITHOUT allow-same-origin,
+        // so they run at an opaque origin and get their own locked-down CSP.
+        frameSrc: ["'self'"],
         frameAncestors: ["'self'"],
         // Restrict <form> submission targets (form-action has no default-src
         // fallback, so it must be set explicitly).

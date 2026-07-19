@@ -11,6 +11,8 @@ import {
   buildUser,
   buildTrip,
   buildDay,
+  buildPlace,
+  buildAssignment,
   buildReservation,
   buildTripFile,
 } from '../../../tests/helpers/factories';
@@ -69,6 +71,12 @@ describe('TransportModal', () => {
   it('FE-PLANNER-TRANSMODAL-002: shows "Add transport" title for new transport', () => {
     render(<TransportModal {...defaultProps} reservation={null} />);
     expect(screen.getByText(/Add transport/i)).toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-002b: file input accepts pkpass (#1448)', () => {
+    render(<TransportModal {...defaultProps} />);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(fileInput.accept).toContain('.pkpass');
   });
 
   it('FE-PLANNER-TRANSMODAL-003: shows "Edit transport" title when editing', () => {
@@ -323,5 +331,186 @@ describe('TransportModal', () => {
     const [fd] = onFileUpload.mock.calls[0] as [FormData];
     expect(fd.get('reservation_id')).toBe('99');
     expect(fd.get('file')).toBeTruthy();
+  });
+
+  // ── Transit itinerary preservation (#1065) ─────────────────────────────────
+
+  it('FE-PLANNER-TRANSMODAL-020: re-saving a transit reservation keeps metadata.transit + stop endpoints', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const res = buildReservation({ title: 'Fernsehturm → Zoo', type: 'bus' }) as any;
+    res.metadata = { transit: { provider: 'transitous', transfers: 1, legs: [{ mode: 'BUS', line: '100' }] } };
+    res.endpoints = [
+      { role: 'from', sequence: 0, name: 'Fernsehturm', code: null, lat: 52.5208, lng: 13.4094, timezone: 'Europe/Berlin', local_date: '2025-06-01', local_time: '08:30' },
+      { role: 'stop', sequence: 1, name: 'Alexanderplatz', code: null, lat: 52.521, lng: 13.41, timezone: 'Europe/Berlin', local_date: '2025-06-01', local_time: '08:40' },
+      { role: 'to', sequence: 2, name: 'Zoologischer Garten', code: null, lat: 52.507, lng: 13.332, timezone: 'Europe/Berlin', local_date: '2025-06-01', local_time: '09:00' },
+    ];
+    render(<TransportModal {...defaultProps} reservation={res} onSave={onSave} />);
+    // Save without touching the route — the itinerary must survive.
+    await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const payload = onSave.mock.calls[0][0];
+    expect(payload.metadata?.transit?.provider).toBe('transitous');
+    expect(payload.metadata?.transit?.legs).toHaveLength(1);
+    expect(payload.endpoints.map((e: { role: string }) => e.role)).toEqual(['from', 'stop', 'to']);
+    expect(payload.endpoints[1]).toMatchObject({ name: 'Alexanderplatz', lat: 52.521 });
+  });
+
+  it('FE-PLANNER-TRANSMODAL-021: changing the destination drops the stale transit itinerary', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const res = buildReservation({ title: 'Fernsehturm → Zoo', type: 'bus' }) as any;
+    res.metadata = { transit: { provider: 'transitous', legs: [{ mode: 'BUS' }] } };
+    res.endpoints = [
+      { role: 'from', sequence: 0, name: 'Fernsehturm', code: null, lat: 52.5208, lng: 13.4094, timezone: 'Europe/Berlin', local_date: null, local_time: null },
+      { role: 'stop', sequence: 1, name: 'Alexanderplatz', code: null, lat: 52.521, lng: 13.41, timezone: 'Europe/Berlin', local_date: null, local_time: null },
+      { role: 'to', sequence: 2, name: 'Zoologischer Garten', code: null, lat: 52.507, lng: 13.332, timezone: 'Europe/Berlin', local_date: null, local_time: null },
+    ];
+    render(<TransportModal {...defaultProps} reservation={res} onSave={onSave} />);
+    // Pick a different destination (mocked LocationSelect emits lat/lng 0,0).
+    const locationInputs = screen.getAllByTestId('location-select');
+    fireEvent.change(locationInputs[1], { target: { value: 'Somewhere Else' } });
+    await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const payload = onSave.mock.calls[0][0];
+    expect(payload.metadata?.transit).toBeUndefined();
+    expect(payload.endpoints.map((e: { role: string }) => e.role)).toEqual(['from', 'to']);
+  });
+
+  it('FE-PLANNER-TRANSMODAL-029: re-saving a joined AirTrail flight keeps metadata.airtrail_ids (#1535)', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const res = buildReservation({ title: 'BRU → HEL → JFK', type: 'flight' }) as any;
+    res.metadata = {
+      airline: 'Finnair',
+      flight_number: 'AY1502',
+      airtrail_ids: ['101', '102'],
+      legs: [
+        { from: 'BRU', to: 'HEL', flight_number: 'AY1502', dep_time: '08:00', arr_time: '12:30' },
+        { from: 'HEL', to: 'JFK', flight_number: 'AY15', dep_time: '14:00', arr_time: '15:00' },
+      ],
+    };
+    res.endpoints = [
+      { role: 'from', sequence: 0, name: 'Brussels', code: 'BRU', lat: 50.9, lng: 4.48, timezone: 'Europe/Brussels', local_date: '2025-06-01', local_time: '08:00' },
+      { role: 'stop', sequence: 1, name: 'Helsinki-Vantaa', code: 'HEL', lat: 60.32, lng: 24.96, timezone: 'Europe/Helsinki', local_date: '2025-06-01', local_time: '14:00' },
+      { role: 'to', sequence: 2, name: 'JFK', code: 'JFK', lat: 40.64, lng: -73.78, timezone: 'America/New_York', local_date: '2025-06-01', local_time: '15:00' },
+    ];
+    render(<TransportModal {...defaultProps} reservation={res} onSave={onSave} />);
+    // A routine edit (retitle + save) must not cost the booking its AirTrail
+    // linkage — the import picker relies on it to not re-offer the legs.
+    await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0].metadata?.airtrail_ids).toEqual(['101', '102']);
+  });
+
+  // ── Manual / Automated creation switch (#1065) ─────────────────────────────
+
+  it('FE-PLANNER-TRANSMODAL-022: creating shows the Manual/Automated switch; Automated opens the transit search', async () => {
+    render(<TransportModal {...defaultProps} places={[]} accommodations={[]} />);
+    expect(screen.getByRole('button', { name: 'Manual transport' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Automated transport' }));
+    // No day selected in defaultProps (days: []) — the pick-day hint shows.
+    expect(screen.getByText(/Pick a day/)).toBeInTheDocument();
+    // The manual form is gone in automated mode.
+    expect(screen.queryByPlaceholderText(/e\.g\. Lufthansa/i)).not.toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-022b: a trip without start/end dates only offers the manual form', () => {
+    render(<TransportModal {...defaultProps} tripHasDates={false} places={[]} accommodations={[]} />);
+    expect(screen.queryByRole('button', { name: 'Automated transport' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Manual transport' })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/e\.g\. Lufthansa/i)).toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-023: initialAutomated opens straight in the transit search with the day preset', () => {
+    const days = [{ id: 10, trip_id: 1, day_number: 1, date: '2025-06-01', title: 'Day 1' }] as any;
+    render(<TransportModal {...defaultProps} days={days} selectedDayId={10} initialAutomated places={[]} accommodations={[]} />);
+    expect(screen.getAllByPlaceholderText('Search stop or station…')).toHaveLength(2);
+  });
+
+  it('FE-PLANNER-TRANSMODAL-028: automated quick picks only offer the chosen day\'s places (#1460)', async () => {
+    const days = [
+      buildDay({ id: 10, date: '2025-06-01' }),
+      buildDay({ id: 11, date: '2025-06-02' }),
+    ];
+    const louvre = buildPlace({ id: 1, name: 'Louvre' });
+    const eiffel = buildPlace({ id: 2, name: 'Eiffel Tower' });
+    const assignments = {
+      '10': [buildAssignment({ day_id: 10, place_id: louvre.id, place: louvre })],
+      '11': [buildAssignment({ day_id: 11, place_id: eiffel.id, place: eiffel })],
+    };
+    render(<TransportModal {...defaultProps} days={days} selectedDayId={10} initialAutomated places={[louvre, eiffel]} assignments={assignments} accommodations={[]} />);
+    // Focusing the "from" field opens the quick picks — day 1's place only.
+    const [fromInput] = screen.getAllByPlaceholderText('Search stop or station…');
+    await userEvent.click(fromInput);
+    expect(screen.getByText('Louvre')).toBeInTheDocument();
+    expect(screen.queryByText('Eiffel Tower')).not.toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-024: editing shows no Manual/Automated switch', () => {
+    const res = buildReservation({ title: 'My Train', type: 'train' });
+    render(<TransportModal {...defaultProps} reservation={res} />);
+    expect(screen.queryByRole('button', { name: 'Automated transport' })).not.toBeInTheDocument();
+  });
+
+  // ── Multi-leg trains (#1150) ───────────────────────────────────────────────
+
+  it('FE-PLANNER-TRANSMODAL-025: a train with an added stop saves from/stop/to endpoints + metadata.legs', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TransportModal {...defaultProps} onSave={onSave} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'Berlin → München');
+    // Insert an intermediate station (2 → 3 stations = 2 legs).
+    await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
+    const stations = screen.getAllByTestId('location-select');
+    expect(stations).toHaveLength(3);
+    fireEvent.change(stations[0], { target: { value: 'Berlin Hbf' } });
+    fireEvent.change(stations[1], { target: { value: 'Frankfurt Hbf' } });
+    fireEvent.change(stations[2], { target: { value: 'München Hbf' } });
+    // Per-leg train number on the first station (placeholder ICE 123).
+    const trainNumbers = screen.getAllByPlaceholderText('ICE 123');
+    fireEvent.change(trainNumbers[0], { target: { value: 'ICE 100' } });
+    await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const payload = onSave.mock.calls[0][0];
+    expect(payload.type).toBe('train');
+    expect(payload.endpoints.map((e: { role: string }) => e.role)).toEqual(['from', 'stop', 'to']);
+    expect(payload.endpoints.map((e: { name: string }) => e.name)).toEqual(['Berlin Hbf', 'Frankfurt Hbf', 'München Hbf']);
+    expect(payload.metadata.legs).toHaveLength(2);
+    expect(payload.metadata.legs[0]).toMatchObject({ from: 'Berlin Hbf', to: 'Frankfurt Hbf', train_number: 'ICE 100' });
+    expect(payload.metadata.train_number).toBe('ICE 100'); // flat mirror of leg 0
+  });
+
+  it('FE-PLANNER-TRANSMODAL-027: a train with a day + train number but no geocoded station still saves them (#1150 regression)', async () => {
+    const days = [{ id: 10, trip_id: 1, day_number: 1, date: '2026-08-01', title: 'Day 1' }] as any;
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TransportModal {...defaultProps} days={days} selectedDayId={10} onSave={onSave} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'ICE 599');
+    // Fill the train number + a departure time, but never pick a geocoded station.
+    fireEvent.change(screen.getAllByPlaceholderText('ICE 123')[0], { target: { value: 'ICE 599' } });
+    fireEvent.change(screen.getAllByTestId('time-picker')[0], { target: { value: '08:00' } });
+    await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const payload = onSave.mock.calls[0][0];
+    // The day, time and train number survive even without any map-picked station.
+    expect(payload.day_id).toBe(10);
+    expect(payload.reservation_time).toBe('2026-08-01T08:00');
+    expect(payload.metadata.train_number).toBe('ICE 599');
+    expect(payload.endpoints).toEqual([]); // no geocoded station → no map endpoints, like before
+  });
+
+  it('FE-PLANNER-TRANSMODAL-026: a two-station train saves flat (no metadata.legs)', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TransportModal {...defaultProps} onSave={onSave} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'Köln → Aachen');
+    const stations = screen.getAllByTestId('location-select');
+    fireEvent.change(stations[0], { target: { value: 'Köln Hbf' } });
+    fireEvent.change(stations[1], { target: { value: 'Aachen Hbf' } });
+    fireEvent.change(screen.getAllByPlaceholderText('ICE 123')[0], { target: { value: 'RE 9' } });
+    await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const payload = onSave.mock.calls[0][0];
+    expect(payload.endpoints.map((e: { role: string }) => e.role)).toEqual(['from', 'to']);
+    expect(payload.metadata.legs).toBeUndefined();
+    expect(payload.metadata.train_number).toBe('RE 9');
   });
 });

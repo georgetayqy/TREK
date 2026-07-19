@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': 'Tidak ada yang berhutang padamu',
   'costs.yourShare': 'Bagianmu',
   'costs.youPaid': 'Kamu membayar',
+  'costs.outstanding': 'Jumlah tertunda',
+  'costs.outstandingSub': 'Pengeluaran belum ada pembayar',
+  'costs.outstandingItems': 'pengeluaran perlu pembayar',
   'costs.expenses': 'Pengeluaran',
   'costs.entries': '{count} entri',
   'costs.searchPlaceholder': 'Cari pengeluaran…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} dalam {to}',
   'costs.category': 'Kategori',
   'costs.whoPaid': 'Siapa yang membayar?',
+  'costs.multiplePayers': 'Beberapa orang membayar',
+  'costs.singlePayer': 'Satu orang membayar',
+  'costs.payersUnbalanced': 'Jumlah pembayar harus berjumlah {amount}',
   'costs.splitBetween': 'Bagi rata antara',
   'costs.pickSomeone': 'Pilih setidaknya satu orang untuk berbagi.',
   'costs.splitSummary': 'Dibagi {count} cara · {amount} masing-masing',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': 'Hanya total — belum diselesaikan',
   'costs.tapToInclude': 'Ketuk untuk menyertakan',
   'costs.amount': 'Jumlah',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'Semua kategori',
+  'costs.filter.allDays': 'Semua hari',
+  'costs.expensesCount': '{count} pengeluaran',
 };
-
 export default budget;

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor } from '../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -12,6 +12,13 @@ import DashboardPage from './DashboardPage';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Pin "now" to a date inside the fixtures' trip window (Paris Adventure runs
+  // 2026-07-01..07-10) so the dashboard's past/upcoming/spotlight split is stable
+  // regardless of the wall clock — otherwise these tests break once the date
+  // rolls past the hardcoded fixture window. shouldAdvanceTime keeps userEvent
+  // and async waitFor working under fake timers.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date('2026-07-05T12:00:00Z'));
   resetAllStores();
   // Seed auth with authenticated user
   seedStore(useAuthStore, { isAuthenticated: true, user: buildUser() });
@@ -28,6 +35,10 @@ beforeEach(() => {
       ]);
     }),
   );
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('DashboardPage', () => {
@@ -847,9 +858,6 @@ describe('DashboardPage', () => {
       seedStore(useSettingsStore, {
         settings: {
           map_tile_url: '',
-          default_lat: 48.8566,
-          default_lng: 2.3522,
-          default_zoom: 10,
           dark_mode: 'auto',
           default_currency: 'USD',
           language: 'en',
@@ -900,6 +908,39 @@ describe('DashboardPage', () => {
       expect(s.dashboard_fx_from).toBe('CAD');
       expect(s.dashboard_fx_to).toBe('CHF');
       expect(s.dashboard_timezones).toEqual(['America/New_York']);
+    });
+
+    it('keeps the legacy localStorage keys when the server write fails, so nothing is lost (#1311)', async () => {
+      // The write to persist the migrated values fails (server briefly unavailable during a
+      // docker upgrade). The legacy localStorage source must survive so the next load retries —
+      // the old code deleted it unconditionally, permanently losing the values.
+      server.use(
+        http.put('/api/settings', () => new HttpResponse(null, { status: 500 })),
+        http.post('/api/settings/bulk', () => new HttpResponse(null, { status: 500 })),
+      );
+      localStorage.setItem('trek_fx_from', 'CAD');
+      localStorage.setItem('trek_fx_to', 'CHF');
+      localStorage.setItem('trek_dashboard_tz', JSON.stringify(['America/New_York']));
+      seedStore(useSettingsStore, { settings: buildSettings(), isLoaded: true });
+      render(<DashboardPage />);
+      // The optimistic store update proves the migration effect ran; the failed write must NOT
+      // have removed the localStorage source.
+      await waitFor(() => {
+        expect(useSettingsStore.getState().settings.dashboard_fx_from).toBe('CAD');
+      });
+      expect(localStorage.getItem('trek_fx_from')).toBe('CAD');
+      expect(localStorage.getItem('trek_fx_to')).toBe('CHF');
+      expect(localStorage.getItem('trek_dashboard_tz')).toBe(JSON.stringify(['America/New_York']));
+    });
+
+    it('drops a malformed legacy timezone value instead of retrying forever (#1311)', async () => {
+      localStorage.setItem('trek_dashboard_tz', 'not-json');
+      seedStore(useSettingsStore, { settings: buildSettings(), isLoaded: true });
+      render(<DashboardPage />);
+      await waitFor(() => {
+        expect(localStorage.getItem('trek_dashboard_tz')).toBeNull();
+      });
+      expect(useSettingsStore.getState().settings.dashboard_timezones).toBeUndefined();
     });
   });
 });

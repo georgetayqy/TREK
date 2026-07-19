@@ -3,11 +3,11 @@ import { useTripStore } from '../store/tripStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { calculateRouteWithLegs, withHotelBookends } from '../components/Map/RouteCalculator'
 import { getTransportRouteEndpoints } from '../utils/dayMerge'
-import { getDayBookendHotels } from '../utils/dayOrder'
+import { getDayBookendHotels, shouldDrawMorningLeg, shouldDrawEveningLeg } from '../utils/dayOrder'
 import type { TripStoreState } from '../store/tripStore'
 import type { RouteSegment, RouteResult, Accommodation } from '../types'
 
-const TRANSPORT_TYPES = ['flight', 'train', 'bus', 'car', 'taxi', 'bicycle', 'cruise', 'ferry', 'transport_other']
+const TRANSPORT_TYPES = ['flight', 'train', 'bus', 'car', 'taxi', 'bicycle', 'cruise', 'ferry', 'transit', 'transport_other']
 
 const NO_ACCOMMODATIONS: Accommodation[] = []
 
@@ -66,11 +66,11 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
 
     // Build a unified list of places + transports sorted by effective position.
     type Entry =
-      | { kind: 'place'; lat: number; lng: number; pos: number }
+      | { kind: 'place'; lat: number; lng: number; pos: number; time: string | null }
       | { kind: 'transport'; from: { lat: number; lng: number } | null; to: { lat: number; lng: number } | null; pos: number }
     const entries: Entry[] = [
       ...da.filter(a => a.place?.lat && a.place?.lng).map(a => ({
-        kind: 'place' as const, lat: a.place.lat!, lng: a.place.lng!, pos: a.order_index,
+        kind: 'place' as const, lat: a.place.lat!, lng: a.place.lng!, pos: a.order_index, time: a.place?.place_time ?? null,
       })),
       ...dayTransports.map(r => {
         const { from, to } = getTransportRouteEndpoints(r, dayId)
@@ -89,19 +89,26 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
     //   arrival point starts the next run.
     // - A transport WITHOUT a location is ignored entirely — the places around it
     //   connect directly, as if the booking weren't there.
+    // A run is only a real drive when it contains at least one actual place. Two
+    // back-to-back transports (e.g. two flights on one day) would otherwise pair the
+    // first's arrival point with the second's departure point into a phantom
+    // [airport → airport] road route — that is the flight itself, not a drive (#1394).
     const runs: { lat: number; lng: number }[][] = []
     let currentRun: { lat: number; lng: number }[] = []
+    let runHasPlace = false
     for (const entry of entries) {
       if (entry.kind === 'place') {
         currentRun.push({ lat: entry.lat, lng: entry.lng })
+        runHasPlace = true
       } else if (entry.from || entry.to) {
         if (entry.from) currentRun.push(entry.from)
-        if (currentRun.length >= 2) runs.push(currentRun)
+        if (currentRun.length >= 2 && runHasPlace) runs.push(currentRun)
         currentRun = []
+        runHasPlace = false
         if (entry.to) currentRun.push(entry.to)
       }
     }
-    if (currentRun.length >= 2) runs.push(currentRun)
+    if (currentRun.length >= 2 && runHasPlace) runs.push(currentRun)
 
     // Bookend the route with the day's accommodation: a hotel → first-stop run and
     // a last-stop → hotel run, so the drawn line matches the sidebar's hotel legs.
@@ -118,17 +125,19 @@ export function useRouteCalculation(tripStore: TripStoreState, selectedDayId: nu
     }
     const hotelPt = (a?: Accommodation) =>
       a && a.place_lat != null && a.place_lng != null ? { lat: a.place_lat, lng: a.place_lng } : null
-    // Only draw a hotel bookend when the leg is real. A hotel → first-stop leg holds
-    // if the first stop is a place, or if you actually slept in that hotel last night;
-    // on a day-1 arrival the morning hotel is just a check-in fallback and the first
-    // waypoint is the transport's departure point, so [hotel → departure] is dropped
-    // (#1321). Symmetrically, [last-stop → hotel] is dropped when you leave on a transport
-    // in the evening and don't sleep in that hotel tonight.
+    // Only draw a hotel bookend when the leg is a real drive. You start/end the day at a hotel
+    // when you slept there / sleep there tonight; on the hotel's own check-in or check-out day
+    // the leg holds only when the edge stop is a PLACE timed after check-in / before check-out
+    // (you dropped bags first, or swung back before checking out). A place before check-in (an
+    // airport you reach first, #1465), a later "home" stop on the checkout day (#1465), or a
+    // transport endpoint on an arrival/departure day (#1321, S7) all draw no bookend.
     const contributes = (e: Entry) => e.kind === 'place' || !!e.from || !!e.to
     const firstStop = entries.find(contributes)
     const lastStop = [...entries].reverse().find(contributes)
-    const drawMorning = firstStop?.kind === 'place' || !!bookends?.morningIsSleptHere
-    const drawEvening = lastStop?.kind === 'place' || !!bookends?.eveningIsOvernight
+    const edgeInfo = (e?: Entry) =>
+      e ? { isPlace: e.kind === 'place', time: e.kind === 'place' ? e.time : null } : undefined
+    const drawMorning = !!bookends && !!day && shouldDrawMorningLeg(bookends, day, edgeInfo(firstStop))
+    const drawEvening = !!bookends && !!day && shouldDrawEveningLeg(bookends, day, edgeInfo(lastStop))
     const runsWithHotel = withHotelBookends(
       runs,
       flatPts[0],

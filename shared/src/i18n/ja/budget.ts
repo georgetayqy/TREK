@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': '受け取る額はありません',
   'costs.yourShare': 'あなたの負担分',
   'costs.youPaid': 'あなたが支払った額',
+  'costs.outstanding': '未精算の金額',
+  'costs.outstandingSub': '支払者が未設定の支出',
+  'costs.outstandingItems': '件の支出に支払者が必要',
   'costs.expenses': '支出',
   'costs.entries': '{count}件',
   'costs.searchPlaceholder': '支出を検索…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} = {to}',
   'costs.category': 'カテゴリ',
   'costs.whoPaid': '誰が支払いましたか？',
+  'costs.multiplePayers': '複数人が支払い',
+  'costs.singlePayer': '1人が支払い',
+  'costs.payersUnbalanced': '支払者の金額の合計は {amount} である必要があります',
   'costs.splitBetween': '均等に分割する相手',
   'costs.pickSomeone': '分割する相手を少なくとも1人選んでください。',
   'costs.splitSummary': '{count}人で分割 · 各{amount}',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': '合計のみ — 未精算',
   'costs.tapToInclude': 'タップして追加',
   'costs.amount': '金額',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'すべてのカテゴリー',
+  'costs.filter.allDays': 'すべての日',
+  'costs.expensesCount': '{count}件の支出',
 };
-
 export default budget;

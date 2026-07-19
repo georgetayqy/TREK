@@ -64,6 +64,20 @@ describe('FilesController (parity with the legacy /api/trips/:tripId/files route
       expect(createFile).toHaveBeenCalledWith('5', file, 1, { place_id: undefined, description: 'd', reservation_id: undefined });
       expect(broadcast).toHaveBeenCalledWith('5', 'file:created', { file: { id: 9 } }, 'sock');
     });
+
+    it('caps non-video by extension and accepts large video; cleans up on rejection (#823)', () => {
+      const big = { filename: 'big.pdf', originalname: 'big.pdf', size: 60 * 1024 * 1024, path: '' } as Express.Multer.File;
+      expect(thrown(() => new FilesController(fsvc()).upload(user, '5', big, {}))).toEqual({ status: 400, body: { error: 'File is too large' } });
+
+      const createFile = vi.fn().mockReturnValue({ id: 9 });
+      const vid = { filename: 'v.mp4', originalname: 'clip.mp4', size: 200 * 1024 * 1024, path: '' } as Express.Multer.File;
+      expect(new FilesController(fsvc({ createFile, broadcast: vi.fn() } as Partial<FilesService>)).upload(user, '5', vid, {})).toEqual({ file: { id: 9 } });
+
+      // A rejected upload with a real path triggers the unlink cleanup branch
+      // (the file doesn't exist, so the inner best-effort catch swallows it).
+      const withPath = { filename: 'a.pdf', path: '/nonexistent/zzz.pdf' } as Express.Multer.File;
+      expect(thrown(() => new FilesController(fsvc({ can: vi.fn().mockReturnValue(false) })).upload(user, '5', withPath, {}))).toEqual({ status: 403, body: { error: 'No permission to upload files' } });
+    });
   });
 
   it('PUT /:id 403 without file_edit, 404 unknown, else updates + broadcasts', () => {
@@ -204,6 +218,24 @@ describe('FilesDownloadController', () => {
     }
   });
 
+  it('serves a .pkpasses bundle inline with its own Wallet MIME type', () => {
+    const real = path.join(os.tmpdir(), `trek-pass-${Date.now()}.pkpasses`);
+    fs.writeFileSync(real, 'x');
+    try {
+      const setHeader = vi.fn();
+      const localRes = { setHeader, sendFile: vi.fn() } as unknown as Response;
+      const s = dsvc({
+        getFileById: vi.fn().mockReturnValue({ filename: 'passes.pkpasses', original_name: 'BoardingPasses.pkpasses' }),
+        resolveFilePath: vi.fn().mockReturnValue({ resolved: real, safe: true }),
+      });
+      new FilesDownloadController(s).download(req, localRes, '5', '9');
+      expect(setHeader).toHaveBeenCalledWith('Content-Type', 'application/vnd.apple.pkpasses');
+      expect(setHeader).toHaveBeenCalledWith('Content-Disposition', 'inline; filename="BoardingPasses.pkpasses"');
+    } finally {
+      fs.unlinkSync(real);
+    }
+  });
+
   it('falls back to the resolved basename when a .pkpass has no original name', () => {
     const real = path.join(os.tmpdir(), `trek-pass-${Date.now()}.pkpass`);
     fs.writeFileSync(real, 'x');
@@ -240,7 +272,7 @@ describe('PhotosController', () => {
     await c.thumbnail(user2, '5', res);
     expect(stream).toHaveBeenCalledWith(res, 1, 5, 'thumbnail');
     await c.original(user2, '5', res);
-    expect(stream).toHaveBeenCalledWith(res, 1, 5, 'original');
+    expect(stream).toHaveBeenCalledWith(res, 1, 5, 'original', undefined);
   });
 
   it('info writes the data, maps a service error', async () => {

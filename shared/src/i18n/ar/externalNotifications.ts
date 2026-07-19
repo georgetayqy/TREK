@@ -28,6 +28,10 @@ const ar: NotificationLocale = {
       title: 'دعوة دمج الإجازة',
       body: `${p.actor} يدعوك لدمج خطط الإجازة. افتح TREK للقبول أو الرفض.`,
     }),
+    collection_invite: (p) => ({
+      title: 'دعوة إلى مجموعة',
+      body: `${p.actor} يدعوك لمشاركة مجموعة. افتح TREK للقبول أو الرفض.`,
+    }),
     photos_shared: (p) => ({
       title: `${p.count} صور مشتركة`,
       body: `${p.actor} شارك ${p.count} صورة في "${p.trip}".`,
@@ -48,6 +52,7 @@ const ar: NotificationLocale = {
       title: 'تمت إعادة تعيين جلسة Synology',
       body: 'تغيّر حسابك أو رابط Synology. تم تسجيل خروجك من Synology Photos.',
     }),
+    plugin_notification: (p) => ({ title: p.title ?? '', body: p.body ?? '' }),
   },
   passwordReset: {
     subject: 'إعادة تعيين كلمة المرور',

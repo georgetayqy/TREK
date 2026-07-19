@@ -7,6 +7,7 @@ vi.mock('../../../src/services/notificationService', () => ({ send: vi.fn().mock
 
 import { AdminController } from '../../../src/nest/admin/admin.controller';
 import type { AdminService } from '../../../src/nest/admin/admin.service';
+import type { PluginRuntimeService } from '../../../src/nest/plugins/plugin-runtime.service';
 import { writeAudit } from '../../../src/services/auditLog';
 import { send as sendNotification } from '../../../src/services/notificationService';
 import type { User } from '../../../src/types';
@@ -82,11 +83,16 @@ describe('AdminController invites + feature toggles', () => {
     expect(new AdminController(svc({ updatePlacesPhotos: vi.fn().mockReturnValue({ enabled: true }) } as Partial<AdminService>)).updatePlacesPhotos(user, { enabled: true }, req)).toEqual({ enabled: true });
   });
 
-  it('collab-features update invalidates MCP sessions + audits', () => {
+  it('collab-features update invalidates MCP sessions only when a flag actually flipped (#1414)', () => {
     const invalidateMcpSessions = vi.fn();
-    const c = new AdminController(svc({ updateCollabFeatures: vi.fn().mockReturnValue({ chat: true }), invalidateMcpSessions } as Partial<AdminService>));
+    const c = new AdminController(svc({ updateCollabFeatures: vi.fn().mockReturnValue({ features: { chat: true }, changed: true }), invalidateMcpSessions } as Partial<AdminService>));
     expect(c.updateCollabFeatures(user, { chat: true }, req)).toEqual({ chat: true });
     expect(invalidateMcpSessions).toHaveBeenCalled();
+
+    const noopInvalidate = vi.fn();
+    const noop = new AdminController(svc({ updateCollabFeatures: vi.fn().mockReturnValue({ features: { chat: true }, changed: false }), invalidateMcpSessions: noopInvalidate } as Partial<AdminService>));
+    expect(noop.updateCollabFeatures(user, { chat: true }, req)).toEqual({ chat: true });
+    expect(noopInvalidate).not.toHaveBeenCalled();
   });
 });
 
@@ -100,11 +106,25 @@ describe('AdminController packing templates', () => {
 });
 
 describe('AdminController addons + sessions + jwt + defaults', () => {
-  it('addon update audits + invalidates MCP sessions', () => {
+  it('addon update audits + invalidates MCP sessions only when the MCP surface changed (#1414)', async () => {
     const invalidateMcpSessions = vi.fn();
-    const c = new AdminController(svc({ updateAddon: vi.fn().mockReturnValue({ addon: { id: 'mcp', enabled: true }, auditDetails: {} }), invalidateMcpSessions } as Partial<AdminService>));
-    expect(c.updateAddon(user, 'mcp', { enabled: true }, req)).toEqual({ addon: { id: 'mcp', enabled: true } });
+    const runtime = { deactivateForDisabledAddon: vi.fn() } as unknown as PluginRuntimeService;
+    const c = new AdminController(svc({ updateAddon: vi.fn().mockReturnValue({ addon: { id: 'mcp', enabled: true }, mcpAffected: true, auditDetails: {} }), invalidateMcpSessions } as Partial<AdminService>), runtime);
+    expect(await c.updateAddon(user, 'mcp', { enabled: true }, req)).toEqual({ addon: { id: 'mcp', enabled: true } });
     expect(invalidateMcpSessions).toHaveBeenCalled();
+    expect(runtime.deactivateForDisabledAddon).not.toHaveBeenCalled();
+
+    // Config-only saves / MCP-irrelevant addons keep live sessions alive.
+    const noopInvalidate = vi.fn();
+    const noop = new AdminController(svc({ updateAddon: vi.fn().mockReturnValue({ addon: { id: 'llm_parsing', enabled: true }, mcpAffected: false, auditDetails: {} }), invalidateMcpSessions: noopInvalidate } as Partial<AdminService>), runtime);
+    expect(await noop.updateAddon(user, 'llm_parsing', { config: { model: 'x' } }, req)).toEqual({ addon: { id: 'llm_parsing', enabled: true } });
+    expect(noopInvalidate).not.toHaveBeenCalled();
+
+    // Disabling an addon cascades to the plugin runtime.
+    const runtime2 = { deactivateForDisabledAddon: vi.fn().mockResolvedValue(['p1']) } as unknown as PluginRuntimeService;
+    const disable = new AdminController(svc({ updateAddon: vi.fn().mockReturnValue({ addon: { id: 'budget', enabled: false }, mcpAffected: true, auditDetails: {} }), invalidateMcpSessions: vi.fn() } as Partial<AdminService>), runtime2);
+    await disable.updateAddon(user, 'budget', { enabled: false }, req);
+    expect(runtime2.deactivateForDisabledAddon).toHaveBeenCalledWith('budget');
   });
 
   it('oauth-sessions revoke audits; rotate-jwt maps error', () => {

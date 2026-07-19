@@ -10,8 +10,13 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { mapsApi } from '../../api/client'
 import { getCategoryIcon, CATEGORY_ICON_MAP } from '../shared/categoryIcons'
 import ReservationOverlay from './ReservationOverlay'
+import { PluginMapMarkers } from './MapPluginMarkers'
+import { useTransportRoutes } from '../../hooks/useTransportRoutes'
+import { visibleRouteReservations } from '../../utils/reservationRoutes'
 import type { Reservation } from '../../types'
 import { POI_CATEGORY_BY_KEY, type Poi } from './poiCategories'
+import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../../constants/mapDefaults'
+import { computeMapViewport, TILE_SIZE_RASTER, type ViewportPadding } from '../../utils/mapViewport'
 
 function categoryIconSvg(iconName: string | null | undefined, size: number): string {
   const IconComponent = (iconName && CATEGORY_ICON_MAP[iconName]) || CATEGORY_ICON_MAP['MapPin']
@@ -140,6 +145,23 @@ function createPoiIcon(category: string) {
   return icon
 }
 
+// Clears the hover tooltip the moment the camera starts moving and suppresses
+// re-showing it until the move ends: after a click-recenter the marker slides
+// away under a stationary cursor, so the browser never fires mouseout — and
+// mouseover/mousemove during the pan animation would immediately re-set the
+// tooltip we just cleared (#1404).
+function CameraHoverGuard({ movingRef, onMoveStart }: { movingRef: { current: boolean }; onMoveStart: () => void }) {
+  const map = useMap()
+  useEffect(() => {
+    const start = () => { movingRef.current = true; onMoveStart() }
+    const end = () => { movingRef.current = false }
+    map.on('movestart zoomstart', start)
+    map.on('moveend zoomend', end)
+    return () => { map.off('movestart zoomstart', start); map.off('moveend zoomend', end) }
+  }, [map, movingRef, onMoveStart])
+  return null
+}
+
 // Emits the current viewport bbox on pan/zoom so the POI-explore pill can fetch
 // OSM places for the visible area.
 function ViewportController({ onViewportChange }: { onViewportChange?: (b: { south: number; west: number; north: number; east: number }) => void }) {
@@ -213,24 +235,30 @@ function MapController({ center, zoom }: MapControllerProps) {
   return null
 }
 
-// Fit bounds when places change (fitKey triggers re-fit)
+// Fit bounds when places change (fitKey triggers re-fit). On a day selection we
+// fit to that day's destinations immediately, then — once the day's route has
+// finished computing asynchronously — re-fit once more to include the full route
+// polyline, so a route that bulges past its stops stays in view (#1128).
 interface BoundsControllerProps {
   hasDayDetail?: boolean
   places: Place[]
+  routeCoords: [number, number][]
   fitKey: number
   paddingOpts: L.FitBoundsOptions
+  /** The map was built already framed on these places, so the opening fit has nothing to do. */
+  framedOnMount?: boolean
 }
 
-function BoundsController({ places, fitKey, paddingOpts, hasDayDetail }: BoundsControllerProps) {
+function BoundsController({ places, routeCoords, fitKey, paddingOpts, hasDayDetail, framedOnMount = false }: BoundsControllerProps) {
   const map = useMap()
   const prevFitKey = useRef(-1)
+  const awaitingRoute = useRef(false)
+  const fitRan = useRef(false)
 
-  useEffect(() => {
-    if (fitKey === prevFitKey.current) return
-    prevFitKey.current = fitKey
-    if (places.length === 0) return
+  const fitTo = useCallback((coords: [number, number][]) => {
+    if (coords.length === 0) return
     try {
-      const bounds = L.latLngBounds(places.map(p => [p.lat, p.lng]))
+      const bounds = L.latLngBounds(coords)
       if (bounds.isValid()) {
         map.fitBounds(bounds, { ...paddingOpts, maxZoom: 16, animate: true })
         if (hasDayDetail) {
@@ -238,7 +266,34 @@ function BoundsController({ places, fitKey, paddingOpts, hasDayDetail }: BoundsC
         }
       }
     } catch {}
+  }, [map, paddingOpts, hasDayDetail])
+
+  // New fitKey (initial trip fit or a day selection): fit to the destinations now
+  // and arm a one-shot re-fit for when the route arrives.
+  useEffect(() => {
+    if (fitKey === prevFitKey.current) return
+    prevFitKey.current = fitKey
+    awaitingRoute.current = false
+    if (places.length === 0) return
+    // The map opened framed on these very places — re-fitting would only re-do that, and its
+    // maxZoom would overrule the gentler zoom a single place opens at. Later fits (picking a
+    // day) still run.
+    if (!fitRan.current && framedOnMount) {
+      fitRan.current = true
+      return
+    }
+    fitRan.current = true
+    fitTo(places.map(p => [p.lat, p.lng] as [number, number]))
+    awaitingRoute.current = true
   }, [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Once the just-selected day's route is ready, expand the fit to include it.
+  // One-shot per day-fit, so later route-profile toggles don't re-zoom the map.
+  useEffect(() => {
+    if (!awaitingRoute.current || routeCoords.length === 0) return
+    awaitingRoute.current = false
+    fitTo([...places.map(p => [p.lat, p.lng] as [number, number]), ...routeCoords])
+  }, [routeCoords]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return null
 }
@@ -391,11 +446,12 @@ export const MapView = memo(function MapView({
   route = null,
   routeSegments = [],
   selectedPlaceId = null,
+  hoverDisabled = false,
   onMarkerClick,
   onMapClick,
   onMapContextMenu = null,
-  center = [48.8566, 2.3522],
-  zoom = 10,
+  center = DEFAULT_MAP_CENTER,
+  zoom = DEFAULT_MAP_ZOOM,
   tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
   fitKey = 0,
   dayOrderMap = {},
@@ -406,10 +462,12 @@ export const MapView = memo(function MapView({
   reservations = [] as Reservation[],
   showReservationStats = false,
   visibleConnectionIds = [] as number[],
+  showTransitRoutes = true,
   onReservationClick,
   pois = [] as Poi[],
   onPoiClick,
   onViewportChange,
+  tripId,
 }: any) {
   const poiMarkers = useMemo(() => (pois as Poi[]).map((poi: Poi) => (
     <Marker
@@ -422,38 +480,84 @@ export const MapView = memo(function MapView({
       <Tooltip direction="top" offset={[0, -10]} opacity={1} className="map-tooltip">{poi.name}</Tooltip>
     </Marker>
   )), [pois, onPoiClick])
-  const visibleReservations = useMemo(() => {
-    if (!visibleConnectionIds || visibleConnectionIds.length === 0) return []
-    const set = new Set(visibleConnectionIds)
-    return reservations.filter((r: Reservation) => set.has(r.id))
-  }, [reservations, visibleConnectionIds])
+  const visibleReservations = useMemo(() => (
+    visibleRouteReservations(reservations, { visibleConnectionIds, showTransitRoutes })
+  ), [reservations, visibleConnectionIds, showTransitRoutes])
+  // Real road geometry for car/bus/taxi/bicycle bookings (straight line until it loads/if it fails).
+  const transportRoutes = useTransportRoutes(visibleReservations)
   // Dynamic padding: account for sidebars + bottom inspector + day detail panel
-  const paddingOpts = useMemo((): L.FitBoundsOptions => {
+  // The chrome overlaying the map (side panels, day detail). Kept as a plain box so both the
+  // Leaflet fit options and the opening-camera maths can read the same numbers.
+  const paddingBox = useMemo((): ViewportPadding => {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-    if (isMobile) return { padding: [40, 20] }
-    const top = 60
-    const bottom = hasInspector ? 320 : hasDayDetail ? 280 : 60
-    const left = leftWidth + 40
-    const right = rightWidth + 40
-    return { paddingTopLeft: [left, top], paddingBottomRight: [right, bottom] }
+    if (isMobile) return { top: 20, right: 40, bottom: 20, left: 40 }
+    return {
+      top: 60,
+      right: rightWidth + 40,
+      bottom: hasInspector ? 320 : hasDayDetail ? 280 : 60,
+      left: leftWidth + 40,
+    }
   }, [leftWidth, rightWidth, hasInspector, hasDayDetail])
+
+  const paddingOpts = useMemo((): L.FitBoundsOptions => ({
+    paddingTopLeft: [paddingBox.left, paddingBox.top],
+    paddingBottomRight: [paddingBox.right, paddingBox.bottom],
+  }), [paddingBox])
+
+  // Open framed on the places rather than on the caller's default, so a trip in Japan shows
+  // Japan straight away instead of the world view followed by a flight across the planet.
+  // The initializer runs once, at mount — exactly when this should be decided; afterwards the
+  // camera belongs to the user. `framed` is false when no place has coordinates (a new trip),
+  // and then the caller's center/zoom stands.
+  const [initialView] = useState(() => {
+    const framed = computeMapViewport(dayPlaces.length > 0 ? dayPlaces : places, {
+      tileSize: TILE_SIZE_RASTER,
+      padding: paddingBox,
+    })
+    return { center: framed?.center ?? center, zoom: framed?.zoom ?? zoom, framed: framed !== null }
+  })
 
   // Hover state for the single tooltip overlay (replaces per-marker <Tooltip>)
   const [hoveredPlace, setHoveredPlace] = useState<any>(null)
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null)
+  const mapMovingRef = useRef(false)
 
   const handleMarkerHover = useCallback((place: any, x: number, y: number) => {
+    if (hoverDisabled || mapMovingRef.current) return
     setHoveredPlace(place)
     setTooltipPos({ x, y })
-  }, [])
+  }, [hoverDisabled])
 
   const handleMarkerHoverOut = useCallback(() => {
     setHoveredPlace(null)
+    setTooltipPos(null)
   }, [])
 
+  // A marker's DOM node is replaced when it becomes selected (its icon grows
+  // 36→44px, and the cluster group re-adds it), so the browser never fires
+  // mouseout on the old node and the fixed-position hover tooltip gets orphaned
+  // — it hangs on screen and drifts with page scroll. Drop it on any selection
+  // change and on any scroll so it can never get stuck.
+  useEffect(() => { setHoveredPlace(null); setTooltipPos(null) }, [selectedPlaceId])
+  useEffect(() => {
+    if (!hoveredPlace) return
+    const clear = () => { setHoveredPlace(null); setTooltipPos(null) }
+    window.addEventListener('scroll', clear, true)
+    return () => window.removeEventListener('scroll', clear, true)
+  }, [hoveredPlace])
+
   const handleMarkerClick = useCallback((id: number) => {
+    // Clear the hover card right away: the recenter that follows moves the
+    // marker out from under the cursor, so no mouseout will ever fire (#1404).
+    setHoveredPlace(null)
+    setTooltipPos(null)
     onMarkerClick?.(id)
   }, [onMarkerClick])
+
+  const clearHover = useCallback(() => {
+    setHoveredPlace(null)
+    setTooltipPos(null)
+  }, [])
 
   // photoUrls: only base64 thumbs for smooth map zoom
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>(getAllThumbs)
@@ -464,6 +568,9 @@ export const MapView = memo(function MapView({
   const thumbRafRef = useRef<number | null>(null)
 
   const placeIds = useMemo(() => places.map(p => p.id).join(','), [places])
+  // Flattened [lat,lng] points of the selected day's route, so the bounds fit can
+  // include the full polyline once it has been computed.
+  const routeCoords = useMemo<[number, number][]>(() => (route || []).flat() as [number, number][], [route])
   useEffect(() => {
     if (!places || places.length === 0 || !placesPhotosEnabled) return
     const cleanups: (() => void)[] = []
@@ -563,22 +670,27 @@ export const MapView = memo(function MapView({
     } catch { return [] }
   }), [places])
 
-  const TooltipOverlay = hoveredPlace && tooltipPos && !isTouchDevice
+  const TooltipOverlay = !hoverDisabled && hoveredPlace && tooltipPos && !isTouchDevice
   const CatIcon = TooltipOverlay ? getCategoryIcon(hoveredPlace.category_icon) : null
 
   const { position: userPosition, mode: trackingMode, error: trackingError, cycleMode: cycleTrackingMode } = useGeolocation()
   // Desktop browsers only get IP-based geolocation (city-level accuracy),
   // so the button would be misleading. Mobile, where real GPS lives, keeps it.
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  const locationButtonBottom = 'calc(var(--bottom-nav-h, 84px) + 12px)'
+  // When the day-detail panel is open it slides up over the map (bottom: navh+20,
+  // height var(--day-panel-h)) and covers the button's band, so lift the button
+  // above it; otherwise keep the plain bottom-nav offset. #1348
+  const locationButtonBottom = hasDayDetail
+    ? 'calc(var(--bottom-nav-h, 84px) + 20px + var(--day-panel-h, 0px) + 12px)'
+    : 'calc(var(--bottom-nav-h, 84px) + 12px)'
 
   return (
     <>
     <div className="w-full h-full relative">
     <MapContainer
       id="trek-map"
-      center={center}
-      zoom={zoom}
+      center={initialView.center}
+      zoom={initialView.zoom}
       zoomControl={false}
       className="w-full h-full bg-[#e5e7eb]"
     >
@@ -593,10 +705,11 @@ export const MapView = memo(function MapView({
       />
 
       <MapController center={center} zoom={zoom} />
-      <BoundsController places={dayPlaces.length > 0 ? dayPlaces : places} fitKey={fitKey} paddingOpts={paddingOpts} hasDayDetail={hasDayDetail} />
+      <BoundsController places={dayPlaces.length > 0 ? dayPlaces : places} routeCoords={dayPlaces.length > 0 ? routeCoords : []} fitKey={fitKey} paddingOpts={paddingOpts} hasDayDetail={hasDayDetail} framedOnMount={initialView.framed} />
       <SelectionController places={places} selectedPlaceId={selectedPlaceId} dayPlaces={dayPlaces} paddingOpts={paddingOpts} />
       <MapClickHandler onClick={onMapClick} />
       <MapContextMenuHandler onContextMenu={onMapContextMenu} />
+      <CameraHoverGuard movingRef={mapMovingRef} onMoveStart={clearHover} />
       <ViewportController onViewportChange={onViewportChange} />
       <LeafletLocationLayer position={userPosition} mode={trackingMode} />
 
@@ -637,9 +750,11 @@ export const MapView = memo(function MapView({
         showConnections
         showStats={showReservationStats}
         onEndpointClick={onReservationClick}
+        roadRoutes={transportRoutes}
       />
 
       {poiMarkers}
+      <PluginMapMarkers tripId={tripId} />
     </MapContainer>
     {isMobile && <LocationButton
       mode={trackingMode}

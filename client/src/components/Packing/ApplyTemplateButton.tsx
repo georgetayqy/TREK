@@ -13,13 +13,14 @@ interface Template {
 
 interface ApplyTemplateButtonProps {
   tripId: number
+  visibility: 'common' | 'personal'
   style: React.CSSProperties
   className?: string
 }
 
 // Dropdown-Button um ein Packing-Template auf den aktuellen Trip anzuwenden.
 // Rendert nichts wenn keine Templates existieren.
-export default function ApplyTemplateButton({ tripId, style, className }: ApplyTemplateButtonProps): React.ReactElement | null {
+export default function ApplyTemplateButton({ tripId, visibility, style, className }: ApplyTemplateButtonProps): React.ReactElement | null {
   const [templates, setTemplates] = useState<Template[]>([])
   const [open, setOpen] = useState(false)
   const [applying, setApplying] = useState(false)
@@ -43,7 +44,7 @@ export default function ApplyTemplateButton({ tripId, style, className }: ApplyT
   const handleApply = async (templateId: number) => {
     setApplying(true)
     try {
-      const data = await packingApi.applyTemplate(tripId, templateId)
+      const data = await packingApi.applyTemplate(tripId, templateId, visibility)
       useTripStore.setState(s => ({ packingItems: [...s.packingItems, ...(data.items || [])] }))
       toast.success(t('packing.templateApplied', { count: data.count }))
       setOpen(false)
@@ -82,7 +83,7 @@ export default function ApplyTemplateButton({ tripId, style, className }: ApplyT
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                 padding: '8px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
-                background: 'transparent', fontFamily: 'inherit', fontSize: 12, color: 'var(--text-primary)',
+                background: 'transparent', fontFamily: 'inherit', fontSize: 'calc(12px * var(--fs-scale-body, 1))', color: 'var(--text-primary)',
               }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-tertiary)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -90,7 +91,7 @@ export default function ApplyTemplateButton({ tripId, style, className }: ApplyT
               <Package size={13} className="text-content-faint" />
               <div style={{ flex: 1, textAlign: 'left' }}>
                 <div style={{ fontWeight: 600 }}>{tmpl.name}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+                <div style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)' }}>
                   {tmpl.item_count} {t('admin.packingTemplates.items')}
                 </div>
               </div>

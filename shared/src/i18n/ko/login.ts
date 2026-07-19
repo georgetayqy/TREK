@@ -8,7 +8,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places, 경로 및 클러스터링',
   'login.features.realtime': '실시간 동기화',
   'login.features.realtimeDesc': 'WebSocket으로 함께 계획',
-  'login.features.budget': '예산 추적',
+  'login.features.budget': '비용 추적',
   'login.features.budgetDesc': '카테고리, 차트 및 1인당 비용',
   'login.features.collab': '협업',
   'login.features.collabDesc': '공유 여행으로 다중 사용자 지원',
@@ -83,5 +83,9 @@ const login: TranslationStrings = {
   'login.resetPasswordFailed': '재설정 실패. 링크가 만료되었을 수 있습니다.',
   'login.passkey.signIn': '패스키로 로그인',
   'login.passkey.failed': '패스키 로그인에 실패했습니다. 다시 시도하세요.',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

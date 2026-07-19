@@ -4,7 +4,7 @@ Production-ready setup using Docker Compose with security hardening enabled.
 
 ## Compose File
 
-See https://github.com/mauriceboe/TREK/blob/main/docker-compose.yml
+See https://github.com/liketrek/TREK/blob/main/docker-compose.yml
 
 ## Security Hardening Explained
 
@@ -17,6 +17,8 @@ The compose file ships with several hardening options enabled by default:
 | `cap_drop: [ALL]` | Drops all Linux capabilities from the container |
 | `cap_add: [CHOWN, SETUID, SETGID]` | Adds back only the capabilities needed for the entrypoint to drop privileges to the `node` user |
 | `tmpfs: /tmp:noexec,nosuid,size=64m` | Mounts a 64 MB in-memory `/tmp`; required because the container root is read-only |
+
+> **Note (Docker from snap):** If you installed Docker via `snap` (config under `/var/snap/docker/...`), `no-new-privileges:true` will prevent the container from starting with `exec /usr/bin/dumb-init: operation not permitted`. This is a [snap/AppArmor limitation](https://bugs.launchpad.net/snapd/+bug/1908448), not a TREK issue — install Docker from the [official apt repository](https://docs.docker.com/engine/install/ubuntu/) instead, or remove `no-new-privileges`. See [Troubleshooting](Troubleshooting#container-wont-start-exec-usrbindumb-init-operation-not-permitted).
 
 ## Volumes
 
@@ -62,17 +64,17 @@ Uncomment and fill in the OIDC, initial setup, or MCP variables as needed. For a
 
 Three tag strategies are available:
 
-| Tag | Example | Behavior |
-|---|---|---|
-| `latest` | `mauriceboe/trek:latest` | Always the newest release across all major versions |
-| Major version | `mauriceboe/trek:3` | Latest release pinned to that major version |
-| Full version | `mauriceboe/trek:3.0.15` | Exact release; never changes |
+| Tag | Example                  | Behavior |
+|---|--------------------------|---|
+| `latest` | `mauriceboe/TREK:latest` | Always the newest release across all major versions |
+| Major version | `mauriceboe/TREK:3`        | Latest release pinned to that major version |
+| Full version | `mauriceboe/TREK:3.4.0`   | Exact release; never changes |
 
 The compose file above uses `latest`. To pin, change the `image:` line:
 
 ```yaml
-image: mauriceboe/trek:3        # track major version 3
-image: mauriceboe/trek:3.0.15   # pin to exact release
+image: mauriceboe/TREK:3        # track major version 3
+image: mauriceboe/TREK:3.4.0   # pin to exact release
 ```
 
 ## Start TREK

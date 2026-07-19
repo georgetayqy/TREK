@@ -96,6 +96,8 @@ const admin: TranslationStrings = {
   'admin.recommended': 'Recomendado',
   'admin.weatherKey': 'Clave API de OpenWeatherMap',
   'admin.weatherKeyHint': 'Para datos meteorológicos. Gratis en openweathermap.org',
+  'admin.unsplashKey': 'Clave de API de Unsplash',
+  'admin.unsplashKeyHint': 'Para la búsqueda de imágenes. Gratis en unsplash.com/developers',
   'admin.validateKey': 'Probar',
   'admin.keyValid': 'Conectado',
   'admin.keyInvalid': 'No válida',
@@ -158,6 +160,310 @@ const admin: TranslationStrings = {
   'admin.packingTemplates.deleteError': 'Error al eliminar plantilla',
   'admin.packingTemplates.saveError': 'Error al guardar',
   'admin.tabs.addons': 'Complementos',
+  'admin.tabs.plugins': 'Plugins',
+  'admin.plugins.rescan': 'Volver a escanear',
+  'admin.plugins.rescanned': 'Carpeta de plugins reescaneada',
+  'admin.plugins.upload': 'Subir plugin',
+  'admin.plugins.dropToUpload': 'Suelta un .zip de plugin para instalar',
+  'admin.plugins.uploaded': 'Plugin “{name}” subido — actívalo para ejecutarlo',
+  'admin.plugins.sideloaded': 'Cargado manualmente',
+  'admin.plugins.devLinkBadge': 'Dev-Link',
+  'admin.plugins.devLinkHint':
+    'Cargado desde un directorio de compilación local y recargado en caliente con datos reales: solo para desarrollo',
+  'admin.plugins.devLinkTitle': 'Vincular un plugin local',
+  'admin.plugins.devLinkPathPlaceholder': '/absolute/path/to/your/plugin',
+  'admin.plugins.devLinkButton': 'Vincular',
+  'admin.plugins.devLinkLinked': '{id} vinculado: actívalo para ejecutarlo',
+  'admin.plugins.sideloadedHint': 'Subido manualmente — no proviene del registro, sin firmar ni revisar',
+  'admin.plugins.browse': 'Explorar plugins',
+  'admin.plugins.installed': 'Instalado',
+  'admin.plugins.install': 'Instalar',
+  'admin.plugins.registryEmpty': 'Aún no hay plugins disponibles en el registro.',
+  'admin.plugins.actionError': 'La acción falló',
+  'admin.plugins.activate': 'Activar',
+  'admin.plugins.activated': 'Plugin activado',
+  'admin.plugins.deactivate': 'Desactivar',
+  'admin.plugins.deactivated': 'Plugin desactivado',
+  'admin.plugins.viewErrors': 'Ver registro de errores',
+  'admin.plugins.errorLog': 'Registro de errores',
+  'admin.plugins.allowedHosts': 'Hosts permitidos',
+  'admin.plugins.allowedHosts.hint':
+    'Este plugin se comunica con un servicio que solo tú puedes nombrar (un servidor autoalojado). Añade los hosts a los que puede acceder — no accederá a ningún otro.',
+  'admin.plugins.allowedHosts.none': 'Aún no se han añadido hosts.',
+  'admin.plugins.allowedHosts.unsupported':
+    'Este plugin no usa hosts proporcionados por el operador. Sus hosts permitidos están fijados en su manifiesto.',
+  'admin.plugins.allowedHosts.restartNote': 'Al guardar se reinicia el plugin para que tome la nueva lista.',
+  'admin.plugins.allowedHosts.add': 'Añadir host permitido',
+  'admin.plugins.allowedHosts.count': '{n} host(s) permitido(s)',
+  'admin.plugins.operatorEgressPill': '+ hosts que añadas',
+  'admin.plugins.operatorEgressHint':
+    'Este plugin se comunica con un servicio que solo tú puedes nombrar (un servidor autoalojado). Tras instalarlo, añade los hosts a los que puede acceder en ⋯ → Hosts permitidos. No accederá a ningún otro.',
+  'admin.plugins.noErrors': 'No hay errores registrados.',
+  'admin.plugins.uninstalled': 'Plugin desinstalado',
+  'admin.plugins.uninstallTitle': '¿Desinstalar el plugin?',
+  'admin.plugins.uninstallBody':
+    'Esto detiene el plugin, elimina su código y borra todos sus datos. No se puede deshacer.',
+  'admin.plugins.status.starting': 'Iniciando…',
+  'admin.plugins.type.widget': 'Widget',
+  'admin.plugins.type.page': 'Página',
+  'admin.plugins.type.integration': 'Integración',
+  'admin.plugins.type.trip-page': 'Página de viaje',
+  'admin.plugins.reviewed': 'Revisado',
+  'admin.plugins.unreviewed': 'No revisado',
+  'admin.plugins.updated': 'Plugin actualizado',
+  'admin.plugins.updateTo': 'Actualizar → v{version}',
+  'admin.plugins.enabledToggle': 'Activar plugin',
+  'plugins.notFound': 'Plugin no encontrado',
+  'admin.plugins.title': 'Plugins',
+  'admin.plugins.subtitle': 'Instala y gestiona plugins de terceros en tu instancia.',
+  'admin.plugins.disabledTitle': 'Los plugins están desactivados',
+  'admin.plugins.disabledBody':
+    'El entorno de ejecución de plugins está apagado (TREK_PLUGINS_ENABLED). Ningún plugin puede ejecutarse hasta que un administrador lo active en la configuración del servidor.',
+  'admin.plugins.empty': 'Aún no hay plugins instalados.',
+  'admin.plugins.loadError': 'No se pudieron cargar los plugins.',
+  'admin.plugins.scaffoldNote':
+    'La instalación y activación de plugins llegarán en una actualización posterior. Por ahora este panel solo muestra los plugins instalados.',
+  'admin.plugins.status.active': 'Activo',
+  'admin.plugins.status.inactive': 'Inactivo',
+  'admin.plugins.status.disabled': 'Desactivado',
+  'admin.plugins.status.error': 'Error',
+  'admin.plugins.status.incompatible': 'Incompatible',
+  'admin.plugins.details': 'Detalles',
+  'admin.plugins.detailError': 'No se pudieron cargar los detalles del plugin.',
+  'admin.plugins.permissionsTitle': 'Permisos',
+  'admin.plugins.noPermissions': 'Este plugin no solicita permisos especiales.',
+  'admin.plugins.egressNote': 'Puede conectarse a: {hosts}',
+  'admin.plugins.setupTitle': 'Configuración',
+  'admin.plugins.noSetup': 'Funciona de inmediato — no hay nada que configurar.',
+  'admin.plugins.scope.instance': 'Para toda la instancia',
+  'admin.plugins.scope.user': 'Por usuario',
+  'admin.plugins.fieldRequired': 'Obligatorio',
+  'admin.plugins.sourceRepo': 'Repositorio de código',
+  'admin.plugins.reportIssue': 'Informar de un problema',
+  'admin.plugins.homepage': 'Sitio web',
+  'admin.plugins.requiresTrek': 'Requiere TREK {version}+',
+  'admin.plugins.reviewedOn': 'Revisado el {date}',
+  'admin.plugins.perm.db:own': 'Almacenar sus propios datos en una base de datos aislada',
+  'admin.plugins.perm.db:read:trips': 'Leer los viajes a los que el usuario activo tiene acceso',
+  'admin.plugins.perm.db:read:users': 'Leer información básica del perfil (nombre, avatar — nunca credenciales)',
+  'admin.plugins.perm.db:read:costs':
+    'Leer los gastos (partidas de presupuesto) a los que el usuario activo tiene acceso',
+  'admin.plugins.perm.db:read:packing':
+    'Leer las listas de equipaje de los viajes a los que el usuario activo tiene acceso',
+  'admin.plugins.perm.db:write:packing':
+    'Crear, editar y eliminar artículos de la lista de equipaje en los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.weather:read': 'Leer la previsión meteorológica en caché del host (por coordenadas)',
+  'admin.plugins.perm.db:read:categories': 'Leer la lista global de categorías de lugares',
+  'admin.plugins.perm.db:read:tags': 'Leer las etiquetas del usuario activo',
+  'admin.plugins.perm.db:write:tags': 'Crear, editar y eliminar las etiquetas del usuario activo',
+  'admin.plugins.perm.db:read:todos': 'Leer las tareas de los viajes a los que el usuario activo tiene acceso',
+  'admin.plugins.perm.db:write:todos':
+    'Crear, editar y eliminar tareas en los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.db:write:atlas':
+    'Marcar países y regiones como visitados y gestionar la lista de deseos del usuario activo (requiere el complemento Atlas)',
+  'admin.plugins.perm.db:write:vacay':
+    'Alternar días de vacaciones y festivos de empresa en el plan activo del usuario activo (requiere el complemento Vacay)',
+  'admin.plugins.perm.db:write:journal':
+    'Crear, editar y eliminar entradas de diario en los diarios que el usuario activo puede editar (requiere el complemento Journey)',
+  'admin.plugins.perm.db:write:collections':
+    'Crear y editar colecciones y guardar lugares en ellas, con el rol de colección del usuario activo (requiere el complemento Collections)',
+  'admin.plugins.perm.db:write:files':
+    'Adjuntar archivos a los viajes que el usuario activo puede editar (límite de 10 MB, extensiones bloqueadas rechazadas) y gestionar sus enlaces',
+  'admin.plugins.perm.db:write:collab':
+    'Publicar notas, encuestas y mensajes de chat en los viajes que el usuario activo puede editar (requiere el complemento Collab)',
+  'admin.plugins.perm.db:write:members':
+    'Añadir usuarios a los viajes — concede acceso al viaje; protegido por el permiso de gestión de miembros del usuario activo',
+  'admin.plugins.perm.notify:send':
+    'Enviar una notificación (bandeja de campana + correo/ntfy) al usuario activo o a un viaje al que pertenece — nunca a un destinatario arbitrario',
+  'admin.plugins.perm.ai:invoke':
+    'Usar el proveedor de IA configurado por el administrador (completado de texto + extracción de documentos) en nombre del usuario activo — el complemento nunca guarda una clave',
+  'admin.plugins.perm.oauth:client':
+    'Conectarse a un servicio de terceros en tu nombre mediante OAuth gestionado por el host (el host guarda los tokens, el complemento nunca los ve)',
+  'admin.plugins.perm.db:read:files': 'Leer los archivos de los viajes a los que el usuario activo tiene acceso',
+  'admin.plugins.perm.db:write:reservations':
+    'Crear, editar y eliminar reservas en los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.db:write:accommodations':
+    'Crear, editar y eliminar alojamientos en los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.db:read:journal':
+    'Leer los diarios de viaje del usuario activo (requiere el complemento Journey)',
+  'admin.plugins.perm.db:read:atlas':
+    'Leer los países y regiones visitados por el usuario activo (requiere el complemento Atlas)',
+  'admin.plugins.perm.db:read:vacay': 'Leer el plan de vacaciones del usuario activo (requiere el complemento Vacay)',
+  'admin.plugins.perm.db:read:daynotes':
+    'Leer las notas del día de los viajes a los que el usuario activo tiene acceso',
+  'admin.plugins.perm.db:read:collections':
+    'Leer las colecciones de lugares guardados del usuario activo (requiere el complemento Collections)',
+  'admin.plugins.perm.db:write:daynotes':
+    'Crear, editar y eliminar notas del día en los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.jobs:run':
+    'Ejecutar sus tareas en segundo plano de forma programada (sin contexto de usuario: no puede leer datos del usuario)',
+  'admin.plugins.perm.db:write:costs':
+    'Crear gastos (partidas de presupuesto) en los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.db:write:places':
+    'Añadir, editar y eliminar lugares en los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.db:write:days': 'Añadir, editar y eliminar días en los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.db:write:itinerary':
+    'Asignar y quitar lugares en los días de los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.db:write:trips':
+    'Editar los detalles del viaje (título, fechas, moneda…) en los viajes que el usuario activo puede editar',
+  'admin.plugins.perm.db:meta':
+    'Adjuntar sus propios datos privados a los viajes, lugares y días a los que el usuario activo tiene acceso',
+  'admin.plugins.perm.ws:broadcast:trip': 'Enviar actualizaciones en tiempo real a los miembros del viaje',
+  'admin.plugins.perm.ws:broadcast:user': 'Enviar actualizaciones en tiempo real a usuarios individuales',
+  'admin.plugins.perm.hook:photo-provider': 'Proporcionar fotos a la sección Fotos',
+  'admin.plugins.perm.hook:calendar-source': 'Proporcionar eventos al calendario',
+  'admin.plugins.perm.hook:place-detail-provider':
+    'Aportar detalles adicionales (reseñas, valoraciones, enlaces) a un lugar',
+  'admin.plugins.perm.hook:trip-warning-provider':
+    'Generar advertencias de validación en un viaje (mostradas en el planificador)',
+  'admin.plugins.perm.hook:table-contributor':
+    'Añadir columnas y acciones a las vistas del viaje (reservas, lugares, días)',
+  'admin.plugins.perm.hook:map-marker-provider': 'Añadir marcadores al mapa del viaje (p. ej. mostrar reservas o POIs)',
+  'admin.plugins.perm.hook:pdf-section-provider': 'Añadir secciones de texto a la exportación PDF del viaje',
+  'admin.plugins.perm.hook:atlas-layer-provider':
+    'Resaltar países en el mapamundi del Atlas (p. ej. listas de deseos o avisos de viaje)',
+  'admin.plugins.perm.hook:journal-entry-provider':
+    'Añadir filas adicionales (enlaces, estadísticas) a las entradas del diario',
+  'admin.plugins.perm.hook:user-data':
+    'Borrar o exportar los datos que almacena sobre un usuario (RGPD: borrado de cuenta y solicitudes de datos)',
+  'admin.plugins.perm.hook:trip-card-provider':
+    'Añadir pequeñas insignias (estado, recuentos) a las tarjetas de viaje del panel',
+  'admin.plugins.perm.hook:notification-channel': 'Enviar tus notificaciones a través de un canal adicional',
+  'admin.plugins.perm.events:subscribe':
+    'Reaccionar a eventos de actividad del núcleo (solo el nombre del evento y el viaje, nunca el contenido)',
+  'admin.plugins.perm.http:outbound': 'Realizar solicitudes salientes a sus hosts declarados',
+  'admin.plugins.perm.db:read:collab':
+    'Leer las notas, encuestas y mensajes de chat de los viajes a los que el usuario activo tiene acceso (requiere el complemento Collab)',
+  'admin.plugins.perm.db:read:files:content':
+    'Leer el contenido (bytes) de los archivos de los viajes a los que el usuario activo tiene acceso',
+  'admin.plugins.perm.db:create:trips': 'Crear nuevos viajes propiedad del usuario activo',
+  'admin.plugins.perm.rates:read': 'Leer los tipos de cambio en caché del host',
+  'admin.plugins.updateConsentTitle': 'Esta actualización necesita nuevos permisos',
+  'admin.plugins.updateConsentBody':
+    '{name} v{version} solicita permisos que aún no has concedido. La nueva versión está instalada, pero permanece desactivada hasta que la apruebes.',
+  'admin.plugins.updateNewPermissions': 'Permisos solicitados nuevos',
+  'admin.plugins.updateNewEgress': 'Nuevas conexiones salientes',
+  'admin.plugins.updateApprove': 'Aprobar y activar',
+  'admin.plugins.updateLater': 'Mantener desactivado por ahora',
+  'admin.plugins.updateKeptOff': 'Actualización instalada — se deja desactivada hasta que apruebes los nuevos permisos',
+  'admin.plugins.reviewedMeaning':
+    '"Revisado" significa que un responsable de TREK analizó este plugin en busca de malware en cada versión, no su calidad ni si funciona. No es una garantía de que un plugin sea inofensivo.',
+  'admin.plugins.security.title': 'Cómo se contienen los plugins — y sus límites',
+  'admin.plugins.security.isolationTitle': 'Cada plugin se ejecuta aislado',
+  'admin.plugins.security.isolationBody':
+    'Un plugin se ejecuta como su propio proceso confinado que solo puede leer sus propios archivos. No puede leer tu base de datos, tu secreto de inicio de sesión ni tu clave de cifrado, no puede iniciar otros programas y no puede escribir archivos en ningún sitio. Su interfaz se ejecuta en un marco de navegador sellado que no puede leer tu cookie de sesión ni tocar la página de TREK que la rodea.',
+  'admin.plugins.security.permsTitle': 'Qué significan los permisos',
+  'admin.plugins.security.permsBody':
+    'Los permisos que se muestran antes de instalar son un límite estricto que TREK aplica mientras el plugin se ejecuta: literalmente no puede hacer nada que no esté en la lista. Pero te indican lo que un plugin puede hacer, no lo que realmente hace. Un plugin con permiso para leer tus viajes y conectarse a un servidor puede enviar tus viajes a ese servidor, así que lee los permisos y los hosts salientes, no solo la descripción.',
+  'admin.plugins.security.limitsTitle': 'Lo que no podemos garantizar',
+  'admin.plugins.security.limitsBody':
+    'El aislamiento es una barrera de software sólida, pero no absoluta. Un plugin actúa exactamente con los permisos que apruebes, así que dentro de esos permisos puede comportarse de forma distinta a lo que sugiere su descripción y puede enviar los datos que posee legítimamente a los hosts que ha declarado. TREK no lee ni juzga lo que hace realmente el código de un plugin.',
+  'admin.plugins.security.worstTitle': 'El peor de los casos',
+  'admin.plugins.security.worstBody':
+    'Un plugin malicioso que actives puede hacer un mal uso de los datos y las conexiones que le concediste — por ejemplo, filtrar los viajes que tiene permiso para leer. No puede robar contraseñas, falsificar un inicio de sesión de administrador, ejecutar comandos en tu servidor ni acceder a datos que no le concediste. El daño se limita a lo que aprobaste, y desactivar el plugin lo detiene.',
+  'admin.plugins.security.reviewedTitle': 'Qué significa "Revisado"',
+  'admin.plugins.security.reviewedBody':
+    'Un plugin revisado fue analizado manualmente en busca de malware por un responsable de TREK en cada versión — se comprobó que no tuviera código malicioso, no si funciona bien. No es una promesa de que el plugin sea inofensivo.',
+  'admin.plugins.security.signedTitle': 'Qué significa "Firmado"',
+  'admin.plugins.security.signedBody':
+    'La suma de comprobación que TREK verifica en cada instalación demuestra que los archivos son exactamente los que el registro avala. Una firma demuestra otra cosa: que provienen del autor, firmados con una clave que solo él posee. Un plugin firmado tiene ambas cosas. Uno sin firmar no es inseguro — simplemente lleva una garantía menos, y hoy la mayoría de los plugins del registro no están firmados.',
+  'admin.plugins.signed': 'Firmado',
+  'admin.plugins.signedHint': 'Verificado con la clave de firma del autor en el momento de la instalación',
+  'admin.plugins.unsigned': 'Sin firmar',
+  'admin.plugins.unsignedHint':
+    'Los archivos coinciden con lo que el registro avala, pero nada los vincula con el autor. Una garantía menos — no es inseguro.',
+  'admin.plugins.updateBlocked': 'Actualización bloqueada — {reason}',
+  'admin.plugins.reviewBlock': 'Revisar',
+  'admin.plugins.retrusted': 'Nueva clave de firma aceptada — el plugin está actualizado',
+  'admin.plugins.sig.title': 'No se pudo verificar la firma de {name}',
+  'admin.plugins.sig.keyChangedBody':
+    'La clave de firma del autor no es la misma con la que se instaló este plugin. Los autores sí rotan sus claves — pero un atacante que se hubiera apoderado del plugin se vería exactamente así.',
+  'admin.plugins.sig.invalidBody':
+    'Los archivos no coinciden con la firma del autor. No son lo que el autor firmó — o se corrompieron, o fueron manipulados. Esto no se puede omitir.',
+  'admin.plugins.sig.missingBody':
+    'Este plugin estaba firmado cuando lo instalaste, pero la nueva versión no incluye ninguna firma. TREK no aceptará esa degradación en silencio. Esto no se puede omitir.',
+  'admin.plugins.sig.incompleteBody':
+    'La entrada del registro está firmada a medias: declara una clave de autor pero la versión no lleva firma (o al revés). Es un error del lado del plugin. Esto no se puede omitir.',
+  'admin.plugins.sig.pinnedKey': 'Clave con la que se instaló',
+  'admin.plugins.sig.newKey': 'Clave que ofrece ahora',
+  'admin.plugins.sig.confirmOutOfBand':
+    'TREK no puede distinguir una rotación de clave legítima de un secuestro — desde aquí ambas se ven idénticas. Confirma la nueva clave con el autor por un canal en el que ya confíes antes de aceptarla. Cuando lo hagas, el plugin se actualizará y la nueva clave quedará registrada.',
+  'admin.plugins.sig.retrustConfirm': 'Confiar en la nueva clave y actualizar',
+  'admin.plugins.sig.cancel': 'No confiar',
+  'admin.plugins.sig.consentUnsigned':
+    'Nada vincula esta versión con su autor — los archivos coinciden con el registro, pero no llevan ninguna firma del autor.',
+  'admin.plugins.security.trustTitle': 'En resumen',
+  'admin.plugins.security.trustBody':
+    'Instalar un plugin es como instalar cualquier aplicación de terceros: añade únicamente código de autores en los que confíes y, en caso de duda, inspecciónalo tú mismo primero. TREK no asume ninguna responsabilidad por los plugins de terceros.',
+  'admin.plugins.runtimeOn': 'Entorno de ejecución activo',
+  'admin.plugins.tabDiscover': 'Descubrir',
+  'admin.plugins.searchPlaceholder': 'Buscar plugins…',
+  'admin.plugins.filterType': 'Tipo',
+  'admin.plugins.filterStatus': 'Estado',
+  'admin.plugins.sortBy': 'Ordenar',
+  'admin.plugins.allTypes': 'Todos los tipos',
+  'admin.plugins.allStatuses': 'Todos',
+  'admin.plugins.stateOff': 'Desactivado',
+  'admin.plugins.filterUpdate': 'Actualización disponible',
+  'admin.plugins.sortName': 'Nombre',
+  'admin.plugins.sortRecent': 'Actualizados recientemente',
+  'admin.plugins.sortUpdates': 'Actualizaciones primero',
+  'admin.plugins.sortDownloads': 'Más descargados',
+  'admin.plugins.updatesAvailable': '{count} actualizaciones disponibles para tus plugins.',
+  'admin.plugins.updateAll': 'Actualizar todo',
+  'admin.plugins.noMatchInstalled': 'Ningún plugin instalado coincide con tu búsqueda.',
+  'admin.plugins.noMatchRegistry': 'Ningún plugin del registro coincide con tu búsqueda.',
+  'admin.plugins.restart': 'Reiniciar',
+  'admin.plugins.restarted': 'Plugin reiniciado',
+  'admin.plugins.cap.readsTrips': 'Lee tus viajes',
+  'admin.plugins.cap.readsUsers': 'Lee perfiles básicos',
+  'admin.plugins.cap.readsCosts': 'Lee tus gastos',
+  'admin.plugins.cap.readsPacking': 'Lee las listas de equipaje',
+  'admin.plugins.cap.readsFiles': 'Lee los archivos del viaje',
+  'admin.plugins.cap.writesCosts': 'Añade gastos',
+  'admin.plugins.cap.writesPlaces': 'Edita lugares',
+  'admin.plugins.cap.writesDays': 'Edita días',
+  'admin.plugins.cap.writesItinerary': 'Edita itinerario',
+  'admin.plugins.cap.writesTrips': 'Edita viajes',
+  'admin.plugins.cap.metadata': 'Añade metadatos',
+  'admin.plugins.cap.widget': 'Widget del panel',
+  'admin.plugins.cap.heroWidget': 'Widget de tarjeta de embarque',
+  'admin.plugins.cap.placeSlot': 'Detalle del lugar',
+  'admin.plugins.cap.daySlot': 'Detalle del día',
+  'admin.plugins.cap.reservationSlot': 'Detalle de la reserva',
+  'admin.plugins.cap.replacesTabs': 'Reemplaza pestañas del planificador',
+  'admin.plugins.cap.realtime': 'Actualizaciones en tiempo real',
+  'admin.plugins.cap.notificationChannel': 'Canal de notificaciones',
+  'admin.plugins.cap.photos': 'Proporciona fotos',
+  'admin.plugins.cap.calendar': 'Proporciona eventos de calendario',
+  'admin.plugins.cap.placeDetails': 'Enriquece lugares',
+  'admin.plugins.cap.warnings': 'Marca problemas',
+  'admin.plugins.cap.events': 'Reacciona a la actividad',
+  'admin.plugins.cap.requiresAddon': 'Requiere {addon}',
+  'admin.plugins.cap.dependsOn': 'Necesita {id} {version}',
+  'admin.plugins.dep.addonDisabledToast': 'Activa primero los complementos necesarios: {addons}',
+  'admin.plugins.dep.autoEnabled': 'Se activaron primero los plugins necesarios: {plugins}',
+  'admin.plugins.dep.downloaded': '{id} descargado',
+  'admin.plugins.dep.resolveTitle': 'Dependencias faltantes',
+  'admin.plugins.dep.resolveBody': '«{name}» necesita que estos plugins estén instalados antes de poder activarse.',
+  'admin.plugins.dep.requires': 'Requiere {version}',
+  'admin.plugins.dep.mismatch': 'Necesita {wanted}: {installed} está instalado',
+  'admin.plugins.dep.download': 'Descargar',
+  'admin.plugins.dep.update': 'Actualizar',
+  'admin.plugins.dep.resolveHint': 'Descarga la última versión compatible, incluidas sus propias dependencias.',
+  'admin.plugins.dep.trekIncompatible': 'Necesita TREK {range} — este servidor ejecuta {host}',
+  'admin.plugins.dep.trekUnknown': 'No indica qué versiones de TREK admite',
+  'admin.plugins.installCompatible': 'Instalar {version}',
+  'admin.plugins.incompatible': 'Incompatible',
+  'admin.plugins.accessTitle': 'A qué puede acceder',
+  'admin.plugins.connectsTitle': 'Se conecta a',
+  'admin.plugins.detailsTitle': 'Detalles',
+  'admin.plugins.noAccess': 'No necesita ningún acceso especial.',
+  'admin.plugins.metaVersion': 'Versión',
+  'admin.plugins.metaSize': 'Tamaño',
+  'admin.plugins.metaRequires': 'Requiere',
+  'admin.plugins.metaReviewed': 'Revisado el',
+  'admin.plugins.downloads': 'Descargas',
   'admin.addons.title': 'Complementos',
   'admin.addons.subtitle': 'Activa o desactiva funciones para personalizar tu experiencia en TREK.',
   'admin.addons.subtitleBefore': 'Activa o desactiva funciones para personalizar tu experiencia en ',
@@ -266,7 +572,7 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.mcp.description': 'Protocolo de contexto de modelo para integración con asistentes de IA',
   'admin.addons.catalog.packing.name': 'Listas',
   'admin.addons.catalog.packing.description': 'Listas de equipaje y tareas pendientes para tus viajes',
-  'admin.addons.catalog.budget.name': 'Presupuesto',
+  'admin.addons.catalog.budget.name': 'Costes',
   'admin.addons.catalog.budget.description': 'Controla los gastos y planifica el presupuesto del viaje',
   'admin.addons.catalog.documents.name': 'Documentos',
   'admin.addons.catalog.documents.description': 'Guarda y gestiona la documentación del viaje',
@@ -327,6 +633,9 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.journey.name': 'Travesía',
   'admin.addons.catalog.journey.description':
     'Seguimiento de viajes y diario de viajero con registros de ubicación, fotos e historias diarias',
+  'admin.addons.catalog.collections.name': 'Colecciones',
+  'admin.addons.catalog.collections.description':
+    'Biblioteca personal de lugares: guarda lugares de tus viajes en listas con nombre, cópialos a cualquier viaje y compártelos con otros',
   'admin.passkey.title': 'Inicio de sesión con passkey',
   'admin.passkey.cardHint':
     'Permite que los usuarios inicien sesión con passkeys (WebAuthn). Desactivado de forma predeterminada.',
@@ -359,5 +668,14 @@ const admin: TranslationStrings = {
   'admin.defaultSettings.mapboxStylePlaceholder': 'Elige un estilo…',
   'admin.defaultSettings.mapbox3d': 'Edificios y terreno en 3D',
   'admin.defaultSettings.mapboxQuality': 'Modo de alta calidad',
+  'admin.group.users': 'Users',
+  'admin.group.config': 'Configuration',
+  'admin.group.integration': 'Integrations',
+  'admin.group.maintenance': 'Maintenance',
+  'admin.invite.tripLabel': 'Añadir a un viaje (opcional)',
+  'admin.invite.tripNone': 'Sin viaje',
+  'admin.invite.tripHint':
+    'El nuevo usuario se añade automáticamente a este viaje cuando se registra mediante el enlace.',
+  'admin.invite.boundTo': 'se añade a {trip}',
 };
 export default admin;

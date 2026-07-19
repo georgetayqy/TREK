@@ -6,7 +6,7 @@ import { useToast } from '../shared/Toast'
 import Section from '../Settings/Section'
 import CustomSelect from '../shared/CustomSelect'
 import { MapView } from '../Map/MapView'
-import { CURRENCIES, SYMBOLS } from '../Budget/BudgetPanel.constants'
+import { SYMBOLS, currenciesWith } from '../Budget/BudgetPanel.constants'
 import type { DistanceUnit, Place } from '../../types'
 import {
   MAPBOX_DEFAULT_STYLE,
@@ -89,7 +89,7 @@ function OptionButton({
       style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '10px 20px', borderRadius: 10, cursor: 'pointer',
-        fontFamily: 'inherit', fontSize: 14, fontWeight: 500,
+        fontFamily: 'inherit', fontSize: 'calc(14px * var(--fs-scale-body, 1))', fontWeight: 500,
         border: active ? '2px solid var(--text-primary)' : '2px solid var(--border-primary)',
         background: active ? 'var(--bg-hover)' : 'var(--bg-card)',
         color: 'var(--text-primary)',
@@ -186,7 +186,7 @@ export default function DefaultUserSettingsTab(): React.ReactElement {
   }], [])
 
   if (!loaded) {
-    return <p className="text-content-faint" style={{ fontSize: 12, fontStyle: 'italic', padding: 16 }}>Loading…</p>
+    return <p className="text-content-faint" style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontStyle: 'italic', padding: 16 }}>Loading…</p>
   }
 
   const darkMode = defaults.dark_mode
@@ -286,7 +286,7 @@ export default function DefaultUserSettingsTab(): React.ReactElement {
           onChange={(value: string) => { if (value) save({ default_currency: value }) }}
           placeholder={t('settings.currency')}
           searchable
-          options={CURRENCIES.map(c => ({ value: c, label: SYMBOLS[c] ? `${c}  ${SYMBOLS[c]}` : c }))}
+          options={currenciesWith(defaults.default_currency).map(c => ({ value: c, label: SYMBOLS[c] ? `${c}  ${SYMBOLS[c]}` : c }))}
           size="sm"
           style={{ maxWidth: 240 }}
         />

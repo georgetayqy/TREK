@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import Modal from '../shared/Modal'
-import { Calendar, Camera, X, Clipboard, UserPlus, Bell } from 'lucide-react'
+import { Calendar, Camera, Search, X, UserPlus, Bell } from 'lucide-react'
 import { tripsApi, authApi } from '../../api/client'
 import CustomSelect from '../shared/CustomSelect'
 import { useAuthStore } from '../../store/authStore'
@@ -9,22 +9,36 @@ import { useToast } from '../shared/Toast'
 import { useTranslation } from '../../i18n'
 import { CustomDatePicker } from '../shared/CustomDateTimePicker'
 import { normalizeImageFile } from '../../utils/convertHeic'
-import type { Trip } from '../../types'
+import { getApiErrorMessage, type Trip } from '../../types'
 import type { TripCreateRequest } from '@trek/shared'
+import { NumericInput } from '../shared/NumericInput'
+import { currenciesWith, SYMBOLS } from '../Budget/BudgetPanel.constants'
+
+type DateShiftMode = 'keep_bookings' | 'shift_all'
 
 interface TripFormModalProps {
   isOpen: boolean
   onClose: () => void
   // Create returns the new trip (so we can attach members / upload the cover);
   // update resolves without a payload.
-  onSave: (data: TripCreateRequest) => Promise<{ trip?: Trip } | void> | void
+  onSave: (data: TripCreateRequest & { date_shift_mode?: DateShiftMode }) => Promise<{ trip?: Trip } | void> | void
   trip: Trip | null
   onCoverUpdate?: (tripId: number, coverUrl: string | null) => void
+}
+
+interface CoverSearchPhoto {
+  id: string
+  url: string
+  thumb: string
+  description?: string | null
+  photographer?: string | null
+  link?: string | null
 }
 
 export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUpdate }: TripFormModalProps) {
   const isEditing = !!trip
   const fileRef = useRef(null)
+  const coverSearchSeq = useRef(0)
   const toast = useToast()
   const { t } = useTranslation()
   const currentUser = useAuthStore(s => s.user)
@@ -39,19 +53,29 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
     description: '',
     start_date: '',
     end_date: '',
+    currency: 'EUR',
     reminder_days: 0 as number,
     day_count: 7 as number | '',
   })
   const [customReminder, setCustomReminder] = useState(false)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [coverPreview, setCoverPreview] = useState(null)
-  const [pendingCoverFile, setPendingCoverFile] = useState(null)
+  const [coverPreview, setCoverPreview] = useState<string | null>(null)
+  const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null)
+  const [pendingUnsplashUrl, setPendingUnsplashUrl] = useState<string | null>(null)
   const [uploadingCover, setUploadingCover] = useState(false)
+  const [coverSearchQuery, setCoverSearchQuery] = useState('')
+  const [coverSearchResults, setCoverSearchResults] = useState<CoverSearchPhoto[]>([])
+  const [coverSearchError, setCoverSearchError] = useState('')
+  const [searchingCover, setSearchingCover] = useState(false)
   const [allUsers, setAllUsers] = useState<{ id: number; username: string }[]>([])
   const [selectedMembers, setSelectedMembers] = useState<number[]>([])
   const [existingMembers, setExistingMembers] = useState<{ id: number; username: string }[]>([])
   const [memberSelectValue, setMemberSelectValue] = useState('')
+  // Set when a start-date change on a dated trip needs the user to pick how the
+  // itinerary follows the new dates (#1288); holds the payload awaiting that choice.
+  const [pendingDateShift, setPendingDateShift] = useState<(TripCreateRequest & { date_shift_mode?: DateShiftMode }) | null>(null)
+  const [dateShiftMode, setDateShiftMode] = useState<DateShiftMode>('keep_bookings')
 
   useEffect(() => {
     if (trip) {
@@ -61,18 +85,26 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         description: trip.description || '',
         start_date: trip.start_date || '',
         end_date: trip.end_date || '',
+        currency: trip.currency || 'EUR',
         reminder_days: rd,
         day_count: trip.day_count || 7,
       })
       setCustomReminder(![0, 1, 3, 9].includes(rd))
       setCoverPreview(trip.cover_image || null)
+      setCoverSearchQuery('')
     } else {
-      setFormData({ title: '', description: '', start_date: '', end_date: '', reminder_days: tripRemindersEnabled ? 3 : 0, day_count: 7 })
+      setFormData({ title: '', description: '', start_date: '', end_date: '', currency: 'EUR', reminder_days: tripRemindersEnabled ? 3 : 0, day_count: 7 })
       setCustomReminder(false)
       setCoverPreview(null)
+      setCoverSearchQuery('')
     }
     setPendingCoverFile(null)
+    setPendingUnsplashUrl(null)
+    setCoverSearchResults([])
+    setCoverSearchError('')
     setSelectedMembers([])
+    setPendingDateShift(null)
+    setDateShiftMode('keep_bookings')
     setError('')
     if (isOpen) {
       authApi.getAppConfig().then((c: { trip_reminders_enabled?: boolean }) => {
@@ -106,16 +138,31 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
         setError(t('dashboard.dayCountRequired')); return
       }
     }
+    const payload: TripCreateRequest & { date_shift_mode?: DateShiftMode } = {
+      title: formData.title.trim(),
+      description: formData.description.trim() || null,
+      start_date: formData.start_date || null,
+      end_date: formData.end_date || null,
+      currency: formData.currency,
+      reminder_days: formData.reminder_days,
+      ...(!formData.start_date && !formData.end_date ? { day_count: Number(formData.day_count) } : {}),
+    }
+    // Moving the start of a dated trip shifts the whole day grid, so let the user
+    // choose how bookings follow before anything is saved (#1288). End-date-only
+    // changes don't shift days and dateless transitions have nothing to shift.
+    if (isEditing && trip?.start_date && trip?.end_date
+      && payload.start_date && payload.end_date && payload.start_date !== trip.start_date) {
+      setDateShiftMode('keep_bookings')
+      setPendingDateShift(payload)
+      return
+    }
+    await performSave(payload)
+  }
+
+  const performSave = async (payload: TripCreateRequest & { date_shift_mode?: DateShiftMode }) => {
     setIsLoading(true)
     try {
-      const result = await onSave({
-        title: formData.title.trim(),
-        description: formData.description.trim() || null,
-        start_date: formData.start_date || null,
-        end_date: formData.end_date || null,
-        reminder_days: formData.reminder_days,
-        ...(!formData.start_date && !formData.end_date ? { day_count: Number(formData.day_count) } : {}),
-      })
+      const result = await onSave(payload)
       const createdTrip = result ? result.trip : undefined
       // Add selected members for newly created trips
       if (selectedMembers.length > 0 && createdTrip?.id) {
@@ -139,6 +186,13 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
           // Cover upload failed but trip was created — surface it without blocking the create
           toast.error(t('dashboard.coverUploadError'))
         }
+      } else if (pendingUnsplashUrl && createdTrip?.id) {
+        try {
+          await tripsApi.update(createdTrip.id, { cover_image: pendingUnsplashUrl })
+          onCoverUpdate?.(createdTrip.id, pendingUnsplashUrl)
+        } catch {
+          toast.error(t('dashboard.coverSaveError'))
+        }
       }
       onClose()
     } catch (err: unknown) {
@@ -152,6 +206,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
     if (!file) return
     // HEIC/HEIF from iOS can't be rendered or stored as-is — convert to JPEG first
     const normalized = await normalizeImageFile(file)
+    setPendingUnsplashUrl(null)
     if (isEditing && trip?.id) {
       // Existing trip: upload immediately
       uploadCoverNow(normalized)
@@ -183,9 +238,56 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
     }
   }
 
+  const handleCoverSearch = async () => {
+    const query = coverSearchQuery.trim() || formData.title.trim()
+    if (!query) {
+      setCoverSearchError(t('dashboard.unsplashQueryRequired'))
+      return
+    }
+    // Guard against out-of-order responses: only the latest search applies its
+    // results, so a slow earlier query can't overwrite a newer one. #1277 review
+    const seq = ++coverSearchSeq.current
+    setSearchingCover(true)
+    setCoverSearchError('')
+    try {
+      const data = await tripsApi.searchCoverImages(query)
+      if (seq !== coverSearchSeq.current) return
+      const photos = data.photos || []
+      setCoverSearchResults(photos)
+      if (photos.length === 0) setCoverSearchError(t('dashboard.unsplashNoResults'))
+    } catch (err: unknown) {
+      if (seq !== coverSearchSeq.current) return
+      setCoverSearchError(getApiErrorMessage(err, t('dashboard.coverSearchError')))
+    } finally {
+      if (seq === coverSearchSeq.current) setSearchingCover(false)
+    }
+  }
+
+  const handleUnsplashSelect = async (photo: CoverSearchPhoto) => {
+    if (!photo.url) return
+    setPendingCoverFile(null)
+    if (isEditing && trip?.id) {
+      setUploadingCover(true)
+      try {
+        await tripsApi.update(trip.id, { cover_image: photo.url })
+        setCoverPreview(photo.url)
+        onCoverUpdate?.(trip.id, photo.url)
+        toast.success(t('dashboard.coverSaved'))
+      } catch (err: unknown) {
+        toast.error(getApiErrorMessage(err, t('dashboard.coverSaveError')))
+      } finally {
+        setUploadingCover(false)
+      }
+    } else {
+      setPendingUnsplashUrl(photo.url)
+      setCoverPreview(photo.url)
+    }
+  }
+
   const handleRemoveCover = async () => {
-    if (pendingCoverFile) {
+    if (pendingCoverFile || pendingUnsplashUrl) {
       setPendingCoverFile(null)
+      setPendingUnsplashUrl(null)
       setCoverPreview(null)
       return
     }
@@ -237,24 +339,64 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={isEditing ? t('dashboard.editTrip') : t('dashboard.createTrip')}
+      title={pendingDateShift ? t('dashboard.dateShiftTitle') : isEditing ? t('dashboard.editTrip') : t('dashboard.createTrip')}
       size="md"
       footer={
         <div className="flex gap-3 justify-end">
-          <button type="button" onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
-            {t('common.cancel')}
-          </button>
-          <button onClick={handleSubmit} disabled={isLoading}
-            className="px-4 py-2 text-sm bg-slate-900 hover:bg-slate-700 disabled:bg-slate-400 text-white rounded-lg transition-colors flex items-center gap-2">
-            {isLoading
-              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />{t('common.saving')}</>
-              : isEditing ? t('common.update') : t('dashboard.createTrip')}
-          </button>
+          {pendingDateShift ? (
+            <>
+              <button type="button" onClick={() => setPendingDateShift(null)} disabled={isLoading}
+                className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+                {t('common.back')}
+              </button>
+              <button onClick={() => performSave({ ...pendingDateShift, date_shift_mode: dateShiftMode })} disabled={isLoading}
+                className="px-4 py-2 text-sm bg-slate-900 hover:bg-slate-700 disabled:bg-slate-400 text-white rounded-lg transition-colors flex items-center gap-2">
+                {isLoading
+                  ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />{t('common.saving')}</>
+                  : t('common.update')}
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={onClose}
+                className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+                {t('common.cancel')}
+              </button>
+              <button onClick={handleSubmit} disabled={isLoading}
+                className="px-4 py-2 text-sm bg-slate-900 hover:bg-slate-700 disabled:bg-slate-400 text-white rounded-lg transition-colors flex items-center gap-2">
+                {isLoading
+                  ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />{t('common.saving')}</>
+                  : isEditing ? t('common.update') : t('dashboard.createTrip')}
+              </button>
+            </>
+          )}
         </div>
       }
     >
-      <form onSubmit={handleSubmit} className="space-y-4" onPaste={handlePaste}>
+      {pendingDateShift && (
+        <div className="space-y-3">
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">{error}</div>
+          )}
+          <p className="text-sm text-slate-600">{t('dashboard.dateShiftIntro')}</p>
+          {([
+            { mode: 'keep_bookings' as DateShiftMode, label: t('dashboard.dateShiftKeepBookings'), desc: t('dashboard.dateShiftKeepBookingsDesc') },
+            { mode: 'shift_all' as DateShiftMode, label: t('dashboard.dateShiftAll'), desc: t('dashboard.dateShiftAllDesc') },
+          ]).map(({ mode, label, desc }) => (
+            <label key={mode}
+              className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${dateShiftMode === mode ? 'border-slate-900 bg-slate-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+              <input type="radio" name="date_shift_mode" value={mode} checked={dateShiftMode === mode}
+                onChange={() => setDateShiftMode(mode)} className="mt-1 accent-slate-900" />
+              <span>
+                <span className="block text-sm font-medium text-slate-800">{label}</span>
+                <span className="block text-sm text-slate-500 mt-0.5">{desc}</span>
+              </span>
+            </label>
+          ))}
+          <p className="text-xs text-slate-400">{t('dashboard.dateShiftHint')}</p>
+        </div>
+      )}
+      <form onSubmit={handleSubmit} className={pendingDateShift ? 'hidden' : 'space-y-4'} onPaste={handlePaste}>
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">{error}</div>
         )}
@@ -268,7 +410,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
               <img src={coverPreview} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               <div style={{ position: 'absolute', bottom: 8, right: 8, display: 'flex', gap: 6 }}>
                 <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadingCover}
-                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.55)', border: 'none', color: 'white', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', backdropFilter: 'blur(4px)' }}>
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.55)', border: 'none', color: 'white', fontSize: 'calc(11.5px * var(--fs-scale-caption, 1))', fontWeight: 600, cursor: 'pointer', backdropFilter: 'blur(4px)' }}>
                   <Camera size={12} /> {uploadingCover ? t('common.uploading') : t('common.change')}
                 </button>
                 <button type="button" onClick={handleRemoveCover}
@@ -282,11 +424,47 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
               onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.background = 'rgba(99,102,241,0.04)' }}
               onDragLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.background = 'none' }}
               onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.background = 'none'; const file = e.dataTransfer.files?.[0]; if (file?.type.startsWith('image/')) handleCoverSelect(file) }}
-              style={{ width: '100%', padding: '18px', border: '2px dashed #e5e7eb', borderRadius: 10, background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, color: '#9ca3af', fontFamily: 'inherit', transition: 'all 0.15s' }}
+              style={{ width: '100%', padding: '18px', border: '2px dashed #e5e7eb', borderRadius: 10, background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 'calc(13px * var(--fs-scale-body, 1))', color: '#9ca3af', fontFamily: 'inherit', transition: 'all 0.15s' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.color = '#9ca3af' }}>
               <Camera size={15} /> {uploadingCover ? t('common.uploading') : t('dashboard.addCoverImage')}
             </button>
+          )}
+          <div className="mt-2 flex gap-2">
+            <input
+              type="text"
+              value={coverSearchQuery}
+              onChange={e => setCoverSearchQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCoverSearch() } }}
+              placeholder={t('dashboard.unsplashSearchPlaceholder')}
+              className={inputCls}
+            />
+            <button type="button" onClick={handleCoverSearch} disabled={searchingCover || (!coverSearchQuery.trim() && !formData.title.trim())}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap">
+              {searchingCover ? <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /> : <Search size={14} />}
+              {t('dashboard.searchUnsplash')}
+            </button>
+          </div>
+          {coverSearchError && <p className="text-xs text-red-500 mt-1.5">{coverSearchError}</p>}
+          {coverSearchResults.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              {coverSearchResults.map(photo => (
+                <button
+                  type="button"
+                  key={photo.id}
+                  onClick={() => handleUnsplashSelect(photo)}
+                  aria-label={t('dashboard.useUnsplashPhoto', { photographer: photo.photographer || 'Unsplash' })}
+                  className={`relative h-20 overflow-hidden rounded-lg border transition-colors ${coverPreview === photo.url ? 'border-slate-900 ring-2 ring-slate-900/20' : 'border-slate-200 hover:border-slate-400'}`}
+                >
+                  <img src={photo.thumb} alt={photo.description || ''} loading="lazy" className="w-full h-full object-cover" />
+                  {photo.photographer && (
+                    <span className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-1 text-[10px] text-white">
+                      {photo.photographer}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
           )}
         </div>}
 
@@ -325,9 +503,8 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
             <label className="block text-sm font-medium text-slate-700 mb-1.5">
               {t('dashboard.dayCount')}
             </label>
-            <input type="number" min={1} max={365} value={formData.day_count}
-              onChange={e => {
-                const raw = e.target.value
+            <NumericInput min={1} max={365} value={formData.day_count}
+              onValueChange={raw => {
                 if (raw === '') { update('day_count', ''); return }
                 const n = Math.floor(Number(raw))
                 if (Number.isFinite(n)) update('day_count', Math.min(365, Math.max(1, n)))
@@ -336,6 +513,17 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
             <p className="text-xs text-slate-400 mt-1.5">{t('dashboard.dayCountHint')}</p>
           </div>
         )}
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">{t('dashboard.currency')}</label>
+          <CustomSelect
+            value={formData.currency}
+            onChange={v => canEditTrip && update('currency', v)}
+            disabled={!canEditTrip}
+            options={currenciesWith(formData.currency).map(c => ({ value: c, label: `${c} (${SYMBOLS[c] || c})` }))}
+            searchable
+          />
+        </div>
 
         {/* Reminder — only visible to owner (or when creating) */}
         {(!isEditing || trip?.user_id === currentUser?.id || currentUser?.role === 'admin') && (
@@ -378,9 +566,9 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
               </div>
               {customReminder && (
                 <div className="flex items-center gap-2 mt-2">
-                  <input type="number" min={1} max={30}
+                  <NumericInput min={1} max={30}
                     value={formData.reminder_days}
-                    onChange={e => update('reminder_days', Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
+                    onValueChange={raw => update('reminder_days', Math.max(1, Math.min(30, Number(raw) || 1)))}
                     className="w-20 px-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300" />
                   <span className="text-xs text-slate-500">{t('trips.reminderDaysBefore')}</span>
                 </div>
@@ -412,7 +600,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
                     }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 99,
-                      fontSize: 12, fontWeight: 500,
+                      fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 500,
                       cursor: m.id === currentUser?.id ? 'default' : 'pointer',
                     }}>
                     {m.username}
@@ -432,7 +620,7 @@ export default function TripFormModal({ isOpen, onClose, onSave, trip, onCoverUp
                       className="bg-surface-secondary text-content border border-edge cursor-pointer"
                       style={{
                         display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 99,
-                        fontSize: 12, fontWeight: 500,
+                        fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 500,
                       }}>
                       {user.username}
                       <X size={11} className="text-content-faint" />

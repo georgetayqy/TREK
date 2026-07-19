@@ -52,6 +52,9 @@ const budget: TranslationStrings = {
   'costs.nothingOwed': 'Nikt nie jest ci nic winien',
   'costs.yourShare': 'Twój udział',
   'costs.youPaid': 'Zapłaciłeś',
+  'costs.outstanding': 'Kwota nierozliczona',
+  'costs.outstandingSub': 'Wydatki bez płatnika',
+  'costs.outstandingItems': 'wydatków potrzebuje płatnika',
   'costs.expenses': 'Wydatki',
   'costs.entries': 'Wpisów: {count}',
   'costs.searchPlaceholder': 'Szukaj wydatków…',
@@ -90,6 +93,9 @@ const budget: TranslationStrings = {
   'costs.rateLabel': '1 {from} w {to}',
   'costs.category': 'Kategoria',
   'costs.whoPaid': 'Kto zapłacił?',
+  'costs.multiplePayers': 'Zapłaciło kilka osób',
+  'costs.singlePayer': 'Zapłaciła jedna osoba',
+  'costs.payersUnbalanced': 'Kwoty płacących muszą sumować się do {amount}',
   'costs.splitBetween': 'Podziel równo między',
   'costs.pickSomeone': 'Wybierz co najmniej jedną osobę do podziału.',
   'costs.splitSummary': 'Podział na {count} · {amount} na osobę',
@@ -116,6 +122,12 @@ const budget: TranslationStrings = {
   'costs.unfinishedHint': 'Tylko w sumie — jeszcze nierozliczone',
   'costs.tapToInclude': 'Dotknij, aby dodać',
   'costs.amount': 'Kwota',
+  'costs.split': 'Split',
+  'costs.splitEqually': 'Equally',
+  'costs.splitCustom': 'Custom',
+  'costs.splitTicket': 'Ticket',
+  'costs.filter.allCategories': 'Wszystkie kategorie',
+  'costs.filter.allDays': 'Wszystkie dni',
+  'costs.expensesCount': '{count} wydatków',
 };
-
 export default budget;

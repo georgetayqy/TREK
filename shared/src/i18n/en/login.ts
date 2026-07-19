@@ -8,7 +8,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places, routes & clustering',
   'login.features.realtime': 'Real-Time Sync',
   'login.features.realtimeDesc': 'Plan together via WebSocket',
-  'login.features.budget': 'Budget Tracking',
+  'login.features.budget': 'Cost Tracking',
   'login.features.budgetDesc': 'Categories, charts & per-person costs',
   'login.features.collab': 'Collaboration',
   'login.features.collabDesc': 'Multi-user with shared trips',
@@ -85,5 +85,9 @@ const login: TranslationStrings = {
   'login.resetPasswordFailed': 'Reset failed. The link may have expired.',
   'login.passkey.signIn': 'Sign in with a passkey',
   'login.passkey.failed': 'Passkey sign-in failed. Please try again.',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

@@ -2,6 +2,7 @@ import { db, canAccessTrip } from '../db/database';
 import crypto from 'crypto';
 import { loadTagsByPlaceIds } from './queryHelpers';
 import { serveFilePath } from './placePhotoCache';
+import { getUserSettings } from './settingsService';
 
 const PLACE_PHOTO_PROXY_PREFIX = '/api/maps/place-photo/';
 
@@ -197,8 +198,9 @@ export function getSharedTripData(token: string): Record<string, any> | null {
     WHERE a.trip_id = ?
   `).all(tripId);
 
-  // Packing
-  const packing = db.prepare('SELECT * FROM packing_items WHERE trip_id = ? ORDER BY sort_order ASC').all(tripId);
+  // Packing — a public viewer is neither owner nor recipient, so only Common items
+  // may surface; never a co-member's private/personal packing items (#858).
+  const packing = db.prepare('SELECT * FROM packing_items WHERE trip_id = ? AND is_private = 0 ORDER BY sort_order ASC').all(tripId);
 
   // Budget
   const budget = db.prepare('SELECT * FROM budget_items WHERE trip_id = ? ORDER BY category ASC').all(tripId);
@@ -219,8 +221,31 @@ export function getSharedTripData(token: string): Record<string, any> | null {
     ? db.prepare('SELECT m.*, u.username, u.avatar FROM collab_messages m JOIN users u ON m.user_id = u.id WHERE m.trip_id = ? AND m.deleted = 0 ORDER BY m.created_at').all(tripId)
     : [];
 
+  // Display currency the share owner sees in their Costs view. A public viewer has
+  // no logged-in user, so the owner's per-user `default_currency` (with the admin
+  // instance default already merged in by getUserSettings) is embedded in the
+  // payload and used by the client to convert every expense — otherwise guests
+  // fall back to the trip's base currency and see the wrong totals (#1361).
+  // getUserSettings merges admin defaults under the user's own settings, so this
+  // honours per-user → admin-default; we then fall back to trip currency → EUR.
+  let baseCurrency = (trip as { currency?: string }).currency || 'EUR';
+  if (shareRow.created_by != null) {
+    const ownerDefault = getUserSettings(shareRow.created_by)['default_currency'];
+    if (typeof ownerDefault === 'string' && ownerDefault.trim()) {
+      baseCurrency = ownerDefault.trim();
+    }
+  }
+
+  // Honour every share flag server-side — the client gates these too, but it must
+  // not rely on that (mirrors journeyShareService). share_map covers the whole
+  // itinerary: days, their assignments/notes, and the place list with coordinates,
+  // addresses and notes. Withhold it when the owner disabled the map.
   return {
-    trip, days, assignments, dayNotes, places, categories, permissions,
+    trip, baseCurrency, categories, permissions,
+    days: permissions.share_map ? days : [],
+    assignments: permissions.share_map ? assignments : {},
+    dayNotes: permissions.share_map ? dayNotes : {},
+    places: permissions.share_map ? places : [],
     reservations: permissions.share_bookings ? reservations : [],
     accommodations: permissions.share_bookings ? accommodations : [],
     packing: permissions.share_packing ? packing : [],
@@ -239,9 +264,13 @@ export function getSharedTripData(token: string): Record<string, any> | null {
  */
 export function getSharedPlacePhotoPath(token: string, placeId: string): string | null {
   const shareRow = db.prepare(
-    "SELECT trip_id FROM share_tokens WHERE token = ? AND (expires_at IS NULL OR expires_at > datetime('now'))"
-  ).get(token) as { trip_id: string } | undefined;
+    "SELECT trip_id, share_map FROM share_tokens WHERE token = ? AND (expires_at IS NULL OR expires_at > datetime('now'))"
+  ).get(token) as { trip_id: string; share_map: number } | undefined;
   if (!shareRow) return null;
+  // Place photos belong to the map/itinerary section — withhold them when the
+  // owner disabled the map, matching getSharedTripData which no longer returns
+  // the places (and thus their ids) in that case.
+  if (!shareRow.share_map) return null;
 
   const expectedUrl = `${PLACE_PHOTO_PROXY_PREFIX}${encodeURIComponent(placeId)}/bytes`;
   const place = db.prepare(

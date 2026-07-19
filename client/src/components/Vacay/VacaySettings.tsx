@@ -5,6 +5,7 @@ import { getIntlLanguage, useTranslation } from '../../i18n'
 import { useToast } from '../shared/Toast'
 import CustomSelect from '../shared/CustomSelect'
 import apiClient from '../../api/client'
+import { fetchRegionOptions } from './holidayRegions'
 import type { VacayHolidayCalendar } from '../../types'
 
 interface VacaySettingsProps {
@@ -71,7 +72,7 @@ export default function VacaySettings({ onClose }: VacaySettingsProps) {
                   updatePlan({ weekend_days: next.join(',') })
                 }}
                   style={{
-                    padding: '4px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    padding: '4px 10px', borderRadius: 8, fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer',
                     fontFamily: 'inherit', border: '1px solid', transition: 'all 0.12s',
                     background: active ? 'var(--text-primary)' : 'var(--bg-card)',
                     borderColor: active ? 'var(--text-primary)' : 'var(--border-primary)',
@@ -103,7 +104,7 @@ export default function VacaySettings({ onClose }: VacaySettingsProps) {
             return (
               <button key={value} onClick={() => updatePlan({ week_start: value })}
                 style={{
-                  padding: '4px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  padding: '4px 10px', borderRadius: 8, fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer',
                   fontFamily: 'inherit', border: '1px solid', transition: 'all 0.12s',
                   background: active ? 'var(--text-primary)' : 'var(--bg-card)',
                   borderColor: active ? 'var(--text-primary)' : 'var(--border-primary)',
@@ -255,30 +256,6 @@ function SettingToggle({ icon: Icon, label, hint, value, onChange }: SettingTogg
   )
 }
 
-// ── shared region-loading helper ─────────────────────────────────────────────
-async function fetchRegionOptions(country: string): Promise<{ value: string; label: string }[]> {
-  try {
-    const year = new Date().getFullYear()
-    const r = await apiClient.get(`/addons/vacay/holidays/${year}/${country}`)
-    const allCounties = new Set<string>()
-    r.data.forEach(h => { if (h.counties) h.counties.forEach(c => allCounties.add(c)) })
-    if (allCounties.size === 0) return []
-    return [...allCounties].sort().map(c => {
-      let label = c.split('-')[1] || c
-      if (c.startsWith('DE-')) {
-        const m: Record<string, string> = { BW:'Baden-Württemberg',BY:'Bayern',BE:'Berlin',BB:'Brandenburg',HB:'Bremen',HH:'Hamburg',HE:'Hessen',MV:'Mecklenburg-Vorpommern',NI:'Niedersachsen',NW:'Nordrhein-Westfalen',RP:'Rheinland-Pfalz',SL:'Saarland',SN:'Sachsen',ST:'Sachsen-Anhalt',SH:'Schleswig-Holstein',TH:'Thüringen' }
-        label = m[c.split('-')[1]] || label
-      } else if (c.startsWith('CH-')) {
-        const m: Record<string, string> = { AG:'Aargau',AI:'Appenzell Innerrhoden',AR:'Appenzell Ausserrhoden',BE:'Bern',BL:'Basel-Landschaft',BS:'Basel-Stadt',FR:'Freiburg',GE:'Genf',GL:'Glarus',GR:'Graubünden',JU:'Jura',LU:'Luzern',NE:'Neuenburg',NW:'Nidwalden',OW:'Obwalden',SG:'St. Gallen',SH:'Schaffhausen',SO:'Solothurn',SZ:'Schwyz',TG:'Thurgau',TI:'Tessin',UR:'Uri',VD:'Waadt',VS:'Wallis',ZG:'Zug',ZH:'Zürich' }
-        label = m[c.split('-')[1]] || label
-      }
-      return { value: c, label }
-    })
-  } catch {
-    return []
-  }
-}
-
 // ── Existing calendar row (inline edit) ──────────────────────────────────────
 function CalendarRow({ cal, countries, onUpdate, onDelete }: {
   cal: VacayHolidayCalendar
@@ -331,7 +308,7 @@ function CalendarRow({ cal, countries, onUpdate, onDelete }: {
           onBlur={() => { const v = localLabel.trim() || null; if (v !== cal.label) onUpdate({ label: v }) }}
           onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
           placeholder={t('vacay.calendarLabel')}
-          style={{ width: '100%', fontSize: 12, padding: '6px 10px', borderRadius: 8, background: 'var(--bg-input)', border: '1px solid var(--border-primary)', color: 'var(--text-primary)', fontFamily: 'inherit', outline: 'none' }}
+          style={{ width: '100%', fontSize: 'calc(12px * var(--fs-scale-body, 1))', padding: '6px 10px', borderRadius: 8, background: 'var(--bg-input)', border: '1px solid var(--border-primary)', color: 'var(--text-primary)', fontFamily: 'inherit', outline: 'none' }}
         />
         <CustomSelect
           value={selectedCountry}
@@ -413,7 +390,7 @@ function AddCalendarForm({ countries, onAdd, onCancel }: {
           value={label}
           onChange={e => setLabel(e.target.value)}
           placeholder={t('vacay.calendarLabel')}
-          style={{ width: '100%', fontSize: 12, padding: '6px 10px', borderRadius: 8, background: 'var(--bg-input)', border: '1px solid var(--border-primary)', color: 'var(--text-primary)', fontFamily: 'inherit', outline: 'none' }}
+          style={{ width: '100%', fontSize: 'calc(12px * var(--fs-scale-body, 1))', padding: '6px 10px', borderRadius: 8, background: 'var(--bg-input)', border: '1px solid var(--border-primary)', color: 'var(--text-primary)', fontFamily: 'inherit', outline: 'none' }}
         />
         <CustomSelect
           value={selectedCountry}

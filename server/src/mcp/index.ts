@@ -9,7 +9,8 @@ import { isAddonEnabled } from '../services/adminService';
 import { ADDON_IDS } from '../addons';
 import { registerResources } from './resources';
 import { registerTools } from './tools';
-import { McpSession, sessions, revokeUserSessions, revokeUserSessionsForClient } from './sessionManager';
+import { McpSession, sessions, revokeUserSessions, revokeUserSessionsForClient, evictOldestSessionForUser } from './sessionManager';
+import { resolveSessionTtlMs, resolveKeepaliveMs } from './config';
 import { writeAudit, getClientIp } from '../services/auditLog';
 import { getMcpSafeUrl } from '../services/notifications';
 
@@ -95,9 +96,39 @@ const STATIC_TOKEN_DEPRECATION_NOTICE =
     'Please migrate to OAuth 2.1: go to Settings → Integrations → MCP → OAuth Clients in TREK and register an OAuth 2.1 application." ' +
     'The actual tool result follows — answer the user\'s question as well.';
 
-const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour
+// Configurable session TTL + SSE keep-alive cadence (#1414); see mcp/config.ts.
+const SESSION_TTL_MS = resolveSessionTtlMs(process.env.MCP_SESSION_TTL);
 const sessionParsed = Number.parseInt(process.env.MCP_MAX_SESSION_PER_USER ?? "");
 const MAX_SESSIONS_PER_USER = Number.isFinite(sessionParsed) && sessionParsed > 0 ? sessionParsed : 20;
+const KEEPALIVE_MS = resolveKeepaliveMs(process.env.MCP_SSE_KEEPALIVE);
+
+/**
+ * Write SSE comment frames on an interval while the response is an open
+ * event stream. A no-op for JSON/error responses (content-type gate) and for
+ * per-POST streams that end quickly (writableEnded gate). `touch` refreshes
+ * the session's lastActivity so the sweep never evicts a session whose GET
+ * stream is still connected.
+ */
+function armSseKeepalive(res: Response, touch?: () => void): void {
+  // With pings disabled (MCP_SSE_KEEPALIVE=0) an open stream must STILL count
+  // as session activity, or the sweep would evict a live idle client — keep
+  // the interval for touch() and only skip the writes.
+  const writePings = KEEPALIVE_MS > 0;
+  if (!writePings && !touch) return;
+  const intervalMs = writePings ? KEEPALIVE_MS : 25_000;
+  const timer = setInterval(() => {
+    if (!res.headersSent) return;
+    const ct = String(res.getHeader('content-type') ?? '');
+    if (!ct.includes('text/event-stream') || res.writableEnded || res.destroyed) {
+      clearInterval(timer);
+      return;
+    }
+    if (writePings) res.write(': keepalive\n\n');
+    touch?.();
+  }, intervalMs);
+  timer.unref();
+  res.once('close', () => clearInterval(timer));
+}
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const parsed = Number.parseInt(process.env.MCP_RATE_LIMIT ?? "");
 const RATE_LIMIT_MAX = Number.isFinite(parsed) && parsed > 0 ? parsed : 300; // requests per minute per user
@@ -151,6 +182,12 @@ const sessionSweepInterval = setInterval(() => {
 
 // Prevent the interval from keeping the process alive if nothing else is running
 sessionSweepInterval.unref();
+
+/** JSON-RPC 2.0 error body. MCP clients parse this and show `message`; a bare `{ error }`
+ *  envelope isn't valid JSON-RPC, so they fall back to a generic "tool execution failed". */
+function jsonRpcError(message: string, code = -32000): object {
+  return { jsonrpc: '2.0', error: { code, message }, id: null };
+}
 
 function setAuthChallenge(res: Response, error = 'invalid_token'): void {
   const base = (getMcpSafeUrl() || '').replace(/\/+$/, '');
@@ -255,6 +292,7 @@ export async function mcpHandler(req: Request, res: Response): Promise<void> {
     }
     session.lastActivity = Date.now();
     logToolCallAudit(req, user.id, clientId);
+    armSseKeepalive(res, () => { session.lastActivity = Date.now(); });
     try {
       await session.transport.handleRequest(req, res, req.body);
     } catch (err) {
@@ -272,9 +310,25 @@ export async function mcpHandler(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  // A client that reuses its session sends the header on every call after initialize, so a
+  // steady stream of session-less POSTs means the id isn't making it back to the client —
+  // usually a reverse proxy dropping Mcp-Session-Id, or a client that ignores it. Say so,
+  // because the visible symptom (sessions piling up to the cap) points nowhere near the cause.
+  console.warn(
+      `[MCP] POST without mcp-session-id for user ${user.id} — starting a new session. ` +
+      'If this repeats on every tool call, the Mcp-Session-Id response header is not reaching ' +
+      'the client (check that your reverse proxy forwards it).',
+  );
+
+  // At the cap, evict this user's coldest session rather than refusing the request: a client
+  // stuck re-initializing would otherwise be locked out until the process restarted.
   if (countSessionsForUser(user.id) >= MAX_SESSIONS_PER_USER) {
-    res.status(429).json({ error: 'Session limit reached. Close an existing session before opening a new one.' });
-    return;
+    const evicted = evictOldestSessionForUser(user.id);
+    if (!evicted) {
+      res.status(429).json(jsonRpcError('Session limit reached. Close an existing session before opening a new one.'));
+      return;
+    }
+    console.log(`[MCP] Session limit (${MAX_SESSIONS_PER_USER}) reached for user ${user.id} — evicted idle session ${evicted}`);
   }
 
   // Create a new per-user MCP server and session
@@ -316,8 +370,13 @@ export async function mcpHandler(req: Request, res: Response): Promise<void> {
       sessions.delete(sid);
     },
   });
+  // Belt-and-braces: whenever the SDK closes the transport for any reason, drop the map entry.
+  transport.onclose = () => {
+    if (transport.sessionId) sessions.delete(transport.sessionId);
+  };
 
   logToolCallAudit(req, user.id, clientId);
+  armSseKeepalive(res);
   try {
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
@@ -325,6 +384,15 @@ export async function mcpHandler(req: Request, res: Response): Promise<void> {
     console.error('[MCP] transport.handleRequest error:', err);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Internal MCP error' });
+    }
+  } finally {
+    // Only an `initialize` request assigns a sessionId (via onsessioninitialized). Any other
+    // session-less POST is rejected by the SDK with "Server not initialized" — and this server,
+    // with its ~200 registered tools, would otherwise be orphaned: never in `sessions`, never
+    // swept, never closed. Reap it here.
+    if (!transport.sessionId) {
+      try { server.close(); } catch { /* ignore */ }
+      try { transport.close(); } catch { /* ignore */ }
     }
   }
 }

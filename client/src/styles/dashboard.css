@@ -18,9 +18,12 @@
   --ink-3: oklch(0.62 0.01 65);
   --line: oklch(0.92 0.008 70);
   --line-2: oklch(0.88 0.01 70);
-  --accent: oklch(0.66 0.17 38);
-  --accent-ink: oklch(0.32 0.13 38);
-  --accent-soft: oklch(0.95 0.04 50);
+  /* Accent follows the user's theme (index.css --accent*): monochrome black/white
+     by default, coloured per data-scheme / custom accent. --accent itself is
+     inherited from the theme; the ink/soft aliases map onto the theme tokens.
+     Category colours are set explicitly per element and are unaffected. */
+  --accent-ink: var(--accent-on, var(--accent));
+  --accent-soft: var(--accent-subtle, color-mix(in oklch, var(--accent) 12%, transparent));
   --success: oklch(0.58 0.12 155);
   --warn: oklch(0.74 0.14 75);
 
@@ -52,7 +55,7 @@
   --glass-blur: blur(22px) saturate(1.7);
 }
 
-/* dark variant — same geometry, dark surfaces, accent kept */
+/* dark variant — same geometry, dark surfaces, theme-driven accent */
 .dark .trek-dash {
   --bg: oklch(0.17 0 0);
   --bg-2: oklch(0.21 0 0);
@@ -63,9 +66,9 @@
   --ink-3: oklch(0.6 0 0);
   --line: oklch(0.32 0 0);
   --line-2: oklch(0.38 0 0);
-  --accent: oklch(0.7 0.16 40);
-  --accent-ink: oklch(0.82 0.13 50);
-  --accent-soft: oklch(0.32 0.07 45);
+  /* Dark: same theme-driven accent (inherited --accent + mapped aliases). */
+  --accent-ink: var(--accent-on, var(--accent));
+  --accent-soft: var(--accent-subtle, color-mix(in oklch, var(--accent) 22%, transparent));
   --success: oklch(0.7 0.13 155);
   --warn: oklch(0.78 0.14 75);
 
@@ -103,6 +106,9 @@
   align-items: start;
 }
 .trek-dash .page-main { min-width: 0; }
+/* Right sidebar disabled → single centered column. */
+.trek-dash .page[data-no-sidebar="true"] { grid-template-columns: 1fr; }
+.trek-dash .page[data-no-sidebar="true"] .page-main { max-width: 1080px; margin-inline: auto; width: 100%; }
 .trek-dash .page-sidebar {
   position: sticky;
   top: 24px;
@@ -221,7 +227,21 @@
 .trek-dash .hero-title { font-size: 104px; font-weight: 600; line-height: 0.9; letter-spacing: -0.045em; margin: 0; text-shadow: 0 1px 12px oklch(0 0 0 / .32), 0 1px 3px oklch(0 0 0 / .4); }
 
 /* ----------------- boarding pass ----------------- */
+/* The pass is split into an outer wrapper (left notch) and an inner glass panel
+   (right notch). Each element carries a SINGLE-layer radial-gradient mask so we
+   never rely on multi-layer `mask-composite: intersect` — Safari mis-composites
+   that path and hides the whole bar (issue #1459). */
 .trek-dash .hero-pass {
+  position: relative;
+  /* Match the inner panel's radius: the mask + translateZ promotes this wrapper to
+     its own compositing layer whose bounds are otherwise square, which showed as a
+     square edge over the rounded glass panel (regression from the #1459 mask split). */
+  border-radius: 24px;
+  -webkit-mask-image: radial-gradient(circle 8px at 0 50%, transparent 8px, black 8px);
+          mask-image: radial-gradient(circle 8px at 0 50%, transparent 8px, black 8px);
+  transform: translateZ(0);
+}
+.trek-dash .hero-pass-inner {
   background: linear-gradient(135deg,
     oklch(0.99 0.006 75 / .75) 0%, oklch(0.985 0.008 70 / .85) 50%, oklch(0.98 0.01 65 / .8) 100%);
   backdrop-filter: blur(40px) saturate(1.8) brightness(1.1);
@@ -233,28 +253,34 @@
     0 2px 8px -2px oklch(0 0 0 / .08), 0 8px 24px -6px oklch(0 0 0 / .12),
     0 20px 60px -16px oklch(0 0 0 / .35), inset 0 1px 1px 0 oklch(1 0 0 / .5);
   color: var(--ink); position: relative; overflow: hidden;
-  mask-image:
-    radial-gradient(circle 8px at 0 50%, transparent 8px, black 8px),
-    radial-gradient(circle 8px at 100% 50%, transparent 8px, black 8px);
-  mask-composite: intersect;
-  -webkit-mask-image:
-    radial-gradient(circle 8px at 0 50%, transparent 8px, black 8px),
-    radial-gradient(circle 8px at 100% 50%, transparent 8px, black 8px);
-  -webkit-mask-composite: source-in;
-  transform: translateZ(0);
+  -webkit-mask-image: radial-gradient(circle 8px at 100% 50%, transparent 8px, black 8px);
+          mask-image: radial-gradient(circle 8px at 100% 50%, transparent 8px, black 8px);
 }
-.dark .trek-dash .hero-pass {
+.dark .trek-dash .hero-pass-inner {
   background: linear-gradient(135deg, oklch(0.28 0 0 / .8) 0%, oklch(0.25 0 0 / .85) 50%, oklch(0.23 0 0 / .8) 100%);
   border: 1px solid oklch(1 0 0 / .1);
   box-shadow:
     0 2px 8px -2px oklch(0 0 0 / .3), 0 8px 24px -6px oklch(0 0 0 / .4),
     0 20px 60px -16px oklch(0 0 0 / .6), inset 0 1px 1px 0 oklch(1 0 0 / .08);
 }
-.trek-dash .hero-pass::before {
+.trek-dash .hero-pass-inner::before {
   content: ""; position: absolute; inset: 0; border-radius: 24px; padding: 1px;
   background: linear-gradient(135deg, oklch(1 0 0 / .25) 0%, oklch(1 0 0 / .08) 40%, oklch(1 0 0 / .02) 70%, oklch(1 0 0 / .15) 100%);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;
+}
+
+/* Hero-slot plugin overlay: a transparent strip whose bottom edge sits on the
+   pass's top edge, so a plugin (e.g. the mascot) appears to stand ON the bar.
+   pointer-events none — it must never block the pass or hero interactions. */
+.trek-dash .hero-pass-wrap { position: relative; }
+.trek-dash .hero-pass-overlay {
+  position: absolute; left: 16px; right: 16px; bottom: 100%; height: 110px;
+  pointer-events: none; z-index: 3; overflow: hidden;
+}
+.trek-dash .hero-overlay-frame {
+  position: absolute; inset: 0; width: 100%; height: 100% !important;
+  border: 0; background: transparent; color-scheme: light;
 }
 .trek-dash .pass-cell {
   padding: 4px 18px; position: relative; display: flex; flex-direction: column;
@@ -318,7 +344,7 @@
 .trek-dash .pass-cell.countdown { gap: 6px; }
 
 /* ----------------- atlas / stats ----------------- */
-.trek-dash .atlas { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 56px; }
+.trek-dash .atlas { display: grid; grid-template-columns: var(--atlas-template, 1.5fr 1fr 1fr 1fr); gap: 16px; margin-bottom: 56px; }
 .trek-dash .atlas-card {
   background: var(--glass-bg); border-radius: var(--r-lg); padding: 24px 26px;
   border: 1px solid var(--glass-border);
@@ -434,6 +460,22 @@
 .trek-dash .trip-meta div { display: flex; flex-direction: column; gap: 3px; text-align: center; }
 .trek-dash .trip-meta .n { font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
 .trek-dash .trip-meta .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-3); font-weight: 500; }
+/* Plugin-contributed badges (tripCardProvider hook) — small text chips under the meta row. */
+.trek-dash .trip-plugin-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.trek-dash .trip-plugin-badge {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 500; line-height: 1.4;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); text-decoration: none;
+}
+.trek-dash a.trip-plugin-badge:hover { border-color: var(--ink-3); }
+.trek-dash .trip-plugin-badge .badge-label { color: var(--ink); font-weight: 600; }
+.trek-dash .trip-plugin-badge .badge-value { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trek-dash .trip-plugin-badge.tone-success { border-color: color-mix(in oklch, var(--success) 40%, var(--line)); }
+.trek-dash .trip-plugin-badge.tone-success .badge-label { color: var(--success); }
+.trek-dash .trip-plugin-badge.tone-warn { border-color: color-mix(in oklch, var(--warn) 45%, var(--line)); }
+.trek-dash .trip-plugin-badge.tone-warn .badge-label { color: var(--warn); }
+.trek-dash .trip-plugin-badge.tone-danger { border-color: color-mix(in oklch, oklch(0.6 0.2 25) 45%, var(--line)); }
+.trek-dash .trip-plugin-badge.tone-danger .badge-label { color: oklch(0.6 0.2 25); }
 .trek-dash .add-trip-card {
   border-radius: var(--r-xl); border: 1.5px dashed var(--line-2);
   background: var(--glass-bg); display: grid; place-items: center;
@@ -538,6 +580,28 @@
 .trek-dash .upc-type.other { background: var(--bg-2); color: var(--ink-2); }
 .trek-dash .upc-type svg { width: 16px; height: 16px; }
 
+/* ----------------- collections widget (list badges) ----------------- */
+.trek-dash .col-empty { font-size: 13px; color: var(--ink-3); }
+.trek-dash .col-badges { display: flex; flex-direction: column; gap: 9px; }
+.trek-dash .col-badge {
+  position: relative; display: block; width: 100%; height: 56px; border-radius: 14px; overflow: hidden;
+  cursor: pointer; text-align: left; box-shadow: var(--sh-sm); transition: transform .15s cubic-bezier(.2,.7,.2,1), box-shadow .2s;
+}
+.trek-dash .col-badge:hover { transform: translateY(-2px); box-shadow: var(--sh-md); }
+.trek-dash .col-badge-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background-size: cover; background-position: center; }
+.trek-dash .col-badge-tint {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--badge-color, #6366f1) 88%, black) 0%, color-mix(in oklch, var(--badge-color, #6366f1) 40%, transparent) 62%, rgba(0,0,0,.3) 100%),
+    linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.4) 100%);
+}
+.trek-dash .col-badge-body { position: relative; z-index: 1; height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 14px; color: #fff; }
+.trek-dash .col-badge-name { font-size: 14.5px; font-weight: 600; letter-spacing: -.01em; text-shadow: 0 1px 4px rgba(0,0,0,.4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trek-dash .col-badge-count {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+  padding: 4px 9px; border-radius: 999px; background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.28); backdrop-filter: blur(6px);
+}
+
 /* ----------------- responsive ----------------- */
 @media (max-width: 1280px) {
   .trek-dash .page { padding-left: 32px; padding-right: 32px; grid-template-columns: 1fr; }
@@ -599,7 +663,7 @@
 
   /* Atlas → single row of stat cards. Passport (countries) and distance are
      hidden on mobile; only Trips total + Days traveled remain. */
-  .trek-dash .atlas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 26px; }
+  .trek-dash .atlas { display: grid; grid-template-columns: var(--atlas-template-m, 1fr 1fr); gap: 10px; margin: 0 0 26px; }
   .trek-dash .atlas-card.passport,
   .trek-dash .atlas-card:last-child { display: none; }
   .trek-dash .atlas .spark { display: none; }

@@ -9,7 +9,7 @@ const login: TranslationStrings = {
   'login.features.mapsDesc': 'Google Places, trasy i grupowanie',
   'login.features.realtime': 'Synchronizacja w czasie rzeczywistym',
   'login.features.realtimeDesc': 'Planuj wspólnie przez WebSocket',
-  'login.features.budget': 'Śledzenie budżetu',
+  'login.features.budget': 'Śledzenie kosztów',
   'login.features.budgetDesc': 'Kategorie, wykresy i koszty w przeliczeniu na osobę',
   'login.features.collab': 'Współpraca',
   'login.features.collabDesc': 'Wielu użytkowników i wspólne podróże',
@@ -85,5 +85,9 @@ const login: TranslationStrings = {
   'login.setNewPasswordHint': 'Musisz zmienić hasło.',
   'login.passkey.signIn': 'Zaloguj się kluczem dostępu',
   'login.passkey.failed': 'Logowanie kluczem dostępu nie powiodło się. Spróbuj ponownie.',
+  'login.insecureCookie.title': "Login won't stick over HTTP",
+  'login.insecureCookie.body':
+    'You’re connecting over plain HTTP, so your browser drops TREK’s secure session cookie — the next request fails with "Access token required". Fix: use HTTPS, or for a home-lab set COOKIE_SECURE=false.',
+  'login.insecureCookie.link': 'Open the Troubleshooting guide',
 };
 export default login;

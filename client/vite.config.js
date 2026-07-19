@@ -1,6 +1,6 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { VitePWA } from 'vite-plugin-pwa'
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   plugins: [
@@ -11,7 +11,14 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,svg,png,woff,woff2,ttf}'],
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api/, /^\/uploads/, /^\/mcp/, /^\/oauth\//, /^\/.well-known\//],
+        navigateFallbackDenylist: [
+          /^\/api/,
+          /^\/uploads/,
+          /^\/mcp/,
+          /^\/oauth\//,
+          /^\/.well-known\//,
+          /^\/plugin-frame\//,
+        ],
         runtimeCaching: [
           {
             // Carto map tiles (default provider)
@@ -34,16 +41,6 @@ export default defineConfig({
             options: {
               cacheName: 'map-tiles',
               expiration: { maxEntries: 12288, maxAgeSeconds: 30 * 24 * 60 * 60 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            // Leaflet CSS/JS from unpkg CDN
-            urlPattern: /^https:\/\/unpkg\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'cdn-libs',
-              expiration: { maxEntries: 30, maxAgeSeconds: 365 * 24 * 60 * 60 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },
@@ -129,6 +126,10 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
+      '/plugin-frame': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
       '/uploads': {
         target: 'http://localhost:3001',
         changeOrigin: true,
@@ -164,6 +165,6 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
-    }
-  }
-})
+    },
+  },
+});

@@ -15,13 +15,16 @@ The following addons are registered in the system (defined in `server/src/db/see
 | Addon ID | Type | Description |
 |---|---|---|
 | `mcp` | integration | Exposes TREK data and actions through the Model Context Protocol for AI assistant integrations. |
-| `packing` | trip | Packing list management — create templates and lists linked to trips. See [Packing-Lists](Packing-Lists). |
-| `budget` | trip | Trip budget tracking — log expenses, set budgets, and track spending per trip. See [Budget-Tracking](Budget-Tracking). |
+| `packing` | trip | **Lists** — packing lists and to-do tasks for your trips. See [Packing-Lists](Packing-Lists). |
+| `budget` | trip | **Costs** — track and split trip expenses. See [Budget-Tracking](Budget-Tracking). |
 | `documents` | trip | Document and file attachments for trips — store itineraries, visa copies, and other files. See [Documents-and-Files](Documents-and-Files). |
 | `vacay` | global | Personal vacation day planner with a year calendar, holiday packs, and collaborator fusion. See [Vacay](Vacay). |
 | `atlas` | global | Interactive world map showing countries and regions you have visited, plus a bucket list. See [Atlas](Atlas). |
 | `collab` | trip | Notes, polls, and live chat for trip collaboration. See [Real-Time-Collaboration](Real-Time-Collaboration). |
 | `journey` | global | Trip tracking and travel journal — check-ins, photos, and daily stories. See [Journey-Journal](Journey-Journal). |
+| `collections` | global | A personal, server-wide library of saved places in named lists, with idea/want/visited status, categories, and fusion sharing with per-member roles. See [Collections](Collections). |
+| `airtrail` | integration | Sync flights from your self-hosted AirTrail instance into trips. |
+| `llm_parsing` | integration | AI Parsing — an LLM fallback that extracts bookings from confirmation files KDE Itinerary can't read. See [AI-Booking-Import](AI-Booking-Import). |
 | `naver_list_import` | trip | Import places from shared Naver Maps lists directly into a trip. |
 
 

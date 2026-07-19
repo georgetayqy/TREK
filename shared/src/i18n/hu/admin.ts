@@ -95,6 +95,8 @@ const admin: TranslationStrings = {
   'admin.recommended': 'Ajánlott',
   'admin.weatherKey': 'OpenWeatherMap API kulcs',
   'admin.weatherKeyHint': 'Időjárás adatokhoz. Ingyenes: openweathermap.org',
+  'admin.unsplashKey': 'Unsplash API-kulcs',
+  'admin.unsplashKeyHint': 'Képkereséshez. Ingyenes: unsplash.com/developers',
   'admin.validateKey': 'Teszt',
   'admin.keyValid': 'Csatlakozva',
   'admin.keyInvalid': 'Érvénytelen',
@@ -159,11 +161,317 @@ const admin: TranslationStrings = {
   'admin.packingTemplates.deleteError': 'Nem sikerült törölni a sablont',
   'admin.packingTemplates.saveError': 'Nem sikerült menteni',
   'admin.tabs.addons': 'Bővítmények',
+  'admin.tabs.plugins': 'Pluginok',
+  'admin.plugins.rescan': 'Újraszkennelés',
+  'admin.plugins.rescanned': 'Plugin mappa újraszkennelve',
+  'admin.plugins.upload': 'Plugin feltöltése',
+  'admin.plugins.dropToUpload': 'Húzz ide egy plugin .zip fájlt a telepítéshez',
+  'admin.plugins.uploaded': 'A(z) “{name}” plugin feltöltve — aktiváld a futtatáshoz',
+  'admin.plugins.sideloaded': 'Manuálisan betöltve',
+  'admin.plugins.devLinkBadge': 'Dev-Link',
+  'admin.plugins.devLinkHint':
+    'Helyi build könyvtárból betöltve és valós adatokkal élőben újratöltve — csak fejlesztéshez',
+  'admin.plugins.devLinkTitle': 'Helyi bővítmény csatolása',
+  'admin.plugins.devLinkPathPlaceholder': '/absolute/path/to/your/plugin',
+  'admin.plugins.devLinkButton': 'Csatolás',
+  'admin.plugins.devLinkLinked': '{id} csatolva — aktiváld a futtatáshoz',
+  'admin.plugins.sideloadedHint': 'Manuálisan feltöltve — nem a tárból, aláíratlan és ellenőrizetlen',
+  'admin.plugins.browse': 'Pluginok böngészése',
+  'admin.plugins.installed': 'Telepítve',
+  'admin.plugins.install': 'Telepítés',
+  'admin.plugins.registryEmpty': 'Még nincsenek elérhető pluginok a tárban.',
+  'admin.plugins.actionError': 'A művelet sikertelen',
+  'admin.plugins.activate': 'Aktiválás',
+  'admin.plugins.activated': 'Plugin aktiválva',
+  'admin.plugins.deactivate': 'Deaktiválás',
+  'admin.plugins.deactivated': 'Plugin deaktiválva',
+  'admin.plugins.viewErrors': 'Hibanapló megtekintése',
+  'admin.plugins.errorLog': 'Hibanapló',
+  'admin.plugins.allowedHosts': 'Engedélyezett hosztok',
+  'admin.plugins.allowedHosts.hint':
+    'Ez a bővítmény olyan szolgáltatással kommunikál, amelyet csak te tudsz megnevezni (saját üzemeltetésű kiszolgáló). Add meg a hosztokat, amelyeket elérhet — másokat nem.',
+  'admin.plugins.allowedHosts.none': 'Még nincs hozzáadott hoszt.',
+  'admin.plugins.allowedHosts.unsupported':
+    'Ez a bővítmény nem használ üzemeltető által megadott hosztokat. Az engedélyezett hosztjai a manifestben rögzítettek.',
+  'admin.plugins.allowedHosts.restartNote': 'A mentés újraindítja a bővítményt, hogy átvegye az új listát.',
+  'admin.plugins.allowedHosts.add': 'Engedélyezett hoszt hozzáadása',
+  'admin.plugins.allowedHosts.count': '{n} engedélyezett hoszt',
+  'admin.plugins.operatorEgressPill': '+ általad hozzáadott hosztok',
+  'admin.plugins.operatorEgressHint':
+    'Ez a bővítmény olyan szolgáltatással kommunikál, amelyet csak te tudsz megnevezni (saját üzemeltetésű kiszolgáló). Telepítés után add meg a hosztokat a ⋯ → Engedélyezett hosztok alatt. Másokat nem ér el.',
+  'admin.plugins.noErrors': 'Nincsenek naplózott hibák.',
+  'admin.plugins.uninstalled': 'Plugin eltávolítva',
+  'admin.plugins.uninstallTitle': 'Plugin eltávolítása?',
+  'admin.plugins.uninstallBody':
+    'Ez leállítja a plugint, eltávolítja a kódját, és törli az összes adatát. Ez nem vonható vissza.',
+  'admin.plugins.status.starting': 'Indítás…',
+  'admin.plugins.type.widget': 'Widget',
+  'admin.plugins.type.page': 'Oldal',
+  'admin.plugins.type.integration': 'Integráció',
+  'admin.plugins.type.trip-page': 'Útvonal-oldal',
+  'admin.plugins.reviewed': 'Ellenőrizve',
+  'admin.plugins.unreviewed': 'Nem ellenőrzött',
+  'admin.plugins.updated': 'Plugin frissítve',
+  'admin.plugins.updateTo': 'Frissítés → v{version}',
+  'admin.plugins.enabledToggle': 'Plugin engedélyezése',
+  'plugins.notFound': 'A plugin nem található',
+  'admin.plugins.title': 'Pluginok',
+  'admin.plugins.subtitle': 'Harmadik féltől származó pluginok telepítése és kezelése a példányodon.',
+  'admin.plugins.disabledTitle': 'A pluginok le vannak tiltva',
+  'admin.plugins.disabledBody':
+    'A plugin futtatókörnyezet ki van kapcsolva (TREK_PLUGINS_ENABLED). Egyetlen plugin sem futhat, amíg egy admin nem engedélyezi a szerverkonfigurációban.',
+  'admin.plugins.empty': 'Még nincsenek telepített pluginok.',
+  'admin.plugins.loadError': 'Nem sikerült betölteni a pluginokat.',
+  'admin.plugins.scaffoldNote':
+    'A pluginok telepítése és aktiválása egy későbbi frissítésben érkezik. Ez a panel jelenleg csak a telepített pluginokat listázza.',
+  'admin.plugins.status.active': 'Aktív',
+  'admin.plugins.status.inactive': 'Inaktív',
+  'admin.plugins.status.disabled': 'Letiltva',
+  'admin.plugins.status.error': 'Hiba',
+  'admin.plugins.status.incompatible': 'Nem kompatibilis',
+  'admin.plugins.details': 'Részletek',
+  'admin.plugins.detailError': 'Nem sikerült betölteni a plugin részleteit.',
+  'admin.plugins.permissionsTitle': 'Engedélyek',
+  'admin.plugins.noPermissions': 'Ez a plugin nem kér különleges engedélyeket.',
+  'admin.plugins.egressNote': 'Kapcsolódhat ehhez: {hosts}',
+  'admin.plugins.setupTitle': 'Beállítás',
+  'admin.plugins.noSetup': 'Azonnal működik — nincs mit beállítani.',
+  'admin.plugins.scope.instance': 'Példányszintű',
+  'admin.plugins.scope.user': 'Felhasználónként',
+  'admin.plugins.fieldRequired': 'Kötelező',
+  'admin.plugins.sourceRepo': 'Forráskód-tároló',
+  'admin.plugins.reportIssue': 'Probléma jelentése',
+  'admin.plugins.homepage': 'Honlap',
+  'admin.plugins.requiresTrek': 'TREK {version}+ szükséges',
+  'admin.plugins.reviewedOn': 'Ellenőrizve: {date}',
+  'admin.plugins.perm.db:own': 'Saját adatok tárolása elkülönített adatbázisban',
+  'admin.plugins.perm.db:read:trips': 'Az aktuális felhasználó számára elérhető utazások olvasása',
+  'admin.plugins.perm.db:read:users': 'Alapvető profiladatok olvasása (név, profilkép — hitelesítő adatok soha)',
+  'admin.plugins.perm.db:read:costs': 'Az aktuális felhasználó számára elérhető költségek (költségtételek) olvasása',
+  'admin.plugins.perm.db:read:packing':
+    'Az aktuális felhasználó számára elérhető utazások csomagolási listáinak olvasása',
+  'admin.plugins.perm.db:write:packing':
+    'Csomagolási lista tételek létrehozása, szerkesztése és törlése az aktuális felhasználó által szerkeszthető utazásokon',
+  'admin.plugins.perm.weather:read':
+    'A gazdagép gyorsítótárazott időjárás-előrejelzésének olvasása (koordináták szerint)',
+  'admin.plugins.perm.db:read:categories': 'A globális helykategória-lista olvasása',
+  'admin.plugins.perm.db:read:tags': 'Az aktuális felhasználó címkéinek olvasása',
+  'admin.plugins.perm.db:write:tags': 'Az aktuális felhasználó címkéinek létrehozása, szerkesztése és törlése',
+  'admin.plugins.perm.db:read:todos': 'Az aktuális felhasználó számára elérhető utazások teendőinek olvasása',
+  'admin.plugins.perm.db:write:todos':
+    'Teendők létrehozása, szerkesztése és törlése az aktuális felhasználó által szerkeszthető utazásokon',
+  'admin.plugins.perm.db:write:atlas':
+    'Országok és régiók meglátogatottként jelölése és az aktuális felhasználó bakancslistájának kezelése (az Atlas bővítmény szükséges)',
+  'admin.plugins.perm.db:write:vacay':
+    'Szabadságnapok és céges ünnepek átkapcsolása az aktuális felhasználó aktív tervén (a Vacay bővítmény szükséges)',
+  'admin.plugins.perm.db:write:journal':
+    'Naplóbejegyzések létrehozása, szerkesztése és törlése az aktuális felhasználó által szerkeszthető naplókban (a Journey bővítmény szükséges)',
+  'admin.plugins.perm.db:write:collections':
+    'Gyűjtemények létrehozása és szerkesztése, helyek mentése beléjük, az aktuális felhasználó gyűjteményszerepével (a Collections bővítmény szükséges)',
+  'admin.plugins.perm.db:write:files':
+    'Fájlok csatolása az aktuális felhasználó által szerkeszthető utazásokhoz (10 MB-os korlát, tiltott kiterjesztések elutasítva), és hivatkozásaik kezelése',
+  'admin.plugins.perm.db:write:collab':
+    'Jegyzetek, szavazások és csevegőüzenetek közzététele az aktuális felhasználó által szerkeszthető utazásokon (a Collab bővítmény szükséges)',
+  'admin.plugins.perm.db:write:members':
+    'Felhasználók hozzáadása utazásokhoz — utazás-hozzáférést ad; az aktuális felhasználó tagkezelési jogával védve',
+  'admin.plugins.perm.notify:send':
+    'Értesítés küldése (csengő postaláda + e-mail/ntfy) az aktuális felhasználónak vagy egy utazásának — soha tetszőleges címzettnek',
+  'admin.plugins.perm.ai:invoke':
+    'Az adminisztrátor által beállított MI-szolgáltató (szövegkiegészítés + dokumentumkinyerés) használata az aktuális felhasználó nevében — a bővítmény soha nem tárol kulcsot',
+  'admin.plugins.perm.oauth:client':
+    'Csatlakozás egy harmadik féltől származó szolgáltatáshoz a nevedben, gazdagép által közvetített OAuth-tal (a tokeneket a gazdagép tárolja, a bővítmény sosem látja)',
+  'admin.plugins.perm.db:read:files': 'Az aktuális felhasználó számára elérhető utazások fájljainak olvasása',
+  'admin.plugins.perm.db:write:reservations':
+    'Foglalások létrehozása, szerkesztése és törlése az aktuális felhasználó által szerkeszthető utazásokon',
+  'admin.plugins.perm.db:write:accommodations':
+    'Szállások létrehozása, szerkesztése és törlése az aktuális felhasználó által szerkeszthető utazásokon',
+  'admin.plugins.perm.db:read:journal':
+    'Az aktuális felhasználó úti naplóinak olvasása (a Journey bővítmény szükséges)',
+  'admin.plugins.perm.db:read:atlas':
+    'Az aktuális felhasználó által meglátogatott országok és régiók olvasása (az Atlas bővítmény szükséges)',
+  'admin.plugins.perm.db:read:vacay':
+    'Az aktuális felhasználó nyaralási tervének olvasása (a Vacay bővítmény szükséges)',
+  'admin.plugins.perm.db:read:daynotes': 'Az aktuális felhasználó számára elérhető utazások napi jegyzeteinek olvasása',
+  'admin.plugins.perm.db:read:collections':
+    'Az aktuális felhasználó mentett helyeinek gyűjteményeit olvasása (a Collections bővítmény szükséges)',
+  'admin.plugins.perm.db:write:daynotes':
+    'Napi jegyzetek létrehozása, szerkesztése és törlése az aktuális felhasználó által szerkeszthető utazásokon',
+  'admin.plugins.perm.jobs:run':
+    'A deklarált háttérfeladatok ütemezett futtatása (felhasználói környezet nélkül — nem olvashat felhasználói adatokat)',
+  'admin.plugins.perm.db:write:costs':
+    'Költségek (költségtételek) létrehozása az aktuális felhasználó által szerkeszthető utazásokon',
+  'admin.plugins.perm.db:write:places':
+    'Helyek hozzáadása, szerkesztése és eltávolítása az aktuális felhasználó által szerkeszthető utazásokon',
+  'admin.plugins.perm.db:write:days':
+    'Napok hozzáadása, szerkesztése és eltávolítása az aktuális felhasználó által szerkeszthető utazásokon',
+  'admin.plugins.perm.db:write:itinerary':
+    'Helyek hozzárendelése és eltávolítása az aktuális felhasználó által szerkeszthető utazások napjain',
+  'admin.plugins.perm.db:write:trips':
+    'Utazás adatainak szerkesztése (cím, dátumok, pénznem…) az aktuális felhasználó által szerkeszthető utazásokon',
+  'admin.plugins.perm.db:meta':
+    'Saját privát adatok csatolása az aktuális felhasználó által elérhető utazásokhoz, helyekhez és napokhoz',
+  'admin.plugins.perm.ws:broadcast:trip': 'Valós idejű frissítések küldése az utazás tagjainak',
+  'admin.plugins.perm.ws:broadcast:user': 'Valós idejű frissítések küldése egyes felhasználóknak',
+  'admin.plugins.perm.hook:photo-provider': 'Fotók biztosítása az Emlékek funkcióhoz',
+  'admin.plugins.perm.hook:calendar-source': 'Események biztosítása a naptárhoz',
+  'admin.plugins.perm.hook:place-detail-provider':
+    'További részletek (értékelések, minősítések, hivatkozások) hozzáadása egy helyhez',
+  'admin.plugins.perm.hook:trip-warning-provider':
+    'Ellenőrzési figyelmeztetések megjelenítése egy utazáson (a tervezőben látható)',
+  'admin.plugins.perm.hook:table-contributor':
+    'Oszlopok és műveletek hozzáadása az utazási nézetekhez (foglalások, helyek, napok)',
+  'admin.plugins.perm.hook:map-marker-provider':
+    'Jelölők hozzáadása az utazás térképéhez (pl. foglalások vagy POI-k megjelenítése)',
+  'admin.plugins.perm.hook:pdf-section-provider': 'Szöveges szakaszok hozzáfűzése az utazás PDF-exportjához',
+  'admin.plugins.perm.hook:atlas-layer-provider':
+    'Országok kiemelése az Atlas világtérképén (pl. kívánságlisták vagy utazási figyelmeztetések)',
+  'admin.plugins.perm.hook:journal-entry-provider':
+    'További sorok (hivatkozások, statisztikák) hozzáadása a naplóbejegyzésekhez',
+  'admin.plugins.perm.hook:user-data':
+    'A felhasználóról tárolt adatok törlése vagy exportálása (GDPR: fióktörlés és adatkérések)',
+  'admin.plugins.perm.hook:trip-card-provider':
+    'Kis jelvények (állapot, számlálók) hozzáadása az irányítópult utazáskártyáihoz',
+  'admin.plugins.perm.hook:notification-channel': 'Értesítéseid kézbesítése egy további csatornán',
+  'admin.plugins.perm.events:subscribe':
+    'Reagál az alapvető tevékenységi eseményekre (csak eseménynév + utazás, soha nem a tartalom)',
+  'admin.plugins.perm.http:outbound': 'Kimenő kérések küldése a bejelentett kiszolgálók felé',
+  'admin.plugins.perm.db:read:collab':
+    'Jegyzetek, szavazások és csevegőüzenetek olvasása az aktuális felhasználó számára elérhető utazásokon (a Collab bővítmény szükséges)',
+  'admin.plugins.perm.db:read:files:content':
+    'Az aktuális felhasználó számára elérhető utazások fájltartalmának (bájtok) olvasása',
+  'admin.plugins.perm.db:create:trips': 'Új utazások létrehozása az aktuális felhasználó tulajdonában',
+  'admin.plugins.perm.rates:read': 'A gazdagép gyorsítótárazott devizaárfolyamainak olvasása',
+  'admin.plugins.updateConsentTitle': 'Ez a frissítés új engedélyeket igényel',
+  'admin.plugins.updateConsentBody':
+    'A(z) {name} v{version} olyan jogokat kér, amelyeket még nem adtál meg. Az új verzió telepítve van, de kikapcsolva marad, amíg jóvá nem hagyod.',
+  'admin.plugins.updateNewPermissions': 'Újonnan kért engedélyek',
+  'admin.plugins.updateNewEgress': 'Új kimenő kapcsolatok',
+  'admin.plugins.updateApprove': 'Jóváhagyás és bekapcsolás',
+  'admin.plugins.updateLater': 'Egyelőre kikapcsolva marad',
+  'admin.plugins.updateKeptOff': 'Frissítés telepítve — kikapcsolva marad, amíg jóvá nem hagyod az új engedélyeket',
+  'admin.plugins.reviewedMeaning':
+    'Az „Ellenőrizve" azt jelenti, hogy egy TREK karbantartó minden verziónál átvizsgálta ezt a plugint kártevők után — nem a minőségét vagy azt, hogy működik-e. Ez nem garancia arra, hogy a plugin ártalmatlan.',
+  'admin.plugins.security.title': 'Hogyan vannak a pluginok elszigetelve — és mik a korlátok',
+  'admin.plugins.security.isolationTitle': 'Minden plugin elszigetelten fut',
+  'admin.plugins.security.isolationBody':
+    'A plugin saját, lezárt folyamatként fut, amely csak a saját fájljait olvashatja. Nem fér hozzá az adatbázisodhoz, a bejelentkezési titkodhoz vagy a titkosítási kulcsodhoz, nem indíthat más programokat, és sehová nem írhat fájlokat. A felülete egy lezárt böngészőkeretben fut, amely nem olvashatja a munkamenet-sütidet, és nem nyúlhat a körülötte lévő TREK oldalhoz.',
+  'admin.plugins.security.permsTitle': 'Mit jelentenek az engedélyek',
+  'admin.plugins.security.permsBody':
+    'A telepítés előtt megjelenített engedélyek szigorú korlátot jelentenek, amelyet a TREK a plugin futása közben kényszerít ki — szó szerint semmit sem tehet, ami nem szerepel a listán. De azt mutatják meg, mit tehet egy plugin, nem azt, hogy valójában mit tesz. Egy olyan plugin, amely olvashatja az utazásaidat és elérhet egy szervert, el is küldheti az utazásaidat arra a szerverre, ezért ne csak a leírást, hanem az engedélyeket és a kimenő kiszolgálókat is olvasd el.',
+  'admin.plugins.security.limitsTitle': 'Mit nem ígérhetünk',
+  'admin.plugins.security.limitsBody':
+    'Az elszigetelés erős szoftveres határ, de nem abszolút. A plugin pontosan azokkal a jogokkal működik, amelyeket jóváhagysz, így ezeken a jogokon belül a leírásától eltérően is viselkedhet, és a jogszerűen birtokolt adatokat elküldheti az általa bejelentett kiszolgálóknak. A TREK nem olvassa és nem ítéli meg, hogy egy plugin kódja valójában mit csinál.',
+  'admin.plugins.security.worstTitle': 'A legrosszabb eset',
+  'admin.plugins.security.worstBody':
+    'Egy ellenséges plugin, amelyet bekapcsolsz, visszaélhet a neki megadott adatokkal és kapcsolatokkal — például kiszivárogtathatja azokat az utazásokat, amelyeket olvashat. Nem tud jelszavakat ellopni, admin bejelentkezést hamisítani, parancsokat futtatni a szervereden, vagy olyan adatokhoz hozzáférni, amelyeket nem engedélyeztél. A kár azon belül marad, amit jóváhagytál, és a plugin kikapcsolása leállítja.',
+  'admin.plugins.security.reviewedTitle': 'Mit jelent az „Ellenőrizve"',
+  'admin.plugins.security.reviewedBody':
+    'Egy ellenőrzött plugint egy TREK karbantartó minden verziónál kézzel átvizsgált kártevők után — ellenséges kód szempontjából ellenőrizte, nem pedig azt, hogy jól működik-e. Ez nem ígéret arra, hogy a plugin ártalmatlan.',
+  'admin.plugins.security.signedTitle': 'Mit jelent az „Aláírva"',
+  'admin.plugins.security.signedBody':
+    'Az ellenőrzőösszeg, amelyet a TREK minden telepítéskor ellenőriz, azt bizonyítja, hogy a fájlok pontosan azok, amelyekért a jegyzék jótáll. Az aláírás mást bizonyít: azt, hogy a szerzőtől származnak, olyan kulccsal aláírva, amelyet csak ő birtokol. Egy aláírt plugin mindkettővel rendelkezik. Az aláírás nélküli nem veszélyes — egyszerűen eggyel kevesebb garanciát hordoz, és a jegyzékben ma a legtöbb plugin aláírás nélküli.',
+  'admin.plugins.signed': 'Aláírva',
+  'admin.plugins.signedHint': 'Telepítéskor ellenőrizve a szerző aláírókulcsával',
+  'admin.plugins.unsigned': 'Aláírás nélkül',
+  'admin.plugins.unsignedHint':
+    'A fájlok megegyeznek azzal, amiért a jegyzék jótáll, de semmi sem köti őket a szerzőhöz. Eggyel kevesebb garancia — nem veszélyes.',
+  'admin.plugins.updateBlocked': 'Frissítés blokkolva — {reason}',
+  'admin.plugins.reviewBlock': 'Áttekintés',
+  'admin.plugins.retrusted': 'Az új aláírókulcs elfogadva — a plugin frissült',
+  'admin.plugins.sig.title': 'A(z) {name} aláírását nem sikerült ellenőrizni',
+  'admin.plugins.sig.keyChangedBody':
+    'A szerző aláírókulcsa nem az, amellyel ezt a plugint telepítetted. A szerzők valóban cserélnek kulcsot — de egy támadó, aki átvette a plugint, pontosan így nézne ki.',
+  'admin.plugins.sig.invalidBody':
+    'A fájlok nem egyeznek a szerző aláírásával. Nem azok, amiket a szerző aláírt — vagy megsérültek, vagy módosították őket. Ez nem hagyható figyelmen kívül.',
+  'admin.plugins.sig.missingBody':
+    'Ez a plugin alá volt írva, amikor telepítetted, de az új verzió nem tartalmaz aláírást. A TREK nem fogadja el csendben ezt a visszalépést. Ez nem hagyható figyelmen kívül.',
+  'admin.plugins.sig.incompleteBody':
+    'A jegyzékbeli bejegyzés félig aláírt: szerzői kulcsot deklarál, de a verzió nem hordoz aláírást (vagy fordítva). Ez a plugin oldalán elkövetett hiba. Ez nem hagyható figyelmen kívül.',
+  'admin.plugins.sig.pinnedKey': 'A telepítéskor használt kulcs',
+  'admin.plugins.sig.newKey': 'A most kínált kulcs',
+  'admin.plugins.sig.confirmOutOfBand':
+    'A TREK nem tudja megkülönböztetni a jogos kulcscserét az átvételtől — innen nézve a kettő azonos. Erősítsd meg az új kulcsot a szerzőnél egy olyan csatornán, amelyben már megbízol, mielőtt elfogadod. Amint ezt megteszed, a plugin frissül, és a TREK megjegyzi az új kulcsot.',
+  'admin.plugins.sig.retrustConfirm': 'Új kulcs megbízhatónak jelölése és frissítés',
+  'admin.plugins.sig.cancel': 'Ne bízz meg benne',
+  'admin.plugins.sig.consentUnsigned':
+    'Semmi sem köti ezt a verziót a szerzőjéhez — a fájlok megegyeznek a jegyzékkel, de nem hordoznak szerzői aláírást.',
+  'admin.plugins.security.trustTitle': 'A lényeg',
+  'admin.plugins.security.trustBody':
+    'Egy plugin telepítése olyan, mint bármely harmadik féltől származó alkalmazás telepítése: csak megbízható szerzőktől adj hozzá kódot, és kétség esetén előbb magad vizsgáld meg. A TREK semmilyen felelősséget nem vállal a harmadik féltől származó pluginokért.',
+  'admin.plugins.runtimeOn': 'Futtatókörnyezet bekapcsolva',
+  'admin.plugins.tabDiscover': 'Felfedezés',
+  'admin.plugins.searchPlaceholder': 'Pluginok keresése…',
+  'admin.plugins.filterType': 'Típus',
+  'admin.plugins.filterStatus': 'Állapot',
+  'admin.plugins.sortBy': 'Rendezés',
+  'admin.plugins.allTypes': 'Minden típus',
+  'admin.plugins.allStatuses': 'Mind',
+  'admin.plugins.stateOff': 'Ki',
+  'admin.plugins.filterUpdate': 'Frissítés elérhető',
+  'admin.plugins.sortName': 'Név',
+  'admin.plugins.sortRecent': 'Nemrég frissítve',
+  'admin.plugins.sortUpdates': 'Frissítések elöl',
+  'admin.plugins.sortDownloads': 'Legtöbb letöltés',
+  'admin.plugins.updatesAvailable': '{count} frissítés érhető el a pluginjaidhoz.',
+  'admin.plugins.updateAll': 'Összes frissítése',
+  'admin.plugins.noMatchInstalled': 'Nincs a keresésnek megfelelő telepített plugin.',
+  'admin.plugins.noMatchRegistry': 'Nincs a keresésnek megfelelő plugin a tárban.',
+  'admin.plugins.restart': 'Újraindítás',
+  'admin.plugins.restarted': 'Plugin újraindítva',
+  'admin.plugins.cap.readsTrips': 'Olvassa az utazásaidat',
+  'admin.plugins.cap.readsUsers': 'Olvassa az alapprofilokat',
+  'admin.plugins.cap.readsCosts': 'Olvassa a költségeidet',
+  'admin.plugins.cap.readsPacking': 'Csomagolási listákat olvas',
+  'admin.plugins.cap.readsFiles': 'Utazási fájlokat olvas',
+  'admin.plugins.cap.writesCosts': 'Költségeket ad hozzá',
+  'admin.plugins.cap.writesPlaces': 'Helyeket szerkeszt',
+  'admin.plugins.cap.writesDays': 'Napokat szerkeszt',
+  'admin.plugins.cap.writesItinerary': 'Útitervet szerkeszt',
+  'admin.plugins.cap.writesTrips': 'Utazásokat szerkeszt',
+  'admin.plugins.cap.metadata': 'Metaadatot ad',
+  'admin.plugins.cap.widget': 'Irányítópult-widget',
+  'admin.plugins.cap.heroWidget': 'Beszállókártya-widget',
+  'admin.plugins.cap.placeSlot': 'Hely részletei',
+  'admin.plugins.cap.daySlot': 'Nap részletei',
+  'admin.plugins.cap.reservationSlot': 'Foglalás részletei',
+  'admin.plugins.cap.replacesTabs': 'Tervező lapokat vált ki',
+  'admin.plugins.cap.realtime': 'Valós idejű frissítések',
+  'admin.plugins.cap.notificationChannel': 'Értesítési csatorna',
+  'admin.plugins.cap.photos': 'Fotókat biztosít',
+  'admin.plugins.cap.calendar': 'Naptáreseményeket biztosít',
+  'admin.plugins.cap.placeDetails': 'Helyeket gazdagít',
+  'admin.plugins.cap.warnings': 'Problémákat jelez',
+  'admin.plugins.cap.events': 'Reagál a tevékenységre',
+  'admin.plugins.cap.requiresAddon': '{addon} szükséges',
+  'admin.plugins.cap.dependsOn': '{id} {version} szükséges',
+  'admin.plugins.dep.addonDisabledToast': 'Előbb engedélyezze a szükséges bővítmény(eke)t: {addons}',
+  'admin.plugins.dep.autoEnabled': 'Előbb engedélyezett szükséges pluginek: {plugins}',
+  'admin.plugins.dep.downloaded': '{id} letöltve',
+  'admin.plugins.dep.resolveTitle': 'Hiányzó függőségek',
+  'admin.plugins.dep.resolveBody': 'A(z) „{name}” engedélyezéséhez előbb telepíteni kell ezeket a plugineket.',
+  'admin.plugins.dep.requires': '{version} szükséges',
+  'admin.plugins.dep.mismatch': '{wanted} szükséges — {installed} van telepítve',
+  'admin.plugins.dep.download': 'Letöltés',
+  'admin.plugins.dep.update': 'Frissítés',
+  'admin.plugins.dep.resolveHint': 'Letölti a legújabb kompatibilis verziót a saját függőségeivel együtt.',
+  'admin.plugins.dep.trekIncompatible': 'TREK {range} szükséges — ez a kiszolgáló {host} verziót futtat',
+  'admin.plugins.dep.trekUnknown': 'Nem adja meg, mely TREK-verziókat támogatja',
+  'admin.plugins.installCompatible': '{version} telepítése',
+  'admin.plugins.incompatible': 'Nem kompatibilis',
+  'admin.plugins.accessTitle': 'Mihez fér hozzá',
+  'admin.plugins.connectsTitle': 'Kapcsolódik ehhez',
+  'admin.plugins.detailsTitle': 'Részletek',
+  'admin.plugins.noAccess': 'Nincs szüksége különleges hozzáférésre.',
+  'admin.plugins.metaVersion': 'Verzió',
+  'admin.plugins.metaSize': 'Méret',
+  'admin.plugins.metaRequires': 'Szükséges',
+  'admin.plugins.metaReviewed': 'Ellenőrizve',
+  'admin.plugins.downloads': 'Letöltések',
   'admin.addons.title': 'Bővítmények',
   'admin.addons.subtitle': 'Funkciók engedélyezése vagy letiltása a TREK testreszabásához.',
   'admin.addons.catalog.packing.name': 'Listák',
   'admin.addons.catalog.packing.description': 'Csomagolási listák és teendők az utazásaidhoz',
-  'admin.addons.catalog.budget.name': 'Költségvetés',
+  'admin.addons.catalog.budget.name': 'Költségek',
   'admin.addons.catalog.budget.description': 'Kiadások nyomon követése és az utazási költségvetés tervezése',
   'admin.addons.catalog.documents.name': 'Dokumentumok',
   'admin.addons.catalog.documents.description': 'Úti dokumentumok tárolása és kezelése',
@@ -323,6 +631,9 @@ const admin: TranslationStrings = {
   'admin.addons.catalog.journey.name': 'Útinaplók',
   'admin.addons.catalog.journey.description':
     'Utazáskövetés és útinapló bejelentkezésekkel, fotókkal és napi történetekkel',
+  'admin.addons.catalog.collections.name': 'Gyűjtemények',
+  'admin.addons.catalog.collections.description':
+    'Személyes helykönyvtár — ments helyeket utazásokon átívelően elnevezett listákba, másold bármelyik utazásba, oszd meg másokkal',
   'admin.passkey.title': 'Passkey-bejelentkezés',
   'admin.passkey.cardHint':
     'Engedélyezd a felhasználóknak a bejelentkezést passkey-vel (WebAuthn). Alapból kikapcsolva.',
@@ -355,5 +666,14 @@ const admin: TranslationStrings = {
   'admin.defaultSettings.mapboxStylePlaceholder': 'Válassz stílust…',
   'admin.defaultSettings.mapbox3d': '3D épületek & domborzat',
   'admin.defaultSettings.mapboxQuality': 'Kiváló minőségű mód',
+  'admin.group.users': 'Users',
+  'admin.group.config': 'Configuration',
+  'admin.group.integration': 'Integrations',
+  'admin.group.maintenance': 'Maintenance',
+  'admin.invite.tripLabel': 'Hozzáadás utazáshoz (opcionális)',
+  'admin.invite.tripNone': 'Nincs utazás',
+  'admin.invite.tripHint':
+    'Az új felhasználó automatikusan hozzáadódik ehhez az utazáshoz, amikor a linken keresztül regisztrál.',
+  'admin.invite.boundTo': 'hozzáadja a következőhöz: {trip}',
 };
 export default admin;
