@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch: {}
 
 env:
   DOCKERHUB_REPO: asdfghjklxd/trek
@@ -36,10 +37,15 @@ jobs:
 
           LAST_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)"
           RANGE="HEAD"
-          CURRENT="0.0.0"
           if [ -n "$LAST_TAG" ]; then
             RANGE="$LAST_TAG..HEAD"
             CURRENT="${LAST_TAG#v}"
+          else
+            # No vX.Y.Z tag exists on this remote yet (e.g. a fork that never
+            # pushed tags) - fall back to the version already committed in
+            # the chart instead of restarting numbering at 0.0.0.
+            CURRENT="$(grep '^version:' charts/trek/Chart.yaml | awk '{print $2}')"
+            CURRENT="${CURRENT:-0.0.0}"
           fi
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
@@ -48,11 +54,15 @@ jobs:
           # Conventional-commit bump: a `!` or a BREAKING CHANGE footer wins,
           # then feat (minor), then fix (patch). No matching commit means
           # nothing release-worthy landed since the last tag.
-          if echo "$COMMITS" | grep -qE '^[a-z]+(\([^)]*\))?!:|BREAKING CHANGE'; then
+          # Using a here-string (not `echo ... | grep -q`) on purpose: grep -q
+          # exits as soon as it finds a match, and closing its end of a pipe
+          # early sends the writer a SIGPIPE - which, combined with
+          # `pipefail`, can make a real match look like a failed check.
+          if grep -qE '^[a-z]+(\([^)]*\))?!:|BREAKING CHANGE' <<< "$COMMITS"; then
             MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
-          elif echo "$COMMITS" | grep -qE '^feat(\([^)]*\))?:'; then
+          elif grep -qE '^feat(\([^)]*\))?:' <<< "$COMMITS"; then
             MINOR=$((MINOR + 1)); PATCH=0
-          elif echo "$COMMITS" | grep -qE '^fix(\([^)]*\))?:'; then
+          elif grep -qE '^fix(\([^)]*\))?:' <<< "$COMMITS"; then
             PATCH=$((PATCH + 1))
           else
             echo "No feat/fix/breaking commits since ${LAST_TAG:-the start of history}; skipping release."
