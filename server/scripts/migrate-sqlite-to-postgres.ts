@@ -1,0 +1,201 @@
+/**
+ * One-time SQLite -> Postgres import tool for the TREK Postgres migration.
+ *
+ * Reads an existing `travel.db`, creates the Postgres baseline schema on the
+ * target (if not already present), and copies every row across in
+ * FK-dependency order, reconciling each table's timestamp columns into real
+ * TIMESTAMPTZ values along the way (see schema.pg.ts's header and
+ * timestamp-columns.ts for the type-mapping decisions this relies on).
+ *
+ * This is an OFFLINE, maintenance-window tool: stop the TREK server pointed
+ * at the SQLite file, run this once against a fresh/empty target Postgres
+ * database, then start the new version with DB_DRIVER=postgres. It refuses
+ * to run against a target that already has data unless --force is passed.
+ *
+ * Not a goal here: streaming/bulk-COPY performance for very large source
+ * databases (batched row-at-a-time INSERTs are used instead) — TREK's
+ * self-hosted, personal/small-group scale does not need it; revisit if real
+ * imports turn out to be too slow.
+ *
+ * Usage:
+ *   cd server
+ *   DB_DRIVER=postgres DATABASE_URL=postgres://user:pass@host:5432/trek \
+ *     node --import tsx scripts/migrate-sqlite-to-postgres.ts /path/to/travel.db [--force]
+ */
+import Database from 'better-sqlite3';
+import { readEnv } from '../src/app-config';
+import type { DbDriver } from '../src/nest/database/drivers/db-driver.interface';
+import { createPostgresDriverFromEnv } from '../src/nest/database/drivers/postgres.driver.factory';
+import { runPostgresMigrations } from '../src/db/postgres/migrations.pg';
+import { baselineTableNamesInDependencyOrder } from '../src/db/postgres/schema.pg';
+import { TIMESTAMP_COLUMNS, type TimestampKind } from '../src/db/postgres/timestamp-columns';
+
+const BATCH_SIZE = 500;
+
+// SQLite's own `DEFAULT CURRENT_TIMESTAMP` / `datetime('now')` shape has no
+// timezone marker and is implicitly UTC.
+const SQLITE_DATETIME_TEXT = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+/**
+ * Normalizes a `datetime-text` column's raw value to something `new Date()`
+ * parses as UTC. A column typed this way can hold either shape: SQLite's own
+ * default-generated text (no timezone marker — must be forced to UTC), or an
+ * app-level `new Date().toISOString()` write that bypassed the DB default
+ * (already real ISO-8601 with a `Z`/offset — the Date constructor already
+ * parses that correctly, so it passes through unchanged).
+ */
+export function parseSqliteDatetimeText(raw: string): string {
+  return SQLITE_DATETIME_TEXT.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw;
+}
+
+export function convertTimestampValue(kind: TimestampKind | undefined, raw: unknown): unknown {
+  if (!kind || raw == null) return raw;
+  switch (kind) {
+    case 'datetime-text':
+      return new Date(parseSqliteDatetimeText(String(raw))).toISOString();
+    case 'epoch-seconds':
+      return new Date(Number(raw) * 1000).toISOString();
+    case 'epoch-millis':
+      return new Date(Number(raw)).toISOString();
+  }
+}
+
+interface ImportReport {
+  table: string;
+  sourceRows: number;
+  importedRows: number;
+}
+
+async function tableIsEmpty(driver: DbDriver, table: string): Promise<boolean> {
+  const row = await driver.get<{ n: number }>(`SELECT count(*)::int AS n FROM ${table}`);
+  return (row?.n ?? 0) === 0;
+}
+
+async function importTable(sqlite: Database.Database, driver: DbDriver, table: string): Promise<ImportReport> {
+  const columns = (sqlite.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map((c) => c.name);
+  if (columns.length === 0) {
+    // Table exists in the Postgres baseline but not in this particular source
+    // database (an older travel.db predating a later-added table) — nothing
+    // to import; the fresh Postgres table stays empty.
+    return { table, sourceRows: 0, importedRows: 0 };
+  }
+
+  const kinds = TIMESTAMP_COLUMNS[table] ?? {};
+  const columnList = columns.map((c) => `"${c}"`).join(', ');
+  const placeholders = columns.map(() => '?').join(', ');
+  const insertSql = `INSERT INTO ${table} (${columnList}) VALUES (${placeholders})`;
+
+  let imported = 0;
+  let batch: unknown[][] = [];
+  const flush = async () => {
+    if (batch.length === 0) return;
+    const rows = batch;
+    batch = [];
+    await driver.transaction(async (tx) => {
+      for (const values of rows) await tx.run(insertSql, values);
+    });
+    imported += rows.length;
+  };
+
+  let sourceRows = 0;
+  const selectAll = sqlite.prepare(`SELECT * FROM "${table}"`);
+  for (const row of selectAll.iterate() as IterableIterator<Record<string, unknown>>) {
+    sourceRows += 1;
+    batch.push(columns.map((c) => convertTimestampValue(kinds[c], row[c])));
+    if (batch.length >= BATCH_SIZE) await flush();
+  }
+  await flush();
+
+  return { table, sourceRows, importedRows: imported };
+}
+
+/**
+ * Advances a table's identity sequence past its highest imported id, since
+ * every row here was inserted with an explicit id (see schema.pg.ts's note on
+ * why identity columns are GENERATED BY DEFAULT, not ALWAYS) and the sequence
+ * itself never saw those inserts. A table with no identity `id` column (a
+ * composite or TEXT primary key) has no sequence to reset — detected
+ * generically via pg_get_serial_sequence rather than a hardcoded table list.
+ * pg_get_serial_sequence errors (42703 undefined_column) rather than
+ * returning null when the table has no column named "id" at all (as opposed
+ * to having one that just isn't a sequence) — e.g. `app_settings`, whose
+ * primary key is `key TEXT`.
+ */
+async function resetIdentitySequence(driver: DbDriver, table: string): Promise<void> {
+  let seq: { seq: string | null } | undefined;
+  try {
+    seq = await driver.get<{ seq: string | null }>(`SELECT pg_get_serial_sequence(?, 'id') AS seq`, [table]);
+  } catch (err) {
+    if ((err as { code?: string }).code === '42703') return;
+    throw err;
+  }
+  if (!seq?.seq) return;
+  await driver.run(
+    `SELECT setval(?, COALESCE((SELECT MAX(id) FROM ${table}), 1), (SELECT MAX(id) FROM ${table}) IS NOT NULL)`,
+    [seq.seq],
+  );
+}
+
+async function main(): Promise<void> {
+  const sqliteFile = process.argv[2];
+  const force = process.argv.includes('--force');
+  if (!sqliteFile) {
+    console.error('Usage: node --import tsx scripts/migrate-sqlite-to-postgres.ts <path-to-travel.db> [--force]');
+    process.exit(1);
+  }
+
+  const env = readEnv();
+  if (env.db.driver !== 'postgres') {
+    console.error(
+      '[import] DB_DRIVER=postgres (plus DATABASE_URL or discrete PG* vars) must be set — see server/.env.example.',
+    );
+    process.exit(1);
+  }
+
+  console.log(`[import] opening source SQLite database: ${sqliteFile}`);
+  const sqlite = new Database(sqliteFile, { readonly: true, fileMustExist: true });
+  const driver = createPostgresDriverFromEnv(env.db);
+
+  try {
+    console.log('[import] ensuring the target schema is up to date...');
+    await runPostgresMigrations(driver);
+
+    if (!force && !(await tableIsEmpty(driver, 'users'))) {
+      console.error(
+        '[import] the target database already has data (the users table is non-empty). ' +
+          'Refusing to import into a non-empty database — pass --force to override.',
+      );
+      process.exit(1);
+    }
+
+    const tables = baselineTableNamesInDependencyOrder();
+    const reports: ImportReport[] = [];
+    for (const table of tables) {
+      const report = await importTable(sqlite, driver, table);
+      reports.push(report);
+      console.log(`[import] ${table}: ${report.importedRows}/${report.sourceRows} rows`);
+    }
+
+    console.log('[import] resetting identity sequences...');
+    for (const table of tables) await resetIdentitySequence(driver, table);
+
+    const mismatches = reports.filter((r) => r.importedRows !== r.sourceRows);
+    if (mismatches.length > 0) {
+      console.error('[import] row-count mismatch on:', mismatches.map((m) => m.table).join(', '));
+      process.exit(1);
+    }
+
+    const totalRows = reports.reduce((sum, r) => sum + r.importedRows, 0);
+    console.log(`[import] done — ${reports.length} tables, ${totalRows} rows imported.`);
+  } finally {
+    sqlite.close();
+    await driver.close();
+  }
+}
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('[import] failed:', err);
+    process.exit(1);
+  });
+}
