@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "airtrail.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "airtrail.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  replicas: {{ .Values.airtrail.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "airtrail.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        {{- include "airtrail.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+    spec:
+      # uploads volume must be writable by UID:GID 1000:1000, per upstream image requirements
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+        - name: wait-for-db
+          image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag }}"
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h {{ include "airtrail.dbFullname" . }} -p 5432 -U "$POSTGRES_USER"; do
+                echo "waiting for db..."
+                sleep 2
+              done
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airtrail.secretName" . }}
+                  key: DB_USERNAME
+      containers:
+        - name: airtrail
+          image: "{{ .Values.airtrail.image.repository }}:{{ .Values.airtrail.image.tag }}"
+          imagePullPolicy: {{ .Values.airtrail.image.pullPolicy }}
+          envFrom:
+            - secretRef:
+                name: {{ include "airtrail.secretName" . }}
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: uploads
+              mountPath: {{ .Values.env.uploadLocation }}
+          resources:
+            {{- toYaml .Values.airtrail.resources | nindent 12 }}
+      volumes:
+        - name: uploads
+          {{- if .Values.airtrail.persistence.uploads.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "airtrail.fullname" . }}-uploads
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

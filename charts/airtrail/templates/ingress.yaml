@@ -1,0 +1,36 @@
+{{- if .Values.airtrail.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "airtrail.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "airtrail.labels" . | nindent 4 }}
+  {{- with .Values.airtrail.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.airtrail.ingress.className }}
+  ingressClassName: {{ .Values.airtrail.ingress.className }}
+  {{- end }}
+  {{- if .Values.airtrail.ingress.tls }}
+  tls:
+    {{- toYaml .Values.airtrail.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.airtrail.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "airtrail.fullname" $ }}
+                port:
+                  number: {{ $.Values.airtrail.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}
