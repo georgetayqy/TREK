@@ -117,6 +117,22 @@ generateEncryptionKey: false
 existingSecret: ""
 existingSecretKey: ENCRYPTION_KEY
 
+# Provision the app secret via a Bitnami SealedSecret CR instead of a plain
+# Secret - lets the encrypted values be committed to git safely. Requires
+# the sealed-secrets controller installed in-cluster. Takes precedence over
+# existingSecret/generateEncryptionKey/secretEnv above when enabled.
+# Sealed from the live trek-secret with:
+#   kubectl get secret trek-secret -n trek -o yaml | kubeseal --format yaml \
+#     --scope strict --controller-name sealed-secrets-controller \
+#     --controller-namespace sealed-secrets
+sealedSecret:
+  enabled: true
+  encryptedData:
+    ADMIN_EMAIL: AgAssfjfCQ++iNUGUUelYlr88J7bTJzoTJQwbkmkenpmelKb2m3ZE8eV7rtcagGJbpDa63bvG2+w4J73SjUQ54P9duGONRnTuSeRGgOGp+OkDCEg8OMmc/ZMfoSYMDiODwMVR81qMq6oKNPb10gL0GuRjgCrJrrWdxOhhh83OSl2IXGBNl5mxZ3LkEJo6l5aOi0d74IONy9XHc5wCeMWWz45F5l98ZvELf7a7nWHSmhOXd0ZZI7Fz3as8hRupuWrWNm+LU6pu3g4radHlyE1jUFVjoMv3UD7Ib/6pPuDd4R4XaCSqCGLOCN2CExkT0sPgFl9dRSIw7eIwj1LF4/zz/TbdnhuXAv0TBAw7svdzthAO/QWoymdh9EQ38pW9TrvZws/fZtrtw1qFvkJQSSWEja1P86y5jRq1nza4nkAMVJ310yQcbYoweyeEs/votL0UfQOFHzi9nAcXHmpy8O/pwUsJxtw4hCHOLFF9bjf+//9FwJaTVkTO7cKPTzOJEVvcduO3FseYXluxDwnyyshMs0sB/zAfgisQ9y3AOl5l2t3z4rbxlFYU+HwdtarUELYppb4LcFKr3yZWnGBSJqXJQe0iKg6GTGdyw3vAlmzrMarT/NuZvib1660+hgq3r4I6F4dtLqBP5FlRLFUSY2ZxrVsvnPJlRTKeZlnXfi1C8WEPghd2R4zysN/hTYlTZbmYDK3IJvK1fkkhoAh3ZqoNTun4COyDZw=
+    ADMIN_PASSWORD: AgCNM8Oi6MHUHOcn+FtGDTMFuQThBs68kQQ1rZPhu12O/5ezxTDeH+IWU3mzEgO61xpiZ03R+l4pFPKudTSnhRbdqsPpckig78nNlsgPe3L/uBnPJ8jKvxCUIorp2fOy+gSY7Ar9ZYqNqadWDm7wqnYMZkdbLWEsSSXYNfrH8jDq4h0AERJUHVon8A9gZ+6PNEQLKrAp2ZaASqEt6iQyJ7aPdYm3TPTFfn4wyuVCzTcWdhSKUwYv6Flp/CHf4tPwUmht4Mnp1C18EUyJvvYX/NHIrxLES4eWNu0Ev8ikac9/RTaoHk99XDI6hzbWN6KoVI9uFUFNfNfj36HQSRwHjvODchD/BbMSzkoE9QjodQFewG4vmaBQh1pn94HEndqxgfCtsTIpOHGgakxSUoprcoEt/7rNeo4pqEsi8gTjJkcYnTV9inS3ZIEAJ+5sTITK+BMmT/5xm9sbB1hfmOYOWp4l3T/wYBv2NVYWPEbQdcT2TgddoBwHVrp2u9K9a13zykDbPhBS4h2Bp3CTPeQT0W//CSEN7hgv7vi2KvqBhirJ7KL5hJedr2SSMoHnpqxVMVoUZzDn24p4FEh1AzNckpq6AJH3ZmO5PzTANMG6lheL+S7PEs2vKMkUrNv2Tu6h4ctt0E8K/YVV3+HQT/YSmsKktH5WtbPyst6eXKQxQJhxEq1g/k5Ao3nQuoqejR1uOkPgw5amLhxx0Rzs9SUdpAh/XKG4RaLD
+    ENCRYPTION_KEY: AgArMCmPs8v4TTVHOMtya1Q/3CP2xgiEMU2VCERQ1y8T7e3RkolJ1pUBGS0zW6oslxhyzZETiquQW1LVbzzI25WOU0PTTgRIcaadqtaYbdgc6pxa0z+SIPoFQw3IeMRGDYJsBgOpCCQGi4xTYQibpfqkLfYgOcgWVluZ1Ufitvxl1YOyuPW4QVC253yJdLsvE0ms2nHEpwdkoPaGCAN3wREji+zkPJovXceLjTz8icBsms8UzGpuenMXczsCXY3QnAoycjoKIHz99qNi0MLkLOKy5qZmYIe9BhHgZQCfha7aty7c8MOx9aJbumxVOqqjk3Fuqp9+hVNCk9rKaDvHErJyE6mp9QVi6k1bfnvP8xaagZ1zNNgaWZsaUSiGFwdcFs3OU0r/oufyQGebpHWvKHvCH4jhaAaBV8/5IKrVhHMWAu6o85MtU4Qewn42FV22MqDHtHff+biPkXlciKRbCubiRalVltDapxZ86Z4QYyrO0+JWgUdbsQqOhvNFHm9N1/Xf8yjM6vF0YmT5cstRhxmD4DLvQJo4yvWNtC+enZ1oSlmlbNsdN6+55xq6XdAMHn9uxcLoUy2ERVElgt2MYQSCz+7EFv5hTEoGcYSBw7WQArkIsx+K3clgDADNzQl9x7CNsifDuTFC+99dc6rw+OPpxH1uG5eUif/st+d+F6g2IybP1zyid+tu6BuMWVv0McE=
+    OIDC_CLIENT_SECRET: AgBJ2BcLPgf30IeZfvRnnkIn5bvYL+3NzBsZ6ndqEyoP40Kdka7gfoM63V9ytYd2nIDJMRR44tyZz6PILnOFRRzK7uxmoC/OHW6KZhR3S2RFrt4VNQsfOurFyjYBzJ3Q9LIGCvTtld2iphjbsTukPZq6O1A69y3/yxJFqRy5P4dbkCqIq2FZ1/ZJo1pIBMm5EI/1ykPhFHYp35zTZ4hf+Xa+yuCbHIqEHBUFlWrLdP3xdAMpI93u2VO4yH+8Htrz40fQDtsslvV+dXUtN8pOArNEbiiRFU0QUE8GGntLboR8ty3klFNg9hxqAZrUnkA+9jYmiQOAOXD8GdWakXe2yQAMEaDjyvDngChXMJMBffOC7tM4pzxdMUy349c3UmQI0qhz5BwDNDq8oQX0rsjJOGiY9lEEvH3/mhFYBJOSxrYTs9otOBEiglQPCm2rSkorGsIyKovvA/rzbTi0vrCe9PoN+wj6l8JxYK9Ds9Mi+AdfblYilMGDHojOssWBuG2bpsGpUwn84vyari94QN3YrDMnu2677mCrDVySaheD4bhx7yVXVVxiAPIJaZyzORC2FqIVV/k3AowMK2sJShDU7LpwXRybq61mH2RjRHjBSjjPfofDQV0jrF1qNBgU0f6PrDO/y8AhEi9SF5EG5SYdSsTYgVWSrq4UxaMRjr/JgTVn88iOpLYlwP3w7gwgYK/WxbHHVe7/JTA3wL0xCuJ7JHnHECjAxEpy4Y1T3UtUWb6lNOHV52+Iny4+l/1JAPvamG2vzVZ70Kz2h+p4WLc2OGWy
+
 persistence:
   # When disabled, volumes fall back to an ephemeral emptyDir (data lost on pod restart).
   enabled: true
@@ -143,14 +159,17 @@ resources:
     memory: 512Mi
 
 ingress:
-  enabled: false
-  className: ""
-  annotations: {}
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-dns
+    external-dns.alpha.kubernetes.io/hostname: trek.georgetay.com
+    nginx.org/client-max-body-size: 500m
   hosts:
-    - host: chart-example.local
+    - host: trek.georgetay.com
       paths:
         - /
-  tls: []
-  #  - secretName: chart-example-tls
-  #    hosts:
-  #      - chart-example.local
+  tls:
+    - secretName: trek-tls
+      hosts:
+        - trek.georgetay.com
