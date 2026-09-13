@@ -1,0 +1,75 @@
+nameOverride: ""
+fullnameOverride: ""
+namespace: airtrail
+
+# -- PostgreSQL database
+db:
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""   # "" = cluster default (standard-rwo)
+  resources: {}
+
+# -- AirTrail application
+airtrail:
+  replicaCount: 1
+  image:
+    repository: johly/airtrail
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+  persistence:
+    uploads:
+      enabled: true
+      size: 1Gi
+      storageClass: ""  # "" = cluster default (standard-rwo)
+  resources: {}
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      external-dns.alpha.kubernetes.io/hostname: airtrail.georgetay.com
+      cert-manager.io/cluster-issuer: letsencrypt-dns
+      nginx.org/client-max-body-size: "20m"
+    hosts:
+      - host: airtrail.georgetay.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: airtrail-tls
+        hosts:
+          - airtrail.georgetay.com
+
+# -- Non-secret env values (mirrors the sample .env)
+env:
+  origin: "https://airtrail.georgetay.com"
+  dbDatabaseName: "airtrail"
+  dbUsername: "airtrail"
+  uploadLocation: "/app/uploads"
+  bodySizeLimit: "20M"
+
+  # Basemap provider (optional) - leave blank to omit from the secret
+  mapProvider: ""                     # openfreemap | carto | protomaps
+  mapCartoApiKey: ""
+  mapProtomapsSourceKind: ""          # hosted | pmtiles | tilejson | zxy
+  mapProtomapsApiKey: ""
+  mapProtomapsSourceUrl: ""
+  mapProtomapsMaxZoom: ""
+  mapProtomapsAssetsBaseUrl: ""
+  mapProtomapsLanguage: ""
+  mapLightStyleUrl: ""
+  mapDarkStyleUrl: ""
+
+# -- Secret values
+secret:
+  # Set to false and provide existingSecret if you manage the secret yourself.
+  # The existing secret must contain the same keys as templates/secret.yaml.
+  create: false
+  existingSecret: "airtrail-secret"
