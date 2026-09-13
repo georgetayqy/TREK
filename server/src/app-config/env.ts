@@ -31,6 +31,7 @@ export function validateEnvAtBoot(raw: RawEnv = process.env as RawEnv): void {
         return `  - ${key}=${JSON.stringify(raw[key])}: ${issue.message}`;
       });
   lines.push(...managedPreconditions(raw));
+  lines.push(...dbPreconditions(raw));
   if (lines.length === 0) return;
   console.error(`Invalid environment configuration:\n${lines.join('\n')}`);
   throw new Error(
@@ -67,4 +68,22 @@ function managedPreconditions(raw: RawEnv): string[] {
   }
 
   return problems;
+}
+
+/**
+ * DB_DRIVER=postgres needs enough connection info to actually connect — every
+ * individual field is independently optional in the schema above (so a
+ * self-hoster staying on sqlite sets none of them), but the combination of
+ * "postgres selected, no way to reach one" would boot happily and then fail
+ * on the first query instead of at startup. Fail closed here instead.
+ */
+function dbPreconditions(raw: RawEnv): string[] {
+  if (deriveAll(raw).db.driver !== 'postgres') return [];
+  const hasConnectionString = !!raw.DATABASE_URL;
+  const hasDiscreteConfig = !!raw.PGDATABASE && !!raw.PGUSER;
+  if (hasConnectionString || hasDiscreteConfig) return [];
+  return [
+    '  - DB_DRIVER=postgres requires either DATABASE_URL, or PGDATABASE + PGUSER ' +
+      '(and typically PGHOST/PGPASSWORD), to be set.',
+  ];
 }

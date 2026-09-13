@@ -11,6 +11,7 @@ import {
   derivePlugins,
   deriveIntegrations,
   deriveBackup,
+  deriveDb,
   deriveNet,
   derivePaths,
   deriveAll,
@@ -233,6 +234,35 @@ describe('deriveBackup', () => {
     expect(deriveBackup({ BACKUP_UPLOAD_LIMIT_MB: '-1' }).uploadLimitMb).toBe(500);
     expect(deriveBackup({}).maxDecompressedMb).toBe(5 * 1024);
     expect(deriveBackup({ ENCRYPTION_KEY: 'x' }).encryptionKeyFromEnv).toBe(true);
+  });
+});
+
+describe('deriveDb', () => {
+  it('defaults to the sqlite driver, case-insensitively selects postgres', () => {
+    expect(deriveDb({}).driver).toBe('sqlite');
+    expect(deriveDb({ DB_DRIVER: 'postgres' }).driver).toBe('postgres');
+    expect(deriveDb({ DB_DRIVER: 'POSTGRES' }).driver).toBe('postgres');
+    expect(deriveDb({ DB_DRIVER: 'sqlite' }).driver).toBe('sqlite');
+    expect(deriveDb({ DB_DRIVER: 'something-else' }).driver).toBe('sqlite');
+  });
+
+  it('DATABASE_URL passes through raw; discrete PG* fields default host/port/sslMode', () => {
+    expect(deriveDb({}).postgres).toEqual({
+      connectionString: undefined,
+      host: 'localhost',
+      port: 5432,
+      database: undefined,
+      user: undefined,
+      password: undefined,
+      sslMode: 'disable',
+    });
+    expect(deriveDb({ DATABASE_URL: 'postgres://u:p@db:5432/trek' }).postgres.connectionString).toBe(
+      'postgres://u:p@db:5432/trek',
+    );
+    expect(
+      deriveDb({ PGHOST: 'pg.internal', PGPORT: '6543', PGDATABASE: 'trek', PGUSER: 'trek', PGSSLMODE: 'Require' })
+        .postgres,
+    ).toMatchObject({ host: 'pg.internal', port: 6543, database: 'trek', user: 'trek', sslMode: 'require' });
   });
 });
 

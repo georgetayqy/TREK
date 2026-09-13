@@ -1,0 +1,30 @@
+# Manual/CI-only Postgres instance for the DbDriver contract suite (the
+# Postgres migration's equivalent of docker-compose.minio-test.yml for the S3
+# storage driver — see that file's header for the general pattern this
+# mirrors). Local `npm run test` stays hermetic and never touches this.
+#
+# Procedure:
+#   docker compose -f docker-compose.postgres-test.yml up -d
+#   docker compose -f docker-compose.postgres-test.yml ps   # wait for "healthy"
+#   cd server && TREK_TEST_PG_URL=postgres://trekci:trekci-secret@127.0.0.1:55432/trek_test \
+#     npx vitest run tests/unit/nest/database/drivers/postgres.driver.contract.test.ts
+#   docker compose -f docker-compose.postgres-test.yml down -v
+#
+# 127.0.0.1-only publish, fixed throwaway credentials, non-default host port
+# (55432) so it never collides with a developer's own local Postgres.
+services:
+  postgres:
+    image: postgres:17.11-alpine
+    ports:
+      - "127.0.0.1:55432:5432"
+    environment:
+      - POSTGRES_USER=trekci
+      - POSTGRES_PASSWORD=trekci-secret
+      - POSTGRES_DB=trek_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trekci -d trek_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    tmpfs:
+      - /var/lib/postgresql/data # throwaway data — never persisted to disk

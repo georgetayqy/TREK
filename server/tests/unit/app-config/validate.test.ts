@@ -171,6 +171,39 @@ describe('validateEnvAtBoot — centrally administered preconditions', () => {
   });
 });
 
+describe('validateEnvAtBoot — DB_DRIVER=postgres preconditions', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('DB-BOOT-001: refuses postgres with no connection info at all', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => validateEnvAtBoot({ DB_DRIVER: 'postgres' })).toThrow(/1 problem/);
+  });
+
+  it('DB-BOOT-002: passes with DATABASE_URL alone', () => {
+    expect(() =>
+      validateEnvAtBoot({ DB_DRIVER: 'postgres', DATABASE_URL: 'postgres://u:p@db:5432/trek' }),
+    ).not.toThrow();
+  });
+
+  it('DB-BOOT-003: passes with discrete PGDATABASE + PGUSER', () => {
+    expect(() =>
+      validateEnvAtBoot({ DB_DRIVER: 'postgres', PGDATABASE: 'trek', PGUSER: 'trek' }),
+    ).not.toThrow();
+  });
+
+  it('DB-BOOT-004: PGDATABASE alone (no PGUSER) is not enough', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => validateEnvAtBoot({ DB_DRIVER: 'postgres', PGDATABASE: 'trek' })).toThrow(/1 problem/);
+  });
+
+  it('DB-BOOT-005: inert on the default sqlite driver — no connection info required', () => {
+    expect(() => validateEnvAtBoot({})).not.toThrow();
+    expect(() => validateEnvAtBoot({ DB_DRIVER: 'sqlite' })).not.toThrow();
+  });
+});
+
 describe('readEnv', () => {
   it('reads process.env live — a runtime mutation is visible on the next call', () => {
     const before = process.env.DEMO_MODE;

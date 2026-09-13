@@ -125,6 +125,17 @@ export const envSchema = z.object({
   PATH: anyString,
   Path: anyString,
 
+  // Database driver — 'sqlite' (default) during the Postgres migration window;
+  // 'postgres' switches DatabaseService onto the node-postgres-backed driver.
+  DB_DRIVER: oneOf(['sqlite', 'postgres']),
+  DATABASE_URL: url,
+  PGHOST: anyString,
+  PGPORT: integer(1, 65535, 'must be a port number (1-65535)'),
+  PGDATABASE: anyString,
+  PGUSER: anyString,
+  PGPASSWORD: anyString,
+  PGSSLMODE: oneOf(['disable', 'prefer', 'require', 'verify-ca', 'verify-full']),
+
   // Data / paths
   TREK_DB_FILE: anyString,
   // The two SQLite pragmas are deliberately unvalidated: a typo here must fall

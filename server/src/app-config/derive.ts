@@ -267,9 +267,26 @@ export function deriveBackup(raw: RawEnv) {
   };
 }
 
+export type PgSslMode = 'disable' | 'prefer' | 'require' | 'verify-ca' | 'verify-full';
+
+function derivePostgres(raw: RawEnv) {
+  return {
+    /** When set, takes priority over the discrete PG* fields below (a driver factory decides the precedence). */
+    connectionString: raw.DATABASE_URL || undefined,
+    host: raw.PGHOST || 'localhost',
+    port: numberOr(raw.PGPORT, 5432),
+    database: raw.PGDATABASE,
+    user: raw.PGUSER,
+    password: raw.PGPASSWORD,
+    sslMode: (raw.PGSSLMODE?.toLowerCase() || 'disable') as PgSslMode,
+  };
+}
+
 export function deriveDb(raw: RawEnv) {
   const durability = resolveDurability(raw.TREK_DB_JOURNAL_MODE, raw.TREK_DB_SYNCHRONOUS);
   return {
+    /** 'sqlite' (default) during the migration window; 'postgres' switches DatabaseService onto the Postgres driver. */
+    driver: raw.DB_DRIVER?.toLowerCase() === 'postgres' ? ('postgres' as const) : ('sqlite' as const),
     trekDbFile: raw.TREK_DB_FILE,
     /** Resolved journal_mode — WAL unless the operator asked for something else (network storage needs DELETE/TRUNCATE). */
     journalMode: durability.journalMode,
@@ -277,6 +294,7 @@ export function deriveDb(raw: RawEnv) {
     synchronous: durability.synchronous,
     /** Complaints about unusable values; derivation stays side-effect free, so db/durability.ts logs them when it opens the file. */
     durabilityWarnings: durability.warnings,
+    postgres: derivePostgres(raw),
   };
 }
 
