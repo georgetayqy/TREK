@@ -121,14 +121,14 @@ persistence:
   # When disabled, volumes fall back to an ephemeral emptyDir (data lost on pod restart).
   enabled: true
   data:
-    size: 1Gi
+    size: 25Gi
     # Leave empty to use the cluster's default StorageClass; set to bind a specific class.
     storageClassName: ""
     # Bind an existing PVC. The other values (size, storageClassName, annotations) are then ignored.
     existingClaim: ""
     annotations: {}
   uploads:
-    size: 1Gi
+    size: 25Gi
     storageClassName: ""
     # Specify an existing PVC to bind. The other values are then ignored.
     existingClaim: ""

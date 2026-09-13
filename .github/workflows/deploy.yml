@@ -157,4 +157,5 @@ jobs:
             --create-namespace \
             --set image.repository="$DOCKERHUB_REPO" \
             --set image.tag="${{ needs.version-bump.outputs.version }}" \
+            --force-conflicts \
             --wait --timeout 5m
