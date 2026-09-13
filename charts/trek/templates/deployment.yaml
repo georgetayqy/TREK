@@ -12,6 +12,12 @@ spec:
   # the old pod down first. Override to RollingUpdate only with a ReadWriteMany volume.
   strategy:
     type: {{ .Values.updateStrategy | default "Recreate" }}
+    {{- if eq (.Values.updateStrategy | default "Recreate") "Recreate" }}
+    # Explicit null (not omitted) so server-side apply claims and clears any
+    # stale rollingUpdate left by a prior RollingUpdate-strategy apply/edit —
+    # type: Recreate with rollingUpdate still set is rejected by the API.
+    rollingUpdate: null
+    {{- end }}
   selector:
     matchLabels:
       app: {{ include "trek.name" . }}

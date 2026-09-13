@@ -22,7 +22,6 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.bump.outputs.version }}
-      ref: ${{ steps.bump.outputs.ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -81,14 +80,8 @@ jobs:
             git commit -m "chore: bump trek chart to $VERSION [skip ci]"
             git tag -a "v$VERSION" -m "v$VERSION"
             git push origin main --follow-tags
-
-            echo "ref=v$VERSION" >> "$GITHUB_OUTPUT"
-          elif [ -n "$LAST_TAG" ]; then
-            echo "No feat/fix/breaking commits since $LAST_TAG; building/deploying the current version ($VERSION) as-is."
-            echo "ref=$LAST_TAG" >> "$GITHUB_OUTPUT"
           else
-            echo "No feat/fix/breaking commits and no existing tag; building/deploying the current version ($VERSION) from HEAD."
-            echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo "No feat/fix/breaking commits since ${LAST_TAG:-the start of history}; building/deploying the current version ($VERSION) from HEAD as-is."
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -100,8 +93,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.version-bump.outputs.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -136,8 +127,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.version-bump.outputs.ref }}
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
