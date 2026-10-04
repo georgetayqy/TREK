@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router'
-import { ArrowDown, ArrowUp, BarChart3, Plus, Search, ArrowRight, ArrowLeftRight, Check, RotateCcw, Pencil, Trash2, AlertCircle, Download, StickyNote, ChevronDown } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, Plus, Search, ArrowRight, ArrowLeftRight, Check, RotateCcw, Pencil, Trash2, AlertCircle, Download, StickyNote, ChevronDown, Receipt, Paperclip } from 'lucide-react'
 import { useTripStore } from '../../store/tripStore'
 import { useAuthStore } from '../../store/authStore'
 import { useSettingsStore } from '../../store/settingsStore'
@@ -8,18 +8,23 @@ import { useCanDo } from '../../store/permissionsStore'
 import { useToast } from '../shared/Toast'
 import { useTranslation } from '../../i18n'
 import { budgetApi } from '../../api/client'
-import { useExchangeRates } from '../../hooks/useExchangeRates'
+import { saveWithReceipts } from './receiptUploads'
+import { convertBooked, convertedLine, tripAmountOf, useExchangeRates, withFallbackFx } from '../../hooks/useExchangeRates'
+import { splitShareLabel, useExpenseFx } from './expenseFx'
+import { useFreezeMissingRates } from './useFreezeMissingRates'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { formatMoney, currencyDecimals, currencyLocale, localizeAmountInput, amountToInputString } from '../../utils/formatters'
-import { downloadBlob } from '../../utils/fileDownload'
+import { downloadBlob, openFile } from '../../utils/fileDownload'
 import Modal from '../shared/Modal'
 import CustomSelect from '../shared/CustomSelect'
 import { CustomDatePicker } from '../shared/CustomDateTimePicker'
 import { localToday } from '../Planner/today'
 import { SYMBOLS, currenciesWith, SPLIT_COLORS } from './BudgetPanel.constants'
-import { amountPattern, calculateTicketShares, hasTicketSplit, NOTE_MAX, payersBalanced, readTicketItems, readUserNote, rebalancePayers, splitEqualShares, writeTicketItems, type TicketItem } from './CostsPanel.helpers'
+import { amountPattern, calculateTicketShares, finalBudgetFor, finalBudgetSources, hasTicketSplit, NOTE_MAX, paidByUser, payersBalanced, readTicketItems, readUserNote, rebalancePayers, settlementDate, splitEqualShares, writeTicketItems, type TicketItem } from './CostsPanel.helpers'
 import { COST_CATEGORY_LIST, catMeta } from './costsCategories'
-import type { BudgetItem } from '../../types'
+import { ReceiptPreviewModal } from './ReceiptPreviewModal'
+import type { BudgetParticipantFinal, BudgetUnconverted } from '@trek/shared'
+import type { BudgetItem, BudgetItemReceipt } from '../../types'
 import type { TripMember } from './BudgetPanelMemberChips'
 import GuestBadge from '../shared/GuestBadge'
 import { NumericInput } from '../shared/NumericInput'
@@ -38,7 +43,14 @@ interface Settlement {
   // The currency the transfer was entered in. Legacy rows predate it (null) and are
   // read as the display currency, which is what the server assumes for them too.
   currency?: string | null
+  // The rate frozen when the transfer was settled, in units of `currency` per 1 trip
+  // currency (#1445). Absent, or exactly 1, on rows written before the freeze existed.
+  exchange_rate?: number
   created_at?: string
+  // The day the transfer actually happened; editable, unlike created_at (when it
+  // was recorded). Null/absent on rows predating this field — settlementDate()
+  // falls back to created_at for those.
+  settled_at?: string | null
   from_username?: string
   to_username?: string
 }
@@ -46,6 +58,14 @@ interface SettlementData {
   balances: { user_id: number; username: string; avatar_url: string | null; balance: number }[]
   flows: { from: { user_id: number; username: string }; to: { user_id: number; username: string }; amount: number }[]
   settlements: Settlement[]
+  // What the trip ends up costing each participant. Computed server-side off the
+  // same ledger as the balances, so the breakdown can't contradict them.
+  finalBudgets: BudgetParticipantFinal[]
+  // The currency the figures are in: the display currency, or the trip's own when
+  // neither the server nor `base_rate` could quote the pair.
+  currency?: string
+  // Rows no rate could convert, left out of every figure above.
+  unconverted?: BudgetUnconverted
 }
 
 // One row in the unified Costs ledger — either an expense or a settle-up payment,
@@ -72,7 +92,8 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
   const base = (displayCurrency || trip?.currency || 'EUR').toUpperCase()
   // Pre-rework rows stored currency = NULL, meaning "the trip's own currency".
   const tripCurrency = (trip?.currency || base).toUpperCase()
-  const { convert } = useExchangeRates(base)
+  // Anchored on the trip currency's quote, the one the server books with (#2525).
+  const { convert, displayPerTrip } = useExchangeRates(base, tripCurrency)
   const curOf = useCallback((e: BudgetItem) => (e.currency || tripCurrency), [tripCurrency])
   const [settlement, setSettlement] = useState<SettlementData | null>(null)
   // A failed settlement read leaves `settlement` null, which the empty views would
@@ -84,9 +105,13 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
   const [dayFilter, setDayFilter] = useState('')   // '' = all days, else YYYY-MM-DD
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<BudgetItem | null>(null)
+  const [previewReceipts, setPreviewReceipts] = useState<{ receipts: BudgetItemReceipt[]; initialIndex: number } | null>(null)
   // One note open at a time: two expanded rows next to each other read as a mess,
   // and the point of the collapse is that the list stays scannable.
   const [expandedNoteId, setExpandedNoteId] = useState<number | null>(null)
+  // One open final-budget breakdown at a time, for the same reason a single note
+  // is expanded at a time: the card is a sidebar, not a report.
+  const [expandedFinalId, setExpandedFinalId] = useState<number | null>(null)
   const [editingSettlement, setEditingSettlement] = useState<Settlement | null>(null)
   const [addingPayment, setAddingPayment] = useState(false)
 
@@ -102,14 +127,20 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
   const fmt = useCallback((v: number, c = base) => formatMoney(v, c, locale), [base, locale])
   const fmt0 = useCallback((v: number, c = base) => formatMoney(v, c, locale, { decimals: 0 }), [base, locale])
 
+  // The browser's own figure for the display currency goes along, for the server to
+  // answer in it when it cannot fetch a quote itself.
   const loadSettlement = useCallback(() => {
-    budgetApi.settlement(tripId, base)
+    budgetApi.settlement(tripId, base, base !== tripCurrency ? displayPerTrip : null)
       .then(s => { setSettlement(s); setSettlementError(false) })
       .catch(() => setSettlementError(true))
-  }, [tripId, base])
+  }, [tripId, base, tripCurrency, displayPerTrip])
 
   useEffect(() => { loadBudgetItems(tripId); loadSettlement() }, [tripId])
-  useEffect(() => { loadSettlement() }, [budgetItems.length, base])
+  useEffect(() => { loadSettlement() }, [budgetItems.length, loadSettlement])
+
+  // Rows the server could not count get a rate frozen from the browser's, and the
+  // settlement is read again once they count.
+  useFreezeMissingRates({ tripId, tripCurrency, canEdit, unconverted: settlement?.unconverted, onHealed: loadSettlement })
 
   // The bottom-nav "+" on the Costs tab opens the add-expense modal via ?create=expense.
   const [searchParams, setSearchParams] = useSearchParams()
@@ -121,8 +152,24 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
   }, [searchParams])
 
   // ── derived expense maths (everything converted to the base currency) ────
-  const baseTotal = (e: BudgetItem) => convert(e.total_price || 0, curOf(e))
-  const myPaidOf = (e: BudgetItem) => (e.payers || []).filter(p => p.user_id === me).reduce((a, p) => a + convert(p.amount, curOf(e)), 0)
+  // Booked, not live: an expense entered in a foreign currency keeps the rate it was
+  // entered at, which is the same rule the server settles by (#1335).
+  const booked = useCallback(
+    (amount: number, e: BudgetItem) => convertBooked(amount, e.currency, e.exchange_rate, tripCurrency, convert),
+    [convert, tripCurrency],
+  )
+  const baseTotal = (e: BudgetItem) => booked(e.total_price || 0, e)
+  // A transfer freezes its own rate at settle time, in its own table (#1445). One
+  // without a currency predates that and was entered in the display currency, which
+  // is how the server settles it too, not in the trip's.
+  const settled = useCallback(
+    (s: Settlement) => convertBooked(s.amount, s.currency || base, s.exchange_rate, tripCurrency, convert),
+    [convert, tripCurrency, base],
+  )
+  const myPaidOf = (e: BudgetItem) => booked(paidByUser(e, me), e)
+  // The line under an amount shown converted: what was entered, then where it went (#2525).
+  const lineOf = (amount: number, e: BudgetItem, shown: number) =>
+    convertedLine(amount, e.currency, e.exchange_rate, tripCurrency, base, shown)
   // "Unfinished": a recorded total nobody has paid yet — counts toward the trip
   // total but stays out of settlements until who-paid is filled in. A negative
   // total (a refund, #2176) is just as unfinished until its recipient is named.
@@ -134,13 +181,15 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
     const myMember = (e.members || []).find(m => m.user_id === me)
     if (!myMember) return 0
     if (myMember.amount !== null && myMember.amount !== undefined) {
-      return convert(myMember.amount, curOf(e))
+      return booked(myMember.amount, e)
     }
     const shares = splitEqualShares(e.total_price || 0, e.members || [], e.id)
     const myShare = shares[me] || 0
-    return convert(myShare, curOf(e))
+    return booked(myShare, e)
   }
 
+  // `booked` carries the rates. They can land after the expenses, and without it in the
+  // deps the cards kept the sums they were first added up with while the rows moved on.
   const totals = useMemo(() => {
     const totalSpend = budgetItems.reduce((a, e) => a + baseTotal(e), 0)
     const myPaid = budgetItems.reduce((a, e) => a + myPaidOf(e), 0)
@@ -150,7 +199,7 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
     const outstanding = budgetItems.reduce((a, e) => (isUnfinished(e) ? a + baseTotal(e) : a), 0)
     const outstandingCount = budgetItems.filter(isUnfinished).length
     return { totalSpend, myPaid, myShare, owe, owed, outstanding, outstandingCount }
-  }, [budgetItems, settlement, me])
+  }, [budgetItems, settlement, me, booked])
 
   // ── filtering + day grouping ────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -164,7 +213,7 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
     const q = search.trim().toLowerCase()
     if (q) list = list.filter(e => e.name.toLowerCase().includes(q))
     return list
-  }, [budgetItems, filter, search, catFilter, dayFilter, me])
+  }, [budgetItems, filter, search, catFilter, dayFilter, me, booked])
 
   // Settlements ("payments") shown inline in the ledger. They have no name, so a
   // text search hides them; they're excluded from the "owed" expense filter and,
@@ -175,14 +224,14 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
     if (filter === 'owed') return []
     let list = settlement?.settlements || []
     if (filter === 'mine') list = list.filter(s => s.from_user_id === me || s.to_user_id === me)
-    if (dayFilter) list = list.filter(s => (s.created_at || '').slice(0, 10) === dayFilter)
+    if (dayFilter) list = list.filter(s => settlementDate(s) === dayFilter)
     return list
   }, [settlement, filter, search, catFilter, dayFilter, me])
 
   const dayGroups = useMemo(() => {
     const entries: LedgerEntry[] = [
       ...filtered.map(e => ({ kind: 'expense' as const, date: e.expense_date || '', e })),
-      ...filteredSettlements.map(s => ({ kind: 'payment' as const, date: (s.created_at || '').slice(0, 10), s })),
+      ...filteredSettlements.map(s => ({ kind: 'payment' as const, date: settlementDate(s), s })),
     ]
     const labelOf = (date: string) => {
       if (!date) return t('costs.noDate')
@@ -217,7 +266,7 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
   // ── settle actions ──────────────────────────────────────────────────────
   const settleFlow = async (fromId: number, toId: number, amount: number) => {
     try {
-      await budgetApi.createSettlement(tripId, { from_user_id: fromId, to_user_id: toId, amount, currency: base })
+      await budgetApi.createSettlement(tripId, withFallbackFx({ from_user_id: fromId, to_user_id: toId, amount, currency: base }, tripCurrency))
       loadSettlement()
     } catch { toast.error(t('common.unknownError')) }
   }
@@ -228,7 +277,7 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
     const flows = settlement?.flows || []
     if (!flows.length) return
     try {
-      for (const f of flows) await budgetApi.createSettlement(tripId, { from_user_id: f.from.user_id, to_user_id: f.to.user_id, amount: f.amount, currency: base })
+      for (const f of flows) await budgetApi.createSettlement(tripId, withFallbackFx({ from_user_id: f.from.user_id, to_user_id: f.to.user_id, amount: f.amount, currency: base }, tripCurrency))
     } catch { toast.error(t('common.unknownError')) }
     // Refresh even when one transfer failed: the ones created before it are real,
     // and leaving them in the flow list invites a second, doubled settle-up.
@@ -262,15 +311,20 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
     }
     const fmtDate = (iso: string) => { if (!iso) return ''; try { return new Date(iso + 'T00:00:00Z').toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }) } catch { return iso } }
 
-    const header = ['Date', 'Name', 'Category', 'Amount', 'Currency', 'Amount (' + base + ')', 'Note']
+    // Read in another currency than the trip's, what each row counts as in the trip
+    // currency too, the figure every sum is built from (#2525).
+    const tripCol = tripCurrency !== base
+    const header = ['Date', 'Name', 'Category', 'Amount', 'Currency', ...(tripCol ? ['Amount (' + tripCurrency + ')'] : []), 'Amount (' + base + ')', 'Note']
     const rows = [header.join(sep)]
     const items = budgetItems.slice().sort((a, b) => (a.expense_date || '').localeCompare(b.expense_date || ''))
     for (const e of items) {
       const cur = curOf(e)
       const note = readUserNote(e)
+      const inTrip = tripAmountOf(e.total_price || 0, e.currency, e.exchange_rate, tripCurrency, convert)
       rows.push([
         esc(fmtDate(e.expense_date || '')), esc(e.name), esc(t(catMeta(e.category).labelKey)),
         (e.total_price || 0).toFixed(currencyDecimals(cur)), cur,
+        ...(tripCol ? [inTrip.toFixed(currencyDecimals(tripCurrency))] : []),
         baseTotal(e).toFixed(currencyDecimals(base)),
         esc(note),
       ].join(sep))
@@ -471,6 +525,12 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
             {BalancesList({ balances: settlement?.balances || [] })}
           </div>
 
+          {/* final budget */}
+          <div className={cardCls} style={{ borderRadius: 22, padding: '22px 24px' }}>
+            <div className={labelCls} style={{ marginBottom: 14 }}>{t('costs.finalBudget')}</div>
+            {FinalBudgetList()}
+          </div>
+
           {/* by category */}
           <div className={cardCls} style={{ borderRadius: 22, padding: '22px 24px' }}>
             <div className={labelCls} style={{ marginBottom: 14 }}>{t('costs.byCategory')}</div>
@@ -487,9 +547,17 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
       )}
 
       {(editingSettlement || addingPayment) && (
-        <SettlementModal tripId={tripId} people={people} me={me} editing={editingSettlement} currency={base}
+        <SettlementModal tripId={tripId} people={people} me={me} editing={editingSettlement} currency={base} tripCurrency={tripCurrency}
           onClose={() => { setEditingSettlement(null); setAddingPayment(false) }}
           onSaved={() => { setEditingSettlement(null); setAddingPayment(false); loadSettlement() }} />
+      )}
+
+      {previewReceipts && (
+        <ReceiptPreviewModal
+          receipts={previewReceipts.receipts}
+          initialIndex={previewReceipts.initialIndex}
+          onClose={() => setPreviewReceipts(null)}
+        />
       )}
 
       <style>{`
@@ -683,6 +751,12 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
           {BalancesList({ balances: settlement?.balances || [] })}
         </div>
 
+        {/* Final budget */}
+        <div className={cardCls} style={{ borderRadius: 18, padding: 16 }}>
+          <div className={labelCls} style={{ marginBottom: 14 }}>{t('costs.finalBudget')}</div>
+          {FinalBudgetList()}
+        </div>
+
         {/* By category */}
         <div className={cardCls} style={{ borderRadius: 18, padding: 16 }}>
           <div className={labelCls} style={{ marginBottom: 14 }}>{t('costs.byCategory')}</div>
@@ -720,7 +794,7 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
   function ExpenseRow({ e }: { e: BudgetItem }) {
     const c = catMeta(e.category)
     const Icon = c.Icon
-    const cur = curOf(e)
+    const line = lineOf(e.total_price || 0, e, baseTotal(e))
     const payers = (e.payers || []).filter(p => p.amount !== 0)
     const net = round2(myPaidOf(e) - myShareOf(e))
     const unfinished = isUnfinished(e)
@@ -762,10 +836,36 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
                 {t('costs.unfinished')}
               </span>
             )}
+            {(e.receipts || []).length > 0 && (
+              <button
+                type="button"
+                onClick={(ev) => {
+                  ev.stopPropagation()
+                  setPreviewReceipts({ receipts: e.receipts!, initialIndex: 0 })
+                }}
+                title={t('costs.viewReceipt')}
+                className="bg-surface-secondary border border-edge text-content-muted hover:text-content hover:border-content-faint transition-all"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  fontSize: 'calc(11px * var(--fs-scale-caption, 1))',
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <Receipt size={12} className="text-content-muted" />
+                <span>{t('costs.receipts') || 'Beleg'}{e.receipts!.length > 1 ? ` (${e.receipts!.length})` : ''}</span>
+              </button>
+            )}
           </div>
-          {cur !== base && (
+          {line && (
             <div className="text-content-faint" style={{ marginTop: 4, fontSize: 'calc(12px * var(--fs-scale-body, 1))', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {fmt(e.total_price, cur)} {'→'} {fmt(baseTotal(e))}
+              {fmt(line.entered.amount, line.entered.currency)} {'→'} {fmt(line.into.amount, line.into.currency)}
             </div>
           )}
           {/* Under the name, because a chip reading "Y 122,00" says nothing on
@@ -775,7 +875,7 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
               {payers.map(p => (
                 <span key={p.user_id} className="bg-surface-secondary border border-edge" title={personName(p.user_id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px 3px 3px', borderRadius: 999, fontSize: 'calc(11.5px * var(--fs-scale-caption, 1))' }}>
                   <Avatar id={p.user_id} size={18} />
-                  <span className="text-content" style={{ fontWeight: 700 }}>{fmt(convert(p.amount, cur))}</span>
+                  <span className="text-content" style={{ fontWeight: 700 }}>{fmt(booked(p.amount, e))}</span>
                 </span>
               ))}
             </div>
@@ -820,6 +920,8 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
   function SettlementRow({ s }: { s: Settlement }) {
     // Legacy transfers carry no currency and were entered in the display base.
     const cur = (s.currency || base).toUpperCase()
+    // Booked in the trip currency like an expense, so it is explained the same way.
+    const line = convertedLine(s.amount, cur, s.exchange_rate, tripCurrency, base, settled(s))
     return (
       <div style={{ display: 'flex', alignItems: 'stretch', gap: 8 }}>
       <div className="bg-surface-card border border-edge exp-row" style={{ flex: 1, minWidth: 0, display: 'grid', gridTemplateColumns: isMobile ? '46px 1fr auto' : '46px minmax(200px, 1fr) minmax(0, 1.5fr) auto', gap: isMobile ? 16 : 18, alignItems: 'center', borderRadius: 18, padding: '16px 20px' }}>
@@ -827,7 +929,7 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
         <div style={{ minWidth: 0 }}>
           <div className="text-content" style={{ fontSize: 'calc(15px * var(--fs-scale-subtitle, 1))', fontWeight: 600, marginBottom: 6 }}>
             {t('costs.payment')}
-            {cur !== base && <span className="text-content-faint" style={{ fontWeight: 400, fontSize: 'calc(12px * var(--fs-scale-body, 1))' }}> · {fmt(s.amount, cur)} → {fmt(convert(s.amount, cur))}</span>}
+            {line && <span className="text-content-faint" style={{ fontWeight: 400, fontSize: 'calc(12px * var(--fs-scale-body, 1))' }}> · {fmt(line.entered.amount, line.entered.currency)} → {fmt(line.into.amount, line.into.currency)}</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }} title={`${personName(s.from_user_id)} → ${personName(s.to_user_id)}`}>
             <Avatar id={s.from_user_id} size={20} /><ArrowRight size={13} className="text-content-faint" /><Avatar id={s.to_user_id} size={20} />
@@ -838,7 +940,7 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
             on the same axis as every expense above it. */}
         {!isMobile && <span />}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, alignSelf: 'center' }}>
-          <span className="bg-surface-secondary border border-edge text-content" style={{ display: 'inline-flex', alignItems: 'center', padding: '6px 13px', borderRadius: 999, fontSize: 'calc(15px * var(--fs-scale-subtitle, 1))', fontWeight: 700, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fmt(convert(s.amount, cur))}</span>
+          <span className="bg-surface-secondary border border-edge text-content" style={{ display: 'inline-flex', alignItems: 'center', padding: '6px 13px', borderRadius: 999, fontSize: 'calc(15px * var(--fs-scale-subtitle, 1))', fontWeight: 700, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fmt(settled(s))}</span>
         </div>
       </div>
       {canEdit && (
@@ -877,6 +979,124 @@ export default function CostsPanel({ tripId, tripMembers = [] }: CostsPanelProps
             </div>
           )
         })}
+      </div>
+    )
+  }
+
+  /**
+   * What the trip actually costs each traveler — one amount per person, with the
+   * arithmetic behind it a click away.
+   *
+   * The four figures come from the settlement response, not from a second pass
+   * over the expenses here: the server nets them in the same integer cents as
+   * the balances, so `expenses − reimbursed − pending` always lands on the total
+   * printed beside the name. The lists under the breakdown are the rows those
+   * figures came from, which is what makes an unexpected total explainable.
+   */
+  function FinalBudgetList() {
+    if (settlementError) return loadFailed()
+    const finals = settlement?.finalBudgets || []
+    const rows = people.map(p => finalBudgetFor(finals, p))
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {rows.map(r => {
+          const open = expandedFinalId === r.user_id
+          return (
+            <div key={r.user_id}>
+              <button type="button" onClick={() => setExpandedFinalId(open ? null : r.user_id)} aria-expanded={open}
+                className="text-content"
+                style={{ display: 'grid', gridTemplateColumns: '28px 1fr auto 14px', gap: 10, alignItems: 'center', width: '100%', padding: '7px 0', background: 'none', border: 0, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                <Avatar id={r.user_id} size={28} />
+                <span style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{personName(r.user_id)}</span>
+                <span style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 700 }}>{fmt(r.final)}</span>
+                <ChevronDown size={14} className="text-content-faint" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+              </button>
+              {open && FinalBudgetBreakdown({ row: r })}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  /** The three lines behind one traveler's final budget, and the rows they add up from. */
+  function FinalBudgetBreakdown({ row }: { row: BudgetParticipantFinal }) {
+    // Each line is signed by what it does to the final, so the column reads as the
+    // subtraction it is: a reimbursement this traveler *sent* raises their cost and
+    // shows as a plus, which "received: −50" could never say. The rows under a line
+    // carry the same sign, so they visibly add up to it. Their amounts are the
+    // server's display cents, not a conversion of the expense list done here.
+    const signed = (v: number) => (v < 0 ? '−' : '+') + fmt(Math.abs(v))
+    const { fronted, moved, outstanding } = finalBudgetSources(row, budgetItems)
+    // Beside a converted row's name, what was entered, so the breakdown names the bill
+    // the way the list above it does rather than by a figure nobody typed.
+    const enteredOf = (itemId: number, shown: number) => {
+      const e = budgetItems.find(i => i.id === itemId)
+      const line = e ? lineOf(paidByUser(e, row.user_id), e, shown) : null
+      return line ? fmt(line.entered.amount, line.entered.currency) : null
+    }
+    const lineCls = { display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 'calc(12px * var(--fs-scale-body, 1))' } as const
+    const detail = (label: string, value: string) => (
+      <div style={lineCls}>
+        <span className="text-content-muted" style={{ minWidth: 0, flex: 1 }}>{label}</span>
+        <span className="text-content" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{value}</span>
+      </div>
+    )
+    const transferLabel = (fromId: number, toId: number) => `${personName(fromId)} → ${toId === me ? t('costs.youLower') : personName(toId)}`
+    // Capped and scrollable: a long trip's expense list would otherwise push the
+    // rest of the sidebar off the screen every time a name is tapped.
+    const listCls = { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 6, maxHeight: 180, overflowY: 'auto' } as const
+    return (
+      <div className="bg-surface-secondary" style={{ borderRadius: 12, padding: '11px 12px', margin: '2px 0 8px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {detail(t('costs.finalExpenses'), signed(row.expenses))}
+          {detail(t('costs.finalReimbursed'), signed(-row.reimbursed))}
+          {detail(t('costs.finalPending'), signed(-row.pending))}
+        </div>
+        {fronted.length > 0 && (
+          <div>
+            <div className={labelCls}>{t('costs.finalExpenses')}</div>
+            <div style={listCls}>
+              {fronted.map(r => {
+                const entered = enteredOf(r.item_id, r.amount)
+                return (
+                  <div key={r.item_id} style={lineCls}>
+                    <span className="text-content-muted" style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.name}{entered && <span className="text-content-faint"> · {entered}</span>}
+                    </span>
+                    <span className="text-content" style={{ whiteSpace: 'nowrap' }}>{signed(r.amount)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        {moved.length > 0 && (
+          <div>
+            <div className={labelCls}>{t('costs.finalReimbursed')}</div>
+            <div style={listCls}>
+              {moved.map(r => (
+                <div key={r.settlement_id} style={lineCls}>
+                  <span className="text-content-muted" style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{transferLabel(r.from_user_id, r.to_user_id)}</span>
+                  <span className="text-content" style={{ whiteSpace: 'nowrap' }}>{signed(-r.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {outstanding.length > 0 && (
+          <div>
+            <div className={labelCls}>{t('costs.finalPending')}</div>
+            <div style={listCls}>
+              {outstanding.map((r, i) => (
+                <div key={i} style={lineCls}>
+                  <span className="text-content-muted" style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{transferLabel(r.from_user_id, r.to_user_id)}</span>
+                  <span className="text-content" style={{ whiteSpace: 'nowrap' }}>{signed(-r.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -965,8 +1185,8 @@ function FlowPills({ ids, lead, Avatar, name }: { ids: number[]; lead: string; A
 // A transfer can be made in any currency — paying a rouble debt in euros is normal —
 // so it carries its own, defaulting to the display currency. The server freezes its
 // FX rate on write, the same way an expense's is frozen.
-function SettlementModal({ tripId, people, me, editing, currency, onClose, onSaved }: {
-  tripId: number; people: TripMember[]; me: number; editing: Settlement | null; currency: string; onClose: () => void; onSaved: () => void
+function SettlementModal({ tripId, people, me, editing, currency, tripCurrency, onClose, onSaved }: {
+  tripId: number; people: TripMember[]; me: number; editing: Settlement | null; currency: string; tripCurrency: string; onClose: () => void; onSaved: () => void
 }) {
   const { t } = useTranslation()
   const toast = useToast()
@@ -977,16 +1197,17 @@ function SettlementModal({ tripId, people, me, editing, currency, onClose, onSav
   // "4.90" and not "4.9" (#2175) — and a JPY transfer gets no fake decimals.
   const [amount, setAmount] = useState<string>(editing ? amountToInputString(editing.amount, (editing.currency || currency).toUpperCase()) : '')
   const [cur, setCur] = useState<string>((editing?.currency || currency).toUpperCase())
+  const [day, setDay] = useState(editing ? settlementDate(editing) : localToday())
   const [saving, setSaving] = useState(false)
 
   const amt = Number.parseFloat(amount) || 0
-  const valid = amt > 0 && fromId !== toId
+  const valid = amt > 0 && fromId !== toId && !!day
   const opts = people.map(p => ({ value: String(p.id), label: p.id === me ? t('costs.you') : p.username }))
 
   const save = async () => {
     if (!valid) return
     setSaving(true)
-    const data = { from_user_id: Number(fromId), to_user_id: Number(toId), amount: amt, currency: cur }
+    const data = withFallbackFx({ from_user_id: Number(fromId), to_user_id: Number(toId), amount: amt, currency: cur, settled_at: day }, tripCurrency)
     try {
       if (editing) await budgetApi.updateSettlement(tripId, editing.id, data)
       else await budgetApi.createSettlement(tripId, data)
@@ -1030,6 +1251,10 @@ function SettlementModal({ tripId, people, me, editing, currency, onClose, onSav
               style={{ width: '100%' }} />
           </div>
         </div>
+        <div>
+          <label className={labelCls}>{t('costs.day')}</label>
+          <CustomDatePicker value={day} onChange={setDay} style={{ width: '100%' }} />
+        </div>
       </div>
     </Modal>
   )
@@ -1052,12 +1277,13 @@ export function ExpenseModal({ tripId, base, people, me, editing, prefill, onClo
   const toast = useToast()
   const isMobile = useIsMobile()
   const { addBudgetItem, updateBudgetItem } = useTripStore()
-  const { convert } = useExchangeRates(base)
   const sym = (c: string) => SYMBOLS[c] || (c + ' ')
+  // A saved expense without a currency opens in the trip's own (#2525).
+  const { tripCurrency: tripCur, editingCurrency, preview } = useExpenseFx(base, editing)
 
   const [name, setName] = useState(editing?.name || prefill?.name || '')
   const [cat, setCat] = useState<string>(editing ? catMeta(editing.category).key : (prefill?.category || 'food'))
-  const [currency, setCurrency] = useState((editing?.currency || base).toUpperCase())
+  const [currency, setCurrency] = useState(editingCurrency)
   const [day, setDay] = useState(editing?.expense_date || localToday())
   const [note, setNote] = useState(() => readUserNote(editing))
   // Edit and prefill seeds are padded to the currency's decimals (#2175): the DB
@@ -1065,7 +1291,7 @@ export function ExpenseModal({ tripId, base, people, me, editing, prefill, onClo
   // 5,00 as "5". A prefill has no currency of its own — it is read as `base`,
   // which is also what the currency field starts on.
   const [total, setTotal] = useState<string>(() => {
-    if (editing) return editing.total_price ? amountToInputString(editing.total_price, (editing.currency || base).toUpperCase()) : ''
+    if (editing) return editing.total_price ? amountToInputString(editing.total_price, editingCurrency) : ''
     if (prefill?.amount != null) return amountToInputString(prefill.amount, base)
     return ''
   })
@@ -1122,6 +1348,24 @@ export function ExpenseModal({ tripId, base, people, me, editing, prefill, onClo
     return m
   })
 
+  const [receipts, setReceipts] = useState<BudgetItemReceipt[]>(() => editing?.receipts || [])
+  const [pendingReceiptFiles, setPendingReceiptFiles] = useState<File[]>([])
+  const [uploadingReceipt, setUploadingReceipt] = useState(false)
+  const [modalPreviewReceipts, setModalPreviewReceipts] = useState<{ receipts: BudgetItemReceipt[]; initialIndex: number } | null>(null)
+
+  const handleReceiptFileSelect = (files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return
+    setPendingReceiptFiles(prev => [...prev, ...Array.from(files)])
+  }
+
+  const handleRemoveReceipt = (receiptId: number) => {
+    setReceipts(prev => prev.filter(r => r.id !== receiptId))
+  }
+
+  const handleRemovePendingReceipt = (index: number) => {
+    setPendingReceiptFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   const [saving, setSaving] = useState(false)
 
   const isTicketMode = splitMode === 'ticket'
@@ -1131,6 +1375,7 @@ export function ExpenseModal({ tripId, base, people, me, editing, prefill, onClo
   }, [ticketItems])
 
   const totalNum = isTicketMode ? ticketInfo.total : (Number.parseFloat(total) || 0)
+  const fx = preview(totalNum, currency)
   const splitSum = [...participants].reduce((sum, id) => sum + (Number.parseFloat(customAmounts[id]) || 0), 0)
   const customBalanced = Math.round(splitSum * 100) === Math.round(totalNum * 100)
   // How much is still to be handed out, read on the total's own side: on a refund
@@ -1318,12 +1563,23 @@ export function ExpenseModal({ tripId, base, people, me, editing, prefill, onClo
       ...(!editing && prefill?.placeId ? { place_id: prefill.placeId } : {}),
     }
     try {
-      if (editing) await updateBudgetItem(tripId, editing.id, data)
-      else await addBudgetItem(tripId, data)
+      setUploadingReceipt(pendingReceiptFiles.length > 0)
+      await saveWithReceipts(tripId, pendingReceiptFiles, editing ? editing.id : null, ids => (
+        editing
+          ? updateBudgetItem(tripId, editing.id, { ...data, receipt_file_ids: [...receipts.map(r => r.id), ...ids] })
+          : addBudgetItem(tripId, { ...data, receipt_file_ids: ids })
+      ))
+      // Only cleared once the save went through, so a retry after a failure
+      // does not upload a second copy of every file.
+      setPendingReceiptFiles([])
       onSaved()
-    } catch {
-      toast.error(t('common.unknownError'))
+    } catch (err) {
+      // A receipt the rollback could not remove is still on the trip, and the
+      // user is the only one who can clear it out of the Files tab.
+      const stuck = (err as { stuckReceiptIds?: number[] })?.stuckReceiptIds
+      toast.error(stuck?.length ? t('costs.receiptLeftBehind', { count: stuck.length }) : t('common.unknownError'))
     } finally {
+      setUploadingReceipt(false)
       setSaving(false)
     }
   }
@@ -1377,12 +1633,18 @@ export function ExpenseModal({ tripId, base, people, me, editing, prefill, onClo
           </div>
         </div>
 
-        {currency !== base && totalNum !== 0 && (
+        {fx && (
           <div className="bg-surface-secondary border border-edge text-content-muted" style={{ borderRadius: 10, padding: '10px 12px', fontSize: 'calc(12.5px * var(--fs-scale-body, 1))', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span>{formatMoney(totalNum, currency, locale)}</span>
-            <span className="text-content-faint">≈</span>
-            <span className="text-content" style={{ fontWeight: 600 }}>{formatMoney(convert(totalNum, currency), base, locale)}</span>
-            <span className="text-content-faint">· {t('costs.liveRate')}</span>
+            {fx.inTrip != null && <>
+              <span className="text-content-faint">→</span>
+              <span className={fx.shown == null ? 'text-content' : undefined} style={fx.shown == null ? { fontWeight: 600 } : undefined}>{formatMoney(fx.inTrip, tripCur, locale)}</span>
+            </>}
+            {fx.shown != null && <>
+              <span className="text-content-faint">≈</span>
+              <span className="text-content" style={{ fontWeight: 600 }}>{formatMoney(fx.shown, base, locale)}</span>
+              <span className="text-content-faint">· {t('costs.liveRate')}</span>
+            </>}
           </div>
         )}
 
@@ -1609,7 +1871,7 @@ export function ExpenseModal({ tripId, base, people, me, editing, prefill, onClo
               <div style={{ marginTop: 10, fontSize: 12.5, display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                 {splitMode === 'equally' ? (
                   <span className="text-content-faint">
-                    {participants.size > 0 && t('costs.splitSummary', { count: participants.size, amount: sym(currency) + each.toFixed(2) })}
+                    {participants.size > 0 && t('costs.splitSummary', { count: participants.size, amount: splitShareLabel(each, currency, fx, participants.size, base, sym, locale) })}
                   </span>
                 ) : (
                   <span style={{ fontWeight: 600, color: customBalanced ? '#16a34a' : '#dc2626' }}>
@@ -1633,8 +1895,91 @@ export function ExpenseModal({ tripId, base, people, me, editing, prefill, onClo
             placeholder={t('costs.notePlaceholder')} maxLength={NOTE_MAX}
             className={inputCls} style={{ borderRadius: 10, padding: '10px 13px', fontSize: 'calc(13.5px * var(--fs-scale-body, 1))', outline: 'none', resize: 'vertical', minHeight: 68, width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.5 }} />
         </div>
+
+        <div className={panelCls}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <label className={labelCls} style={{ marginBottom: 0 }}>{t('costs.receiptsTitle') || t('costs.receipts')}</label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 'calc(12px * var(--fs-scale-caption, 1))', fontWeight: 600, color: 'var(--text-primary)' }}>
+              <input
+                type="file"
+                multiple
+                accept="image/*,application/pdf"
+                style={{ display: 'none' }}
+                onChange={e => {
+                  handleReceiptFileSelect(e.target.files)
+                  e.target.value = ''
+                }}
+              />
+              <span className="bg-surface-card border border-edge text-content-muted hover:text-content transition-colors" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 999 }}>
+                <Plus size={13} /> {t('costs.attachReceipt')}
+              </span>
+            </label>
+          </div>
+
+          {uploadingReceipt && (
+            <div className="text-content-faint" style={{ fontSize: 'calc(12px * var(--fs-scale-caption, 1))', marginBottom: 8 }}>
+              {t('common.saving')}...
+            </div>
+          )}
+
+          {receipts.length === 0 && pendingReceiptFiles.length === 0 ? (
+            <div className="text-content-faint" style={{ fontSize: 'calc(12.5px * var(--fs-scale-body, 1))', padding: '6px 0' }}>
+              {t('costs.noReceipts')}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {receipts.map((r, rIdx) => (
+                <div key={r.id} className="bg-surface-secondary border border-edge" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 11px', borderRadius: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => setModalPreviewReceipts({ receipts, initialIndex: rIdx })}
+                    className="text-content hover:underline"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minWidth: 0, background: 'none', border: 0, padding: 0, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', fontSize: 'calc(13px * var(--fs-scale-body, 1))' }}
+                  >
+                    <Receipt size={14} className="text-content-faint flex-shrink-0" />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.original_name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveReceipt(r.id)}
+                    title={t('costs.deleteReceipt')}
+                    className="text-content-muted hover:text-red-500 transition-colors"
+                    style={{ background: 'none', border: 0, padding: 3, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+              {pendingReceiptFiles.map((file, idx) => (
+                <div key={idx} className="bg-surface-secondary border border-edge" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 11px', borderRadius: 10 }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minWidth: 0, fontSize: 'calc(13px * var(--fs-scale-body, 1))' }}>
+                    <Paperclip size={14} className="text-content-faint flex-shrink-0" />
+                    <span className="text-content" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemovePendingReceipt(idx)}
+                    title={t('costs.deleteReceipt')}
+                    className="text-content-muted hover:text-red-500 transition-colors"
+                    style={{ background: 'none', border: 0, padding: 3, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         </div>
       </div>
+
+      {modalPreviewReceipts && (
+        <ReceiptPreviewModal
+          receipts={modalPreviewReceipts.receipts}
+          initialIndex={modalPreviewReceipts.initialIndex}
+          onClose={() => setModalPreviewReceipts(null)}
+        />
+      )}
     </Modal>
   )
 }

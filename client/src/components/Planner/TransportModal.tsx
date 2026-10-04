@@ -1,11 +1,14 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams } from 'react-router'
-import { Plane, Train, Car, Ship, Bus, Sailboat, Bike, CarTaxiFront, Route, TramFront, Paperclip, FileText, X, ExternalLink, Link2, Plus, Trash2 } from 'lucide-react'
+import { Plane, Train, Car, Ship, Bus, Sailboat, Bike, CarTaxiFront, Route, TramFront, Paperclip, FileText, X, ExternalLink, Link2, Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react'
 import Modal from '../shared/Modal'
+import ConfirmDialog from '../shared/ConfirmDialog'
 import CustomSelect from '../shared/CustomSelect'
+import { BookingCodeInput } from '../shared/BookingCode'
 import CustomTimePicker from '../shared/CustomTimePicker'
 import AirportSelect, { type Airport } from './AirportSelect'
 import LocationSelect, { type LocationPoint } from './LocationSelect'
+import { toLocationPicks } from './locationPicks'
 import { useTranslation } from '../../i18n'
 import { useToast } from '../shared/Toast'
 import { useTripStore } from '../../store/tripStore'
@@ -14,8 +17,9 @@ import { formatDate, splitReservationDateTime, resolveDayId } from '../../utils/
 import { openFile } from '../../utils/fileDownload'
 import apiClient from '../../api/client'
 import type { Day, Place, Accommodation, Reservation, ReservationEndpoint, TripFile, BudgetItem, AssignmentsMap } from '../../types'
-import { parseReservationMetadata, orderedEndpoints } from '../../utils/flightLegs'
+import { parseReservationMetadata, orderedEndpoints, stripAirportCode } from '../../utils/flightLegs'
 import { BookingCostsSection } from './BookingCostsSection'
+import { importedPriceEntry } from './importedPrice'
 import { TravelerPicker } from './TravelerPicker'
 import type { TripMember } from '../Budget/BudgetPanelMemberChips'
 import type { BookingExpenseRequest } from './BookingCostsSection.types'
@@ -53,14 +57,6 @@ function endpointFromLocation(l: LocationPoint, role: 'from' | 'to' | 'stop', se
     local_date: date,
     local_time: time,
   }
-}
-
-// "Paris Charles de Gaulle (CDG)" → "Paris Charles de Gaulle". Done as a trim
-// plus an anchored test instead of /\s*\([A-Z]{3}\)\s*$/, because the leading
-// \s* backtracks over every space in a long name for a quadratic worst case.
-function stripAirportCode(name: string): string {
-  const trimmed = name.trimEnd()
-  return /\([A-Z]{3}\)$/.test(trimmed) ? trimmed.slice(0, -5).trimEnd() : name
 }
 
 function airportFromEndpoint(e: ReservationEndpoint | undefined): Airport | null {
@@ -116,6 +112,19 @@ interface StationWaypointForm {
   seat: string
   confirmation_number: string
 }
+// ── Car stops along the drive ──────────────────────────────────────────────
+//
+// A rental is one booking with one pick-up and one return, so — unlike a flight or a
+// train — the stops in between are not legs of their own: they are places the drive
+// passes through, each with an optional time the driver plans to be there. They persist
+// as the same `role: 'stop'` endpoints every other transport type already uses.
+interface CarStopForm {
+  location: LocationPoint | null
+  time: string
+}
+
+const emptyCarStop = (): CarStopForm => ({ location: null, time: '' })
+
 function emptyStationWaypoint(dayId: string | number = ''): StationWaypointForm {
   return { location: null, arrDayId: dayId, arrTime: '', depDayId: dayId, depTime: '', train_number: '', platform: '', seat: '', confirmation_number: '' }
 }
@@ -159,6 +168,8 @@ interface TransportModalProps {
   files?: TripFile[]
   onFileUpload?: (fd: FormData) => Promise<unknown>
   onFileDelete?: (fileId: number) => Promise<void>
+  /** Deletes the reservation being edited. Omit to hide the delete action (create mode, or no permission). */
+  onDelete?: () => void | Promise<void>
   onOpenExpense?: (req: BookingExpenseRequest) => void
   // Pre-fill a brand-new transport booking from a parsed import item (review-
   // before-save); like `reservation` for the form but stays in create mode.
@@ -178,9 +189,11 @@ interface TransportModalProps {
   tripMembers?: TripMember[]
 }
 
-export function TransportModal({ isOpen, onClose, onSave, reservation, days, selectedDayId, files = [], onFileUpload, onFileDelete, onOpenExpense, prefill = null, places = [], assignments = {}, accommodations = [], initialAutomated = false, transitPrefill = null, tripHasDates = true, tripMembers = [] }: TransportModalProps) {
+export function TransportModal({ isOpen, onClose, onSave, reservation, days, selectedDayId, files = [], onFileUpload, onFileDelete, onDelete, onOpenExpense, prefill = null, places = [], assignments = {}, accommodations = [], initialAutomated = false, transitPrefill = null, tripHasDates = true, tripMembers = [] }: TransportModalProps) {
   const { t, locale } = useTranslation()
   const toast = useToast()
+  // The trip's places, offered by every location field of the manual tab (#2468).
+  const locationPicks = useMemo(() => toLocationPicks(places), [places])
   const isBudgetEnabled = useAddonStore(s => s.isEnabled('budget'))
   const budgetItems = useTripStore(s => s.budgetItems)
   const deleteBudgetItem = useTripStore(s => s.deleteBudgetItem)
@@ -194,12 +207,27 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
   // Manual vs Automated (public transit search) creation mode (#1065).
   const [automated, setAutomated] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [fromPick, setFromPick] = useState<EndpointPick>({})
   const [toPick, setToPick] = useState<EndpointPick>({})
   // Flight route as an ordered list of airports (origin .. stops .. destination).
   const [waypoints, setWaypoints] = useState<WaypointForm[]>([emptyWaypoint(), emptyWaypoint()])
   // Train route as an ordered list of stations (origin .. stops .. destination).
   const [trainWaypoints, setTrainWaypoints] = useState<StationWaypointForm[]>([emptyStationWaypoint(), emptyStationWaypoint()])
+  // A car keeps its pick-up and return as the frame of the rental and gains the stops
+  // in between (#1797): one booking, one continuous drive, several places along it.
+  const [carStops, setCarStops] = useState<CarStopForm[]>([])
+
+  /** Swaps a stop with its neighbour. Purely local: `sequence` is derived on save. */
+  const moveCarStop = (index: number, delta: number): void => {
+    setCarStops(prev => {
+      const to = index + delta
+      if (to < 0 || to >= prev.length) return prev
+      const next = [...prev]
+      ;[next[index], next[to]] = [next[to], next[index]]
+      return next
+    })
+  }
   const [uploadingFile, setUploadingFile] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [showFilePicker, setShowFilePicker] = useState(false)
@@ -207,6 +235,20 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
   // Travelers assigned to this booking (#1517) — seeded on open, persisted after save.
   const [travelerIds, setTravelerIds] = useState<Set<number>>(new Set())
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const filePickerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showFilePicker) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!filePickerRef.current?.contains(event.target as Node)) setShowFilePicker(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+  }, [showFilePicker])
+
+  useEffect(() => {
+    if (!isOpen) setShowFilePicker(false)
+  }, [isOpen])
 
   useEffect(() => {
     if (!isOpen) return
@@ -346,6 +388,17 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       } else {
         setFromPick({ location: locationFromEndpoint(from) || undefined })
         setToPick({ location: locationFromEndpoint(to) || undefined })
+        // Stops persist for every type; only a car offers an editor for them, so only a
+        // car reads them back into one. The others keep passing theirs through untouched.
+        setCarStops(
+          src.type === 'car'
+            ? (src.endpoints ?? [])
+                .filter(e => e.role === 'stop')
+                .slice()
+                .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+                .map(e => ({ location: locationFromEndpoint(e), time: e.local_time ?? '' }))
+            : [],
+        )
       }
     } else {
       setForm({ ...defaultForm, start_day_id: selectedDayId ?? '', end_day_id: selectedDayId ?? '' })
@@ -354,6 +407,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       setToPick({})
       setWaypoints([emptyWaypoint(selectedDayId ?? ''), emptyWaypoint(selectedDayId ?? '')])
       setTrainWaypoints([emptyStationWaypoint(selectedDayId ?? ''), emptyStationWaypoint(selectedDayId ?? '')])
+      setCarStops([])
     }
   }, [isOpen, reservation, prefill, selectedDayId, budgetItems])
 
@@ -504,8 +558,14 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
         })
       } else {
         if (fromPick.location) endpoints.push(endpointFromLocation(fromPick.location, 'from', 0, startDate, form.departure_time || null))
-        // Keep the itinerary's transfer stops while the route is unchanged (#1065).
-        const stops = keepTransit
+        // A car writes the stops the driver planned; every other type keeps passing the
+        // itinerary's transfer stops through while the route is unchanged (#1065).
+        const carEndpoints = form.type === 'car'
+          ? carStops
+              .filter(s => s.location)
+              .map((s, i) => endpointFromLocation(s.location!, 'stop', i + 1, startDate, s.time || null))
+          : []
+        const stops = keepTransit && form.type !== 'car'
           ? prevEndpointsAll.filter(ep => ep.role === 'stop').slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
           : []
         stops.forEach((s, i) => endpoints.push({
@@ -513,7 +573,9 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
           lat: s.lat, lng: s.lng, timezone: s.timezone ?? null,
           local_date: s.local_date ?? null, local_time: s.local_time ?? null,
         }))
-        if (toPick.location) endpoints.push(endpointFromLocation(toPick.location, 'to', stops.length + 1, endDate, form.arrival_time || null))
+        carEndpoints.forEach(e => endpoints.push(e))
+        const stopCount = stops.length + carEndpoints.length
+        if (toPick.location) endpoints.push(endpointFromLocation(toPick.location, 'to', stopCount + 1, endDate, form.arrival_time || null))
       }
 
       // Flights and trains derive their span from the first/last waypoint; other
@@ -555,11 +617,8 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       // Imported booking → auto-create the linked cost from the parsed price (what the
       // old direct import did). Only on create (not edit) and only when there's a price.
       if (!reservation && prefill && isBudgetEnabled) {
-        const pmeta = prefill.metadata && typeof prefill.metadata === 'object' ? (prefill.metadata as Record<string, unknown>) : {}
-        const price = Number(pmeta.price)
-        if (Number.isFinite(price) && price > 0) {
-          ;(payload as Record<string, unknown>).create_budget_entry = { total_price: price, category: typeToCostCategory(form.type) }
-        }
+        const entry = importedPriceEntry(prefill.metadata, form.type)
+        if (entry) (payload as Record<string, unknown>).create_budget_entry = entry
       }
       const saved = await onSave(payload)
       // Persist the traveler assignment once we have the reservation id (create → save
@@ -603,12 +662,10 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
     try { await deleteBudgetItem(Number(tripId), item.id) } catch { toast.error(t('common.unknownError')) }
   }
 
-  // On an import review (not yet saved), preview the parsed price as the cost that will be linked.
-  const prefillMeta = prefill?.metadata && typeof prefill.metadata === 'object' ? (prefill.metadata as Record<string, unknown>) : null
-  const prefillPrice = Number(prefillMeta?.price)
-  const pendingExpense = !reservation && Number.isFinite(prefillPrice) && prefillPrice > 0
-    ? { total_price: prefillPrice, currency: (prefillMeta?.priceCurrency as string | null) ?? null, category: typeToCostCategory(form.type) }
-    : null
+  // On an import review (not yet saved), preview the parsed price as the cost that will be
+  // linked: the same entry the save sends, so the two cannot name different currencies.
+  const importedEntry = !reservation && prefill ? importedPriceEntry(prefill.metadata, form.type) : null
+  const pendingExpense = importedEntry ? { ...importedEntry, currency: importedEntry.currency ?? null } : null
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -671,15 +728,24 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
       title={automated ? t('transit.title') : reservation ? t('transport.modalTitle.edit') : t('transport.modalTitle.create')}
       size="2xl"
       footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button type="button" onClick={onClose} className="text-content-muted" style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', cursor: 'pointer', fontFamily: 'inherit' }}>
-            {t('common.cancel')}
-          </button>
-          {!automated && (
-          <button type="button" onClick={handleSubmit} disabled={isSaving || !form.title.trim()} className="bg-[var(--text-primary)] text-[var(--bg-primary)]" style={{ padding: '8px 20px', borderRadius: 10, border: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: isSaving || !form.title.trim() ? 0.5 : 1 }}>
-            {isSaving ? t('common.saving') : reservation ? t('common.update') : t('common.add')}
-          </button>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}>
+          <div>
+            {!automated && reservation?.id && onDelete && (
+              <button type="button" onClick={() => setShowDeleteConfirm(true)} className="text-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                <Trash2 size={13} /> {t('common.delete')}
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={onClose} className="text-content-muted" style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', cursor: 'pointer', fontFamily: 'inherit' }}>
+              {t('common.cancel')}
+            </button>
+            {!automated && (
+            <button type="button" onClick={handleSubmit} disabled={isSaving || !form.title.trim()} className="bg-[var(--text-primary)] text-[var(--bg-primary)]" style={{ padding: '8px 20px', borderRadius: 10, border: 'none', fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: isSaving || !form.title.trim() ? 0.5 : 1 }}>
+              {isSaving ? t('common.saving') : reservation ? t('common.update') : t('common.add')}
+            </button>
+            )}
+          </div>
         </div>
       }
     >
@@ -842,7 +908,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                           {writesFlightLegs && (
                             <div>
                               <label className={labelClass}>{t('reservations.confirmationCode')}</label>
-                              <input type="text" value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
+                              <BookingCodeInput value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
                                 placeholder={t('reservations.confirmationPlaceholder')} className={inputClass} />
                             </div>
                           )}
@@ -875,7 +941,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span className="text-content-faint" style={{ fontSize: 'calc(10px * var(--fs-scale-caption, 1))', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', flexShrink: 0 }}>{roleLabel}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <LocationSelect value={wp.location} onChange={l => updateWp({ location: l || null })} />
+                        <LocationSelect value={wp.location} onChange={l => updateWp({ location: l || null })} places={locationPicks} />
                       </div>
                       {!isFirst && !isLast && (
                         <button type="button" onClick={() => setTrainWaypoints(prev => prev.filter((_, j) => j !== i))} aria-label={t('common.delete')} className="text-content-faint" style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4, flexShrink: 0 }}>
@@ -923,7 +989,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                           {writesTrainLegs && (
                             <div>
                               <label className={labelClass}>{t('reservations.confirmationCode')}</label>
-                              <input type="text" value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
+                              <BookingCodeInput value={wp.confirmation_number} onChange={e => updateWp({ confirmation_number: e.target.value })}
                                 placeholder={t('reservations.confirmationPlaceholder')} className={inputClass} />
                             </div>
                           )}
@@ -947,13 +1013,84 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>{t('reservations.meta.from')}</label>
-                <LocationSelect value={fromPick.location || null} onChange={l => setFromPick({ location: l || undefined })} />
+                <LocationSelect value={fromPick.location || null} onChange={l => setFromPick({ location: l || undefined })} places={locationPicks} />
               </div>
               <div>
                 <label className={labelClass}>{t('reservations.meta.to')}</label>
-                <LocationSelect value={toPick.location || null} onChange={l => setToPick({ location: l || undefined })} />
+                <LocationSelect value={toPick.location || null} onChange={l => setToPick({ location: l || undefined })} places={locationPicks} />
               </div>
             </div>
+
+            {/* Stops along the drive — cars only (#1797). The rental frame above stays the
+                pick-up and return; these are the places in between, in order. */}
+            {form.type === 'car' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label className={labelClass}>{t('roadtrip.stops.label')}</label>
+                {carStops.map((stop, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    {/* The order of these stops IS the route: `sequence` is the array index
+                        at save time, so the only way to change which one is driven first
+                        was to delete both and re-enter them. Buttons rather than dragging,
+                        because the row already carries a location picker and a time picker
+                        and there is nothing left to grab. */}
+                    {carStops.length > 1 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => moveCarStop(i, -1)}
+                          disabled={i === 0}
+                          aria-label={t('dayplan.moveUp')}
+                          className="text-content-faint enabled:hover:text-content disabled:opacity-30"
+                          style={{ background: 'none', border: 'none', cursor: i === 0 ? 'default' : 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center' }}
+                        >
+                          <ChevronUp size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveCarStop(i, 1)}
+                          disabled={i === carStops.length - 1}
+                          aria-label={t('dayplan.moveDown')}
+                          className="text-content-faint enabled:hover:text-content disabled:opacity-30"
+                          style={{ background: 'none', border: 'none', cursor: i === carStops.length - 1 ? 'default' : 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center' }}
+                        >
+                          <ChevronDown size={13} />
+                        </button>
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <LocationSelect
+                        value={stop.location}
+                        onChange={l => setCarStops(prev => prev.map((s, j) => (j === i ? { ...s, location: l || null } : s)))}
+                        places={locationPicks}
+                      />
+                    </div>
+                    <div style={{ width: 110, flexShrink: 0 }}>
+                      <CustomTimePicker
+                        value={stop.time}
+                        onChange={v => setCarStops(prev => prev.map((s, j) => (j === i ? { ...s, time: v } : s)))}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCarStops(prev => prev.filter((_, j) => j !== i))}
+                      aria-label={t('roadtrip.stops.remove')}
+                      className="text-content-faint hover:text-danger"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, display: 'flex', alignItems: 'center' }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setCarStops(prev => [...prev, emptyCarStop()])}
+                  className="text-content-faint hover:text-content-secondary"
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '6px 10px', border: '1px dashed var(--border-primary)', borderRadius: 8, background: 'none', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  <Plus size={12} /> {t('reservations.layover.addStop')}
+                </button>
+              </div>
+            )}
 
             {/* Departure row */}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -988,7 +1125,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className={labelClass}>{t('reservations.confirmationCode')}</label>
-            <input type="text" value={form.confirmation_number} onChange={e => set('confirmation_number', e.target.value)}
+            <BookingCodeInput value={form.confirmation_number} onChange={e => set('confirmation_number', e.target.value)}
               placeholder={t('reservations.confirmationPlaceholder')} className={inputClass} />
           </div>
           <div>
@@ -1065,7 +1202,7 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
                 {uploadingFile ? t('reservations.uploading') : t('reservations.attachFile')}
               </button>}
               {reservation?.id && files.filter(f => !f.deleted_at && !attachedFiles.some(af => af.id === f.id)).length > 0 && (
-                <div style={{ position: 'relative' }}>
+                <div ref={filePickerRef} style={{ position: 'relative' }}>
                   <button type="button" onClick={() => setShowFilePicker(v => !v)} className="text-content-faint" style={{
                     display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px',
                     border: '1px dashed var(--border-primary)', borderRadius: 8, background: 'none',
@@ -1121,6 +1258,20 @@ export function TransportModal({ isOpen, onClose, onSave, reservation, days, sel
 
       </form>
       )}
+
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title={t('reservations.confirm.deleteTitle')}
+        message={t('reservations.confirm.deleteBody', { name: reservation?.title ?? '' })}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        onConfirm={async () => {
+          setShowDeleteConfirm(false)
+          await onDelete?.()
+          onClose()
+        }}
+      />
     </Modal>
   )
 }

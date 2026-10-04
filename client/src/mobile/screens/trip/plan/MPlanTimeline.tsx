@@ -2,10 +2,11 @@ import { useRef, useState, type MouseEvent } from 'react'
 import {
   ArrowRight, BedDouble, CalendarDays, CalendarRange, ChevronRight, Compass, LogIn, LogOut,
   MapPin, Pencil, PencilLine, Route, Ticket, TrainFront, Undo2,
-  Car, Footprints, Zap, RotateCcw,
+  Car, Footprints, Zap, RotateCcw, TramFront,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useContextMenu, ContextMenu } from '../../../../components/shared/ContextMenu'
+import MarkdownText from '../../../../components/shared/MarkdownText'
 import { fmtTransitDuration } from '../../../../components/Planner/transitDisplay'
 import { formatTime } from '../../../../utils/formatters'
 import { useMPlanTimeline, type MPlanTimelineController } from './useMPlanTimeline'
@@ -21,6 +22,7 @@ import { Fragment } from 'react'
 import MDancingTrek from '../../../components/MDancingTrek'
 import type { MPlanTimelineProps } from '../MTripShell'
 import type { MergedItem } from '../../../../utils/dayMerge'
+import type { RouteSegment } from '../../../../types'
 import type { Assignment } from '../../../../types'
 import type { ComponentType, ReactNode } from 'react'
 import GoogleMapsIcon from '../../../../components/shared/GoogleMapsIcon'
@@ -41,12 +43,16 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
   const { t, trip, can } = planner
   const canEdit = can('day_edit', trip)
   const editing = shell.mode === 'edit' && canEdit
+  const canEditPlaces = can('place_edit', trip)
   // Per-segment travel mode (#1281): tap a connector → pick the leg's mode.
   const legMenu = useContextMenu()
   const modeIcon = (key: string) => (key === 'walking' ? Footprints : key.startsWith('plugin:') ? Zap : Car)
-  const openLegMenu = (e: MouseEvent, assignmentId: number) => {
+  const openLegMenu = (e: MouseEvent, assignmentId: number, seg: RouteSegment) => {
+    // Public transit sits under the road profiles, as on the desktop (#2398).
+    const transitLeg = tl.transitLegFor(seg)
     legMenu.open(e, [
       ...tl.routeModeOptions.map(o => ({ label: o.label, icon: modeIcon(o.key), onClick: () => tl.setLegMode(assignmentId, o.key) })),
+      ...(transitLeg ? [{ label: t('transit.title'), icon: TramFront, onClick: () => tl.planTransitLeg(transitLeg) }] : []),
       { divider: true },
       { label: t('dayplan.transportMode.useDefault'), icon: RotateCcw, onClick: () => tl.setLegMode(assignmentId, null) },
     ])
@@ -197,7 +203,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
                     reorder={reorderFor(row.item)}
                     drag={dragFor(row)}
                     onOpen={() => openPlace(row.assignment)}
-                    onEdit={() => tl.editAssignment(row.assignment)}
+                    onEdit={canEditPlaces ? () => tl.editAssignment(row.assignment) : undefined}
                     onRemove={() => tl.removeAssignment(row.assignment)}
                   />
                   {dayScheduleFor('assignment', row.assignment.id)}
@@ -249,7 +255,7 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
                 />
               )
             case 'conn':
-              return <ConnRow key={row.key} seg={row.seg} onTap={editing && row.assignmentId != null ? e => openLegMenu(e, row.assignmentId!) : undefined} />
+              return <ConnRow key={row.key} seg={row.seg} onTap={editing && row.assignmentId != null ? e => openLegMenu(e, row.assignmentId!, row.seg) : undefined} />
           }
         })}
 
@@ -276,8 +282,12 @@ export default function MPlanTimeline({ planner, shell }: MPlanTimelineProps) {
             <PlanAction icon={Ticket} label={t('mobileTrip.addBookingShort')} onClick={tl.addBooking} />
             <PlanAction icon={TrainFront} label={t('mobileTrip.addTransportShort')} onClick={tl.addTransport} />
             <PlanAction icon={Route} label={t('dayplan.optimize')} onClick={() => void tl.optimize()} />
-            <PlanAction icon={GoogleMapsIcon} label={t('mobileTrip.googleMaps')} onClick={tl.exportGoogleMaps} />
-            <PlanAction icon={Compass} label={t('mobileTrip.coMaps')} onClick={tl.exportCoMaps} />
+            {tl.canExportRoute && (
+              <>
+                <PlanAction icon={GoogleMapsIcon} label={t('mobileTrip.googleMaps')} onClick={tl.exportGoogleMaps} />
+                <PlanAction icon={Compass} label={t('mobileTrip.coMaps')} onClick={tl.exportCoMaps} />
+              </>
+            )}
           </div>
         )}
       </div>
@@ -323,7 +333,7 @@ function UpNextCard({ tl, t, onOpen }: {
             )}
             <span className="min-w-0 truncate text-[1.125rem] font-bold">{place?.name}</span>
           </div>
-          {sub && <div className="mt-[2px] truncate font-geist text-[0.75rem] text-m-muted">{sub}</div>}
+          {sub && <MarkdownText clamp className="mt-[2px] font-geist text-[0.75rem] text-m-muted">{sub}</MarkdownText>}
         </div>
         <span className="ml-2 flex h-8 w-8 flex-none items-center justify-center rounded-full bg-m-act text-m-actfg">
           <ChevronRight size={16} strokeWidth={2.4} />

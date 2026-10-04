@@ -10,8 +10,10 @@ import { usePluginStore } from '../../store/pluginStore'
 import PluginFrame from '../Plugins/PluginFrame'
 import { useCanDo } from '../../store/permissionsStore'
 import { useTripStore } from '../../store/tripStore'
+import { applyStayStops } from '../../store/stayStops'
 import CustomSelect from '../shared/CustomSelect'
 import CustomTimePicker from '../shared/CustomTimePicker'
+import { BlurredCode, BookingCodeInput } from '../shared/BookingCode'
 import { useSettingsStore } from '../../store/settingsStore'
 import { useToast } from '../shared/Toast'
 import { getLocaleForLanguage, useTranslation } from '../../i18n'
@@ -19,6 +21,7 @@ import type { Day, Place, Category, Reservation, AssignmentsMap } from '../../ty
 import { isDayInAccommodationRange } from '../../utils/dayOrder'
 import { formatClockTime, splitReservationDateTime } from '../../utils/formatters'
 import { useDayDetail } from './useDayDetail'
+import { stayPlaces } from '../../utils/stayPlaces'
 
 const WEATHER_ICON_MAP = {
   Clear: Sun, Clouds: Cloud, Rain: CloudRain, Drizzle: CloudDrizzle,
@@ -452,7 +455,7 @@ function AccommodationList({ dayAccommodations, day, reservations, canEditDays, 
                         )}
                         {acc.confirmation && (
                           <div style={{ flex: 1, padding: '8px 10px', textAlign: 'center' }}>
-                            <div style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>{acc.confirmation}</div>
+                            <div style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}><BlurredCode>{acc.confirmation}</BlurredCode></div>
                             <div style={{ fontSize: 'calc(9px * var(--fs-scale-caption, 1))', color: 'var(--text-faint)', fontWeight: 500, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
                               <Hash size={8} /> {t('day.confirmation')}
                             </div>
@@ -522,7 +525,7 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
       return
     }
     try {
-      await accommodationsApi.update(tripId, accommodation.id, {
+      applyStayStops(await accommodationsApi.update(tripId, accommodation.id, {
         place_id: hotelForm.place_id,
         start_day_id: hotelDayRange.start,
         end_day_id: hotelDayRange.end,
@@ -530,7 +533,7 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
         check_in_end: hotelForm.check_in_end || null,
         check_out: hotelForm.check_out || null,
         confirmation: hotelForm.confirmation || null,
-      })
+      }))
       setShowHotelPicker(false)
       setHotelForm({ check_in: '', check_in_end: '', check_out: '', confirmation: '', place_id: null })
       // Reload
@@ -631,7 +634,7 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
                     </div>
                     <div style={{ flex: 2, minWidth: 120 }}>
                       <label style={{ fontSize: 'calc(9px * var(--fs-scale-caption, 1))', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 3 }}>{t('day.confirmation')}</label>
-                      <input type="text" value={hotelForm.confirmation} onChange={e => setHotelForm(f => ({ ...f, confirmation: e.target.value }))}
+                      <BookingCodeInput value={hotelForm.confirmation} onChange={e => setHotelForm(f => ({ ...f, confirmation: e.target.value }))}
                         placeholder="ABC-12345" style={{ width: '100%', padding: '8px 10px', borderRadius: 10, border: '1px solid var(--border-primary)', background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontFamily: 'inherit', boxSizing: 'border-box', height: 38 }} />
                     </div>
                   </div>
@@ -658,7 +661,8 @@ function HotelPickerModal({ showHotelPicker, setShowHotelPicker, font, t, hotelD
                   {/* Place List */}
                   <div style={{ maxHeight: 250, overflowY: 'auto' }}>
                     {(() => {
-                      const filtered = hotelCategoryFilter ? places.filter(p => p.category_id === hotelCategoryFilter) : places
+                      const offered = stayPlaces<Place>(places, hotelForm.place_id)
+                      const filtered = hotelCategoryFilter ? offered.filter(p => p.category_id === hotelCategoryFilter) : offered
                       return filtered.length === 0 ? (
                         <div style={{ padding: 20, textAlign: 'center', fontSize: 'calc(12px * var(--fs-scale-body, 1))', color: 'var(--text-faint)' }}>{t('day.noPlacesForHotel')}</div>
                       ) : filtered.map(p => (

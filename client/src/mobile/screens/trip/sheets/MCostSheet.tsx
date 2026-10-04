@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Plus, Trash2, Wallet } from 'lucide-react'
+import { Check, ChevronDown, Plus, Trash2, Wallet, Receipt, Paperclip } from 'lucide-react'
 import MSheet from '../../../components/MSheet'
 import CustomSelect from '../../../../components/shared/CustomSelect'
 import { CustomDatePicker } from '../../../../components/shared/CustomDateTimePicker'
@@ -8,8 +8,10 @@ import { Eyebrow, FIELD_AREA_CLS, FIELD_CLS, FormSheetFooter, FormSheetHeader } 
 import { useTranslation } from '../../../../i18n'
 import { useToast } from '../../../../components/shared/Toast'
 import { useTripStore } from '../../../../store/tripStore'
-import { useExchangeRates } from '../../../../hooks/useExchangeRates'
 import { formatMoney, localizeAmountInput, amountToInputString } from '../../../../utils/formatters'
+import { openFile } from '../../../../utils/fileDownload'
+import { saveWithReceipts } from '../../../../components/Budget/receiptUploads'
+import { splitShareLabel, useExpenseFx } from '../../../../components/Budget/expenseFx'
 import { SYMBOLS, SPLIT_COLORS, currenciesWith } from '../../../../components/Budget/BudgetPanel.constants'
 import { COST_CATEGORY_LIST, catMeta } from '../../../../components/Budget/costsCategories'
 import { localToday } from '../../../../components/Planner/today'
@@ -18,7 +20,8 @@ import type { ExpensePrefill } from '../../../../components/Budget/CostsPanel'
 import { payersBalanced, rebalancePayers } from '../../../../components/Budget/CostsPanel.helpers'
 import GuestBadge from '../../../../components/shared/GuestBadge'
 import type { TripMember } from '../../../../components/Budget/BudgetPanelMemberChips'
-import type { BudgetItem } from '../../../../types'
+import { ReceiptPreviewModal } from '../../../../components/Budget/ReceiptPreviewModal'
+import type { BudgetItem, BudgetItemReceipt } from '../../../../types'
 
 export interface MCostSheetProps {
   tripId: number
@@ -55,8 +58,9 @@ export default function MCostSheet({ tripId, base, people, me, editing, prefill,
   const { t, locale } = useTranslation()
   const toast = useToast()
   const { addBudgetItem, updateBudgetItem, deleteBudgetItem } = useTripStore()
-  const { convert } = useExchangeRates(base)
   const sym = (c: string) => SYMBOLS[c] || (c + ' ')
+  // A saved expense without a currency opens in the trip's own (#2525), as on desktop.
+  const { tripCurrency: tripCur, editingCurrency, preview } = useExpenseFx(base, editing)
 
   // Internal open flag so the exit animation still plays even though the parent
   // unmounts us on close.
@@ -72,13 +76,13 @@ export default function MCostSheet({ tripId, base, people, me, editing, prefill,
   const [cat, setCat] = useState<string>(editing ? catMeta(editing.category).key : (prefill?.category || 'food'))
   const [catOpen, setCatOpen] = useState(false)
   const [note, setNote] = useState(() => readUserNote(editing))
-  const [currency, setCurrency] = useState((editing?.currency || base).toUpperCase())
+  const [currency, setCurrency] = useState(editingCurrency)
   const [day, setDay] = useState(editing?.expense_date || localToday())
   // Edit and prefill seeds are padded to the currency's decimals (#2175), same
   // as the desktop modal: a saved 4,90 must reopen as "4,90", not "4,9". A
   // prefill has no currency of its own and is read as `base`.
   const [total, setTotal] = useState<string>(() => {
-    if (editing) return editing.total_price ? amountToInputString(editing.total_price, (editing.currency || base).toUpperCase()) : ''
+    if (editing) return editing.total_price ? amountToInputString(editing.total_price, editingCurrency) : ''
     if (prefill?.amount != null) return amountToInputString(prefill.amount, base)
     return ''
   })
@@ -123,6 +127,24 @@ export default function MCostSheet({ tripId, base, people, me, editing, prefill,
     return m
   })
 
+  const [receipts, setReceipts] = useState<BudgetItemReceipt[]>(() => editing?.receipts || [])
+  const [pendingReceiptFiles, setPendingReceiptFiles] = useState<File[]>([])
+  const [uploadingReceipt, setUploadingReceipt] = useState(false)
+  const [previewReceipts, setPreviewReceipts] = useState<{ receipts: BudgetItemReceipt[]; initialIndex: number } | null>(null)
+
+  const handleReceiptFileSelect = (files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return
+    setPendingReceiptFiles(prev => [...prev, ...Array.from(files)])
+  }
+
+  const handleRemoveReceipt = (receiptId: number) => {
+    setReceipts(prev => prev.filter(r => r.id !== receiptId))
+  }
+
+  const handleRemovePendingReceipt = (index: number) => {
+    setPendingReceiptFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   const [saving, setSaving] = useState(false)
   const [deleteArmed, setDeleteArmed] = useState(false)
 
@@ -130,6 +152,7 @@ export default function MCostSheet({ tripId, base, people, me, editing, prefill,
   const ticketInfo = useMemo(() => calculateTicketShares(ticketItems), [ticketItems])
 
   const totalNum = isTicketMode ? ticketInfo.total : (Number.parseFloat(total) || 0)
+  const fx = preview(totalNum, currency)
   const splitSum = [...participants].reduce((sum, id) => sum + (Number.parseFloat(customAmounts[id]) || 0), 0)
   const customBalanced = Math.round(splitSum * 100) === Math.round(totalNum * 100)
   const each = participants.size > 0 ? totalNum / participants.size : 0
@@ -270,12 +293,20 @@ export default function MCostSheet({ tripId, base, people, me, editing, prefill,
       ...(!editing && prefill?.placeId ? { place_id: prefill.placeId } : {}),
     }
     try {
-      if (editing) await updateBudgetItem(tripId, editing.id, data)
-      else await addBudgetItem(tripId, data)
+      setUploadingReceipt(pendingReceiptFiles.length > 0)
+      await saveWithReceipts(tripId, pendingReceiptFiles, editing ? editing.id : null, ids => (
+        editing
+          ? updateBudgetItem(tripId, editing.id, { ...data, receipt_file_ids: [...receipts.map(r => r.id), ...ids] })
+          : addBudgetItem(tripId, { ...data, receipt_file_ids: ids })
+      ))
+      setPendingReceiptFiles([])
       onSaved()
-    } catch {
-      toast.error(t('common.unknownError'))
+    } catch (err) {
+      const stuck = (err as { stuckReceiptIds?: number[] })?.stuckReceiptIds
+      toast.error(stuck?.length ? t('costs.receiptLeftBehind', { count: stuck.length }) : t('common.unknownError'))
       setSaving(false)
+    } finally {
+      setUploadingReceipt(false)
     }
   }
 
@@ -375,12 +406,18 @@ export default function MCostSheet({ tripId, base, people, me, editing, prefill,
         </div>
 
         {/* CONVERSION HINT */}
-        {currency !== base && totalNum !== 0 && (
+        {fx && (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[12px] border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] px-3 py-[9px] text-[0.71875rem] text-m-muted">
             <span>{formatMoney(totalNum, currency, locale)}</span>
-            <span className="text-m-faint">≈</span>
-            <span className="font-semibold text-m-ink">{formatMoney(convert(totalNum, currency), base, locale)}</span>
-            <span className="text-m-faint">· {t('costs.liveRate')}</span>
+            {fx.inTrip != null && <>
+              <span className="text-m-faint">→</span>
+              <span className={fx.shown == null ? 'font-semibold text-m-ink' : undefined}>{formatMoney(fx.inTrip, tripCur, locale)}</span>
+            </>}
+            {fx.shown != null && <>
+              <span className="text-m-faint">≈</span>
+              <span className="font-semibold text-m-ink">{formatMoney(fx.shown, base, locale)}</span>
+              <span className="text-m-faint">· {t('costs.liveRate')}</span>
+            </>}
           </div>
         )}
 
@@ -617,12 +654,12 @@ export default function MCostSheet({ tripId, base, people, me, editing, prefill,
             <div className="mt-2 text-[0.71875rem]">
               {splitMode === 'equally' ? (
                 <span className="text-m-faint">
-                  {participants.size > 0 && t('costs.splitSummary', { count: participants.size, amount: sym(currency) + each.toFixed(2) })}
+                  {participants.size > 0 && t('costs.splitSummary', { count: participants.size, amount: splitShareLabel(each, currency, fx, participants.size, base, sym, locale) })}
                 </span>
               ) : (
                 <span className={`font-semibold ${customBalanced ? 'text-[color:var(--m-st-confirmed)]' : 'text-[color:var(--m-st-danger)]'}`}>
                   {customBalanced
-                    ? t('costs.splitSummary', { count: participants.size, amount: sym(currency) + each.toFixed(2) })
+                    ? t('costs.splitSummary', { count: participants.size, amount: splitShareLabel(each, currency, fx, participants.size, base, sym, locale) })
                     : `${sym(currency)}${splitSum.toFixed(2)} / ${sym(currency)}${totalNum.toFixed(2)}`}
                 </span>
               )}
@@ -641,6 +678,77 @@ export default function MCostSheet({ tripId, base, people, me, editing, prefill,
           placeholder={t('costs.notePlaceholder')}
           className={FIELD_AREA_CLS}
         />
+
+        {/* RECEIPTS */}
+        <div className="mb-[6px] mt-4 flex items-center justify-between">
+          <Eyebrow className="uppercase">{t('costs.receiptsTitle') || t('costs.receipts')}</Eyebrow>
+          <label className="flex cursor-pointer items-center gap-1 text-[0.75rem] font-semibold text-m-ink">
+            <input
+              type="file"
+              multiple
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={e => {
+                handleReceiptFileSelect(e.target.files)
+                e.target.value = ''
+              }}
+            />
+            <span className="flex items-center gap-1 rounded-full border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] px-2.5 py-1 text-m-muted">
+              <Plus size={12} /> {t('costs.attachReceipt')}
+            </span>
+          </label>
+        </div>
+
+        {uploadingReceipt && (
+          <div className="mb-2 text-[0.75rem] text-m-faint">
+            {t('common.saving')}...
+          </div>
+        )}
+
+        {receipts.length === 0 && pendingReceiptFiles.length === 0 ? (
+          <div className="py-1 text-[0.75rem] text-m-faint">
+            {t('costs.noReceipts')}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5 pb-2">
+            {receipts.map((r, rIdx) => (
+              <div key={r.id} className={ROW_CLS}>
+                <button
+                  type="button"
+                  onClick={() => setPreviewReceipts({ receipts, initialIndex: rIdx })}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                  <Receipt size={14} className="flex-none text-m-faint" />
+                  <span className="truncate text-[0.8125rem] font-medium text-m-ink">{r.original_name}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveReceipt(r.id)}
+                  title={t('costs.deleteReceipt')}
+                  className="flex-none p-1 text-m-muted hover:text-red-500"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            {pendingReceiptFiles.map((file, idx) => (
+              <div key={idx} className={ROW_CLS}>
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <Paperclip size={14} className="flex-none text-m-faint" />
+                  <span className="truncate text-[0.8125rem] font-medium text-m-ink">{file.name}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemovePendingReceipt(idx)}
+                  title={t('costs.deleteReceipt')}
+                  className="flex-none p-1 text-m-muted hover:text-red-500"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <FormSheetFooter
@@ -653,6 +761,14 @@ export default function MCostSheet({ tripId, base, people, me, editing, prefill,
         submitLabel={submitLabel}
         submitDisabled={!valid || saving}
       />
+
+      {previewReceipts && (
+        <ReceiptPreviewModal
+          receipts={previewReceipts.receipts}
+          initialIndex={previewReceipts.initialIndex}
+          onClose={() => setPreviewReceipts(null)}
+        />
+      )}
     </MSheet>
   )
 }
