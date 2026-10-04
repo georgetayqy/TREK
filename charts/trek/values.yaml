@@ -36,10 +36,10 @@ env:
   # Supported: de, en, es, fr, hu, nl, br, cs, pl, ru, zh, zh-TW, it, ar
   # ALLOWED_ORIGINS: ""
   # NOTE: If using ingress, ensure env.ALLOWED_ORIGINS matches the domains in ingress.hosts for proper CORS configuration.
-  # APP_URL: "https://trek.example.com"
+  APP_URL: "https://trek.georgetay.com"
   # Public base URL of this instance. Required when OIDC is enabled — must match the redirect URI registered with your IdP.
   # Also used as the base URL for links in email notifications and other external links.
-  # FORCE_HTTPS: "false"
+  FORCE_HTTPS: "true"
   # Optional. When "true": HTTPS redirect, HSTS, CSP upgrade-insecure-requests, secure cookies. Only behind a TLS proxy. Requires TRUST_PROXY.
   # HSTS_INCLUDE_SUBDOMAINS: "false"
   # When "true": adds includeSubDomains to the HSTS header. Only effective when HSTS is active. Leave "false" if sibling subdomains still run over plain HTTP.
@@ -51,19 +51,19 @@ env:
   # Session length when "Remember me" is ticked: a longer-lived JWT + persistent cookie that survives browser restarts. Same format as SESSION_DURATION. Defaults to 30d.
   # TRUST_PROXY: "1"
   # Trusted proxy hops for X-Forwarded-For/X-Forwarded-Proto. Defaults to 1 in production. Must be set for FORCE_HTTPS to work.
-  # ALLOW_INTERNAL_NETWORK: "false"
+  ALLOW_INTERNAL_NETWORK: "true"
   # Set to "true" if Immich or other integrated services are hosted on a private/RFC-1918 network address.
   # Loopback (127.x) and link-local/metadata addresses (169.254.x) are always blocked.
   # ALLOW_LINK_LOCAL_IPS: ""
   # Comma-separated single link-local addresses TREK may reach after all, e.g. "169.254.1.2" for a host gateway.
   # 169.254.169.x and 169.254.170.x (cloud metadata) cannot be listed; an invalid entry aborts startup.
-  # OIDC_ISSUER: ""
+  OIDC_ISSUER: "https://dev-afsb2o3i7tkdltn6.us.auth0.com/"
   # OpenID Connect provider URL.
-  # OIDC_CLIENT_ID: ""
+  OIDC_CLIENT_ID: "O1J2g1uRfRAzVpRusigJGyhfu2mRCTIz"
   # OIDC client ID.
   # OIDC_DISPLAY_NAME: "SSO"
   # Label shown on the SSO login button.
-  # OIDC_ONLY: "false"
+  OIDC_ONLY: "true"
   # Set to "true" to force SSO-only mode: disables password login and password registration.
   # Overrides the granular toggles in Admin > Settings and cannot be changed at runtime.
   # First SSO login becomes admin on a fresh instance.
@@ -147,7 +147,7 @@ secretEnv:
 generateEncryptionKey: false
 
 # If set, use an existing Kubernetes secret that contains ENCRYPTION_KEY
-existingSecret: ""
+existingSecret: "trek-secret"
 existingSecretKey: ENCRYPTION_KEY
 
 # Provision the app secret via a Bitnami SealedSecret CR instead of a plain
@@ -161,10 +161,10 @@ existingSecretKey: ENCRYPTION_KEY
 sealedSecret:
   enabled: true
   encryptedData:
-    ADMIN_EMAIL: AgAssfjfCQ++iNUGUUelYlr88J7bTJzoTJQwbkmkenpmelKb2m3ZE8eV7rtcagGJbpDa63bvG2+w4J73SjUQ54P9duGONRnTuSeRGgOGp+OkDCEg8OMmc/ZMfoSYMDiODwMVR81qMq6oKNPb10gL0GuRjgCrJrrWdxOhhh83OSl2IXGBNl5mxZ3LkEJo6l5aOi0d74IONy9XHc5wCeMWWz45F5l98ZvELf7a7nWHSmhOXd0ZZI7Fz3as8hRupuWrWNm+LU6pu3g4radHlyE1jUFVjoMv3UD7Ib/6pPuDd4R4XaCSqCGLOCN2CExkT0sPgFl9dRSIw7eIwj1LF4/zz/TbdnhuXAv0TBAw7svdzthAO/QWoymdh9EQ38pW9TrvZws/fZtrtw1qFvkJQSSWEja1P86y5jRq1nza4nkAMVJ310yQcbYoweyeEs/votL0UfQOFHzi9nAcXHmpy8O/pwUsJxtw4hCHOLFF9bjf+//9FwJaTVkTO7cKPTzOJEVvcduO3FseYXluxDwnyyshMs0sB/zAfgisQ9y3AOl5l2t3z4rbxlFYU+HwdtarUELYppb4LcFKr3yZWnGBSJqXJQe0iKg6GTGdyw3vAlmzrMarT/NuZvib1660+hgq3r4I6F4dtLqBP5FlRLFUSY2ZxrVsvnPJlRTKeZlnXfi1C8WEPghd2R4zysN/hTYlTZbmYDK3IJvK1fkkhoAh3ZqoNTun4COyDZw=
-    ADMIN_PASSWORD: AgCNM8Oi6MHUHOcn+FtGDTMFuQThBs68kQQ1rZPhu12O/5ezxTDeH+IWU3mzEgO61xpiZ03R+l4pFPKudTSnhRbdqsPpckig78nNlsgPe3L/uBnPJ8jKvxCUIorp2fOy+gSY7Ar9ZYqNqadWDm7wqnYMZkdbLWEsSSXYNfrH8jDq4h0AERJUHVon8A9gZ+6PNEQLKrAp2ZaASqEt6iQyJ7aPdYm3TPTFfn4wyuVCzTcWdhSKUwYv6Flp/CHf4tPwUmht4Mnp1C18EUyJvvYX/NHIrxLES4eWNu0Ev8ikac9/RTaoHk99XDI6hzbWN6KoVI9uFUFNfNfj36HQSRwHjvODchD/BbMSzkoE9QjodQFewG4vmaBQh1pn94HEndqxgfCtsTIpOHGgakxSUoprcoEt/7rNeo4pqEsi8gTjJkcYnTV9inS3ZIEAJ+5sTITK+BMmT/5xm9sbB1hfmOYOWp4l3T/wYBv2NVYWPEbQdcT2TgddoBwHVrp2u9K9a13zykDbPhBS4h2Bp3CTPeQT0W//CSEN7hgv7vi2KvqBhirJ7KL5hJedr2SSMoHnpqxVMVoUZzDn24p4FEh1AzNckpq6AJH3ZmO5PzTANMG6lheL+S7PEs2vKMkUrNv2Tu6h4ctt0E8K/YVV3+HQT/YSmsKktH5WtbPyst6eXKQxQJhxEq1g/k5Ao3nQuoqejR1uOkPgw5amLhxx0Rzs9SUdpAh/XKG4RaLD
-    ENCRYPTION_KEY: AgArMCmPs8v4TTVHOMtya1Q/3CP2xgiEMU2VCERQ1y8T7e3RkolJ1pUBGS0zW6oslxhyzZETiquQW1LVbzzI25WOU0PTTgRIcaadqtaYbdgc6pxa0z+SIPoFQw3IeMRGDYJsBgOpCCQGi4xTYQibpfqkLfYgOcgWVluZ1Ufitvxl1YOyuPW4QVC253yJdLsvE0ms2nHEpwdkoPaGCAN3wREji+zkPJovXceLjTz8icBsms8UzGpuenMXczsCXY3QnAoycjoKIHz99qNi0MLkLOKy5qZmYIe9BhHgZQCfha7aty7c8MOx9aJbumxVOqqjk3Fuqp9+hVNCk9rKaDvHErJyE6mp9QVi6k1bfnvP8xaagZ1zNNgaWZsaUSiGFwdcFs3OU0r/oufyQGebpHWvKHvCH4jhaAaBV8/5IKrVhHMWAu6o85MtU4Qewn42FV22MqDHtHff+biPkXlciKRbCubiRalVltDapxZ86Z4QYyrO0+JWgUdbsQqOhvNFHm9N1/Xf8yjM6vF0YmT5cstRhxmD4DLvQJo4yvWNtC+enZ1oSlmlbNsdN6+55xq6XdAMHn9uxcLoUy2ERVElgt2MYQSCz+7EFv5hTEoGcYSBw7WQArkIsx+K3clgDADNzQl9x7CNsifDuTFC+99dc6rw+OPpxH1uG5eUif/st+d+F6g2IybP1zyid+tu6BuMWVv0McE=
-    OIDC_CLIENT_SECRET: AgBJ2BcLPgf30IeZfvRnnkIn5bvYL+3NzBsZ6ndqEyoP40Kdka7gfoM63V9ytYd2nIDJMRR44tyZz6PILnOFRRzK7uxmoC/OHW6KZhR3S2RFrt4VNQsfOurFyjYBzJ3Q9LIGCvTtld2iphjbsTukPZq6O1A69y3/yxJFqRy5P4dbkCqIq2FZ1/ZJo1pIBMm5EI/1ykPhFHYp35zTZ4hf+Xa+yuCbHIqEHBUFlWrLdP3xdAMpI93u2VO4yH+8Htrz40fQDtsslvV+dXUtN8pOArNEbiiRFU0QUE8GGntLboR8ty3klFNg9hxqAZrUnkA+9jYmiQOAOXD8GdWakXe2yQAMEaDjyvDngChXMJMBffOC7tM4pzxdMUy349c3UmQI0qhz5BwDNDq8oQX0rsjJOGiY9lEEvH3/mhFYBJOSxrYTs9otOBEiglQPCm2rSkorGsIyKovvA/rzbTi0vrCe9PoN+wj6l8JxYK9Ds9Mi+AdfblYilMGDHojOssWBuG2bpsGpUwn84vyari94QN3YrDMnu2677mCrDVySaheD4bhx7yVXVVxiAPIJaZyzORC2FqIVV/k3AowMK2sJShDU7LpwXRybq61mH2RjRHjBSjjPfofDQV0jrF1qNBgU0f6PrDO/y8AhEi9SF5EG5SYdSsTYgVWSrq4UxaMRjr/JgTVn88iOpLYlwP3w7gwgYK/WxbHHVe7/JTA3wL0xCuJ7JHnHECjAxEpy4Y1T3UtUWb6lNOHV52+Iny4+l/1JAPvamG2vzVZ70Kz2h+p4WLc2OGWy
+    ADMIN_EMAIL: AgBsTF2+Vkm4ZPbXPNm02l1cBKdxjQORkw66tdJMYKEDtHl2KWxyOlwMZqEIpYrnbnGODCkwnpuphBmHYnFqYYWUGUP1ngNKp4F+wwDrRzZeurp6F3C0LTDhfSxmpmMqC7Cz3WwFYqBDg1C0lpwGwYBpijFU4xBn8A4YOyZfD7rxgNHEe5QuwH3FVY5oxj0PxYAAo2oG2UJibEUCdVNKeD+9qiYAtDzf8O16gFQR5aiXIVvhn4V1UzXvKi0NVtp7RpYCUR7pvY54pCQL3TKDaddoeofOuDc79prsdcnIb0dy8l4ba4ltxfRWDBr+RPnQlWHA1CkALphY+rRFUal3HxXPu6imtHK5pJ249JgrkHf5Q3u0IjkoJy5M//COAlBSxfyl/SO6zTWfEv7+wf0l1s05N6MnSZ3r7iNOV8QPtt7FdVoRvJVzpOrR7mtwhGU/sse6CL4bWw2frv12V1NfF8NGEe1DpY/fZJpCZHeEVn8SZWBi0zpzz+TdaSNLCgWvAsKqTsl9asykSDinD4BXrYlEFg8QOOJihSF6q+5Z3D9kM3s29kmOLgK7byghfb3OVD+iSVHOrgHOpyki80Ciak++quPTt3YysWnp2R0qrHAwTE04eurtVEXwHwJKC9GIi8iQNBKQPy1aNfMixx9c1zfVnhHVSrqjlXkIwD+ZLKqfOeqx8x4/4k2HVT8ATgvuxFlbxijDGhDArSHxhE8Ar13XMPyHyx4=
+    ADMIN_PASSWORD: AgAzvy2XIx67SC257LeuvV4cH9ybZ0W5AzfKxJc22znUmkzByAoVE6tPPB9vd7TKRQUX7wBvyLWDnI0G5Ozg4lmmCrtPfoSNgJjIaFTbYG86CiqntduIdKpCzl+PHBv3Z3aFpNpO9//ne+FFS34ZnTwYRTWtZjV+A09kwP33zl0Xza8HgtgTAWXDQcW6tV+nQObAFodQNUA31+aWGNqCsSrrThF8vX7A2HTisMlbIPVXmc86XSq1uOygXX2Cy4OV4TNG9WKc0yyirC2ImSsj03hA58yLpfaX4XAMsh6nDrdtud1Bj9qiXCo8k5/pPSw/BWHbwXFfhFt0LuvIoMAxPI+AOAJHhFLUxqAT+stwFVmkURs4/08WksLyK8Hb7v5oFXXTOoH8okzx+J0Y3zpNw1nIWqlY2kjA5qyKtuFuALSKa5OKCHe+nbQrKvOM94dCLYgL9Of/V4p96ubag2EWfW0avj0dxY8/ogDi4PuGbU/JLqV+7yG6PP/vdvbmm4RaHs/SPpBLO+OizGNDjBQQPZOu5DOwWiD/w96ImFL9PlC7TZ9fQQjANBtU5HyBdrgCVWgMJBO80yRy6ACYZJGLvOEpCD5aTvasOj4ciflQ2ymOLhta5ccBmQDbeKYbVICQzPJEB9/H9xS4JsYcLABy2HpbbcF9VnYatEE2P06SFbOfWruouvpWpXrLIXOQltTznsizfgRZqneLsMXcq98GxZygLVeI5GYk
+    ENCRYPTION_KEY: AgALeXZvg7+b2eouQLGQ6OplBVnLQKV4s0Ag1Aus5H/C6+ZBvzz9z0f5RgfJ6oBI0OGHHlHyB2Pn8/eSDG7QfBWQTXwU2xMCEfynUF/LiFhFomRMRmYE0+KYPH5Q0OxqI/7ICZuaRMrQNKux9COQO296CMJU+bloHW5400trvA+7pL0yQbRFHIOIGSbP6B4ij0E80iEhG3hBEiTGgu8y3flp+czsczeKp2flJ4nat+gddgI3FAdkqJKdB9Hfz/L0Tv+RV6HSWqZeL33ITNvVehBs54xDu38msRLCaS2hZ/OubQCClTEEOMKmYgqRwTIDvEZckfeycNP0K8IFqjEL2WgSqbUECQrBcDzfSh01CtzVhtLwqCO2Kg0rTwsLPYqVKeM3l4mVzqjZjyPCTQm43i1B6ecVQueADC1Xrepy3Jz8QbZKSUQz2WOmZuLtq0sONcg5UzoejOPDMMC+Ll7ZTvCqz57TDcHhK0a7bZ32XEh7YtESCiC8kvCHVnfRcnhUEDuWXmLgzR6kzzihi4/+RxfVeS2/94WCt2d9u/ysmsf5qy497s6DqhS/rI3LCmh4nf5+6o1fq0fEIn4IJ8j3VKOL84+AqwqBfI8zcW/11UnDP9P3o7J6UHEPceTMYxZzD4b5ZbMCs8YRnGt0sJfw6xPlNSQyYe08EVA4hOH7lCboL+9JgAyO0I8Pc+Xs7MnRkNyxSVPLLPpwGeMeGOt4tgfkNHrsvS6kQRIRVYjzIjnIPpWHag57pDhszghQsCac6hKXvEFNyYQXP0oXQVT8eUs6VA==
+    OIDC_CLIENT_SECRET: AgBamcBSIOjdSrTAIFA035Zw3H0h8NrbtsmqpKSBNWBLyDoIHYnePw81BAgwtvR7s/jHfvBgK0bcTlvOkkkhki96fEhgu8sNmsfh7bhIjQeaZsbdD3e/dacIifkpKSRwapRK9VXKawLent17DUHVAIRyQpfSLS4rmRBw+GhO3R3FX2TB96kHVJ9VZ/tvW3KWikh054S5zO/hBhSwcfZ/CYt6N9bBFqLtCZdSqWY1j9rDqLGbvPtvcPZMuNZ0cP/kmtV8r/ZU+oq/WaYni8x/jLxbkRHdwWjkhttUPzOpAlFGeEKT+slHQqDJ6x/RHWTReE9ycq4yUkFrbC9Ngi45XKU3RHMViwRZqgnG57YEH3I70WSGEmKuC+ws2TLDROO4R4oLFHKhoyJ3hNEfujZiGzNKNFTbq/mEuugzOq6kFm9a8ITtv2a21TlO6nWjqSA6ahoN6DXlxGr+ySIwbVmJH5q/hpRNvmMiJmjwg1WLZxIhhZ0ejQ79+AenUROv44pWsN0kpJS8X8oldfpZXteRPjEs6uP46c2VsZL2NC+lR72QnuA6XF17gUOjoSJF5Cg7HEHcgoYiiiR3UDhi7cEGVWp/WfTs14WjULu2lhOLIhD+hu1OuL23IkS5PBsq/vI/59QspMc0gyD7Yuyh6zrH9679RIqKxhuL+lbEkdOCgIDcG+YgtbNoFrhT9lhJH8AE7J4VGa+Ttg7YP8dRDIcy/Knu9dSkKAL6VQPJBs4JPa+H1gzFB0F6HsFtYhG2+tPaxIErcdkhDMeVKQG1jZW9EVgR
 
 persistence:
   # When disabled, volumes fall back to an ephemeral emptyDir (data lost on pod restart).
