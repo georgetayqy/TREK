@@ -57,11 +57,11 @@ env:
   # ALLOW_LINK_LOCAL_IPS: ""
   # Comma-separated single link-local addresses TREK may reach after all, e.g. "169.254.1.2" for a host gateway.
   # 169.254.169.x and 169.254.170.x (cloud metadata) cannot be listed; an invalid entry aborts startup.
-  OIDC_ISSUER: "https://dev-afsb2o3i7tkdltn6.us.auth0.com/"
+  OIDC_ISSUER: "https://auth.georgetay.com/"
   # OpenID Connect provider URL.
   OIDC_CLIENT_ID: "O1J2g1uRfRAzVpRusigJGyhfu2mRCTIz"
   # OIDC client ID.
-  # OIDC_DISPLAY_NAME: "SSO"
+  OIDC_DISPLAY_NAME: "SSO"
   # Label shown on the SSO login button.
   OIDC_ONLY: "true"
   # Set to "true" to force SSO-only mode: disables password login and password registration.
