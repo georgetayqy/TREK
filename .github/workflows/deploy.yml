@@ -194,8 +194,7 @@ jobs:
             --create-namespace \
             --set image.repository="$DOCKERHUB_REPO" \
             --set image.tag="${{ needs.version-bump.outputs.version }}" \
-            --set persistence.data.storageClassName=local-path \
-            --set persistence.uploads.storageClassName=local-path \
+            -f charts/trek/values-talos.yaml \
             --force-conflicts \
             --wait --timeout 5m
 
