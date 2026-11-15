@@ -73,3 +73,8 @@ minio-licence.key
 
 # ignore values file
 charts/trek/values.yaml
+
+# plaintext secrets, never commit
+charts/*/secret-plain.yaml
+charts/*/templates/out.yaml
+charts/*/templates/secret-new.yaml
