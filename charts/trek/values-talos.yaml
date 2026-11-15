@@ -19,8 +19,10 @@ sealedSecret:
 
 persistence:
   data:
+    size: 50Gi
     storageClassName: local-path
   uploads:
+    size: 50Gi
     storageClassName: local-path
 
 # Traefik on Talos; TLS is terminated at Cloudflare (no cert-manager / external-dns).
