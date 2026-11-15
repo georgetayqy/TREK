@@ -23,12 +23,13 @@ spec:
         fsGroup: 1000
       initContainers:
         - name: wait-for-db
-          image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag }}"
+          # pg_isready ships in the Postgres image the database itself runs on.
+          image: {{ if .Values.db.cnpg.enabled }}{{ .Values.db.cnpg.imageName | quote }}{{ else }}"{{ .Values.db.image.repository }}:{{ .Values.db.image.tag }}"{{ end }}
           command:
             - sh
             - -c
             - |
-              until pg_isready -h {{ include "airtrail.dbFullname" . }} -p 5432 -U "$POSTGRES_USER"; do
+              until pg_isready -h {{ include "airtrail.dbHost" . }} -p 5432 -U "$POSTGRES_USER"; do
                 echo "waiting for db..."
                 sleep 2
               done
@@ -45,6 +46,15 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ include "airtrail.secretName" . }}
+          {{- if .Values.db.cnpg.enabled }}
+          env:
+            # Explicit env wins over envFrom: use the credentials CNPG generated, not the sealed DB_URL.
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "airtrail.dbFullname" . }}-app
+                  key: uri
+          {{- end }}
           ports:
             - name: http
               containerPort: 3000

@@ -45,10 +45,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
-{{- define "airtrail.dbUrl" -}}
-{{- if .Values.secret.dbUrl -}}
-{{- .Values.secret.dbUrl -}}
+{{/* Host of the Postgres the app talks to: the CNPG read-write service, or the bundled db Service. */}}
+{{- define "airtrail.dbHost" -}}
+{{- if .Values.db.cnpg.enabled -}}
+{{- printf "%s-rw" (include "airtrail.dbFullname" .) -}}
 {{- else -}}
-{{- printf "postgres://%s:%s@%s:5432/%s" .Values.env.dbUsername .Values.secret.dbPassword (include "airtrail.dbFullname" .) .Values.env.dbDatabaseName -}}
+{{- include "airtrail.dbFullname" . -}}
 {{- end -}}
 {{- end -}}

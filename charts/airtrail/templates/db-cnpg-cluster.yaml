@@ -1,0 +1,26 @@
+{{- if .Values.db.cnpg.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "airtrail.dbFullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "airtrail.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db
+spec:
+  instances: {{ .Values.db.cnpg.instances }}
+  {{- with .Values.db.cnpg.imageName }}
+  imageName: {{ . | quote }}
+  {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.env.dbDatabaseName | quote }}
+      owner: {{ .Values.env.dbUsername | quote }}
+  storage:
+    size: {{ .Values.db.persistence.size }}
+    {{- with .Values.db.persistence.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+  resources:
+    {{- toYaml .Values.db.resources | nindent 4 }}
+{{- end }}
