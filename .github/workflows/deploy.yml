@@ -24,7 +24,7 @@ jobs:
       version: ${{ steps.bump.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -92,19 +92,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
@@ -126,26 +126,26 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Get GKE credentials
-        uses: google-github-actions/get-gke-credentials@v2
+        uses: google-github-actions/get-gke-credentials@v3
         with:
           cluster_name: ${{ env.GKE_CLUSTER }}
           location: ${{ env.GKE_LOCATION }}
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       - name: Helm upgrade
         run: |
@@ -165,20 +165,14 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v3
+        uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-          ping: talos.tail47a089.ts.net
-
-      - name: Check Kubernetes API reachability
-        run: |
-          tailscale status
-          nc -vz -w 5 talos.tail47a089.ts.net 6443
 
       - name: Configure kubeconfig
         run: |
@@ -191,14 +185,25 @@ jobs:
           KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
-      - name: Helm upgrade
+      - name: Helm upgrade TREK
         run: |
           helm upgrade --install "$HELM_RELEASE" ./charts/trek \
             --namespace "$K8S_NAMESPACE" \
             --create-namespace \
             --set image.repository="$DOCKERHUB_REPO" \
             --set image.tag="${{ needs.version-bump.outputs.version }}" \
+            --set persistence.data.storageClassName=local-path \
+            --set persistence.uploads.storageClassName=local-path \
             --force-conflicts \
+            --wait --timeout 5m
+
+      - name: Helm upgrade airtrail
+        run: |
+          helm upgrade --install airtrail ./charts/airtrail \
+            --namespace airtrail \
+            --create-namespace \
+            --set db.persistence.storageClass=local-path \
+            --set airtrail.persistence.uploads.storageClass=local-path \
             --wait --timeout 5m
