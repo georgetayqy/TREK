@@ -8,6 +8,9 @@ db:
   cnpg:
     instances: 1
     imageName: "ghcr.io/cloudnative-pg/postgresql:18"
+    # PodMonitor so Prometheus scrapes the Postgres instances (skipped if the Prometheus Operator CRDs are absent).
+    podMonitor:
+      enabled: true
   persistence:
     size: 10Gi
     storageClass: ""  # "" = cluster default

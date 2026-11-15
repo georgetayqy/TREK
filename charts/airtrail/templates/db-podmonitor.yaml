@@ -1,0 +1,17 @@
+{{- if and .Values.db.cnpg.podMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "airtrail.dbFullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "airtrail.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: {{ include "airtrail.dbFullname" . }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+{{- end }}
