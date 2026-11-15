@@ -119,6 +119,8 @@ jobs:
 
   deploy-gke:
     name: Deploy to GKE via Helm
+    # Skipped: production now runs on the Talos cluster (deploy-tailscale). Remove to re-enable.
+    if: false
     needs: [version-bump, build-and-push]
     runs-on: ubuntu-latest
     permissions:
