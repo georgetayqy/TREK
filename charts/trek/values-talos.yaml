@@ -1,7 +1,7 @@
 # Overrides for the Talos cluster. Use after the base file:
 #   helm upgrade --install trek ./charts/trek -f charts/trek/values-talos.yaml
 env:
-  APP_URL: "https://trek-new.georgetay.com"
+  APP_URL: "https://trek.georgetay.com"
   # Cloudflare terminates TLS and cloudflared hands Traefik plain http (Traefik does not trust
   # X-Forwarded-Proto here), so the app's own HTTPS redirect loops forever. Keep cookies secure.
   FORCE_HTTPS: "false"
@@ -38,7 +38,7 @@ ingress:
     external-dns.alpha.kubernetes.io/hostname: null
     nginx.org/client-max-body-size: null
   hosts:
-    - host: trek-new.georgetay.com
+    - host: trek.georgetay.com
       paths:
         - /
   tls: []

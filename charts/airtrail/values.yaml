@@ -35,7 +35,7 @@ airtrail:
     className: "traefik"
     annotations: {}
     hosts:
-      - host: airtrail-new.georgetay.com
+      - host: airtrail.georgetay.com
         paths:
           - path: /
             pathType: Prefix
