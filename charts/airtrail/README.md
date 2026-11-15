@@ -1,83 +1,108 @@
 # AirTrail Helm Chart
 
-Deploys [AirTrail](https://github.com/johly/airtrail) with its PostgreSQL
-database on Kubernetes. Converted from the upstream `docker-compose.yml` and
-`.env` sample.
+Deploys [AirTrail](https://github.com/johly/airtrail) on Kubernetes, with its
+PostgreSQL database managed by the [CloudNativePG](https://cloudnative-pg.io)
+operator. Originally converted from the upstream `docker-compose.yml`.
+
+## Requirements
+
+- The **CloudNativePG operator** must be installed (and its CRDs present)
+  before this chart, because the chart creates a `postgresql.cnpg.io/v1`
+  `Cluster`. On the Talos cluster it is deployed by Argo CD from
+  `personal-cluster/services/cloud-native-postgres-operator`.
+- The **Sealed Secrets** controller, because `airtrail-secret` ships as a
+  `SealedSecret`.
+- An ingress controller matching `airtrail.ingress.className` (Traefik on the
+  Talos cluster).
 
 ## What it creates
 
-- `Secret` — holds `ORIGIN`, `DB_URL`, `DB_PASSWORD`, and the other values
-  from the sample `.env`, based on `values.yaml`.
-- `Deployment` + `Service` + `PersistentVolumeClaim` for PostgreSQL
-  (equivalent to the `db` compose service / `db_data` volume).
-- `Deployment` + `Service` + `PersistentVolumeClaim` for AirTrail itself
-  (equivalent to the `airtrail` compose service / `uploads` volume), with an
-  init container that waits for Postgres to become ready (replaces
-  `depends_on: condition: service_healthy`, which has no direct Kubernetes
-  equivalent).
+- `Cluster` (CloudNativePG) named `<release>-db`: one Postgres instance with
+  the `airtrail` database and owner created from `env.dbDatabaseName` /
+  `env.dbUsername`. The operator generates the password and the connection
+  details in the `<release>-db-app` secret.
+- `Deployment` + `Service` + `PersistentVolumeClaim` (uploads) for AirTrail.
+  `DB_URL` is taken from the `uri` key of `<release>-db-app`, which overrides
+  any `DB_URL` in `airtrail-secret`.
+- `SealedSecret` `airtrail-secret` with the app settings (`ORIGIN`,
+  `BODY_SIZE_LIMIT`, OAuth settings, ...). See [Secrets](#secrets).
 - Optional `Ingress`.
+
+### Readiness
+
+The AirTrail container has a readiness probe that opens a TCP connection to the
+database's read-write Service (`<release>-db-rw:5432`) using `node`. CNPG's
+`-rw` Service has no endpoints until a primary is elected, so the pod is only
+Ready while a primary is reachable. It does not delay startup: on a fresh
+install AirTrail may restart a few times until the database is up.
 
 ## Quick start
 
-Deploys into its own `airtrail` namespace (`.Values.namespace`), matching the
-`trek` chart's convention of one namespace per app:
+Deploys into its own `airtrail` namespace (`.Values.namespace`):
 
 ```bash
-kubectl create namespace airtrail
-helm install airtrail ./airtrail \
-  --namespace airtrail \
-  --set secret.dbPassword=$(openssl rand -hex 16)
+helm upgrade --install airtrail ./charts/airtrail \
+  --namespace airtrail --create-namespace \
+  --set db.persistence.storageClass=local-path \
+  --set airtrail.persistence.uploads.storageClass=local-path
 ```
 
-`secret.dbPassword` in `values.yaml` is a `CHANGEME` placeholder on purpose —
-never commit a real password there. Pass the real one at install time via
-`--set`, or with a gitignored `-f values-secret.yaml` if you'd rather not put
-it on the command line. (Unlike `trek`, this chart does not yet use Bitnami
-`SealedSecret`s — if you want the DB password committed to git safely the way
-`trek`'s secrets are, that template needs converting first.)
+The GitHub Actions workflow (`.github/workflows/deploy.yml`) runs exactly this
+for the Talos cluster only; AirTrail is not deployed to GKE.
 
-Ingress is enabled by default, exposing AirTrail at `https://airtrail.georgetay.com`
-via the same nginx + cert-manager + external-dns stack `trek`'s ingress uses.
-To use a different hostname, override `airtrail.ingress.hosts`,
-`airtrail.ingress.tls` and `airtrail.ingress.annotations."external-dns.alpha.kubernetes.io/hostname"`,
-and `env.origin` together. To go internal-only instead, set
-`airtrail.ingress.enabled=false` and port-forward:
+To go internal-only, set `airtrail.ingress.enabled=false` and port-forward:
 
 ```bash
 kubectl port-forward -n airtrail svc/airtrail 3000:3000
 ```
 
+## Secrets
+
+`templates/secret.yaml` holds a `SealedSecret` named `airtrail-secret`. It is
+sealed against one specific cluster's controller key, so it only decrypts on
+that cluster. To reseal for another cluster (or after changing a value):
+
+```bash
+kubeseal --context <context> \
+  --controller-name sealed-secrets-controller --controller-namespace kube-system \
+  --format yaml < airtrail-secret.plain.yaml
+```
+
+Then paste the resulting `encryptedData` block into `templates/secret.yaml`.
+Keep the plaintext file out of the chart and out of git.
+
+Database credentials are **not** in this secret; they come from CNPG. If the
+`ORIGIN` host changes, update `airtrail.ingress.hosts` and reseal `ORIGIN`
+together.
+
 ## Storage
 
-Both PVCs (`db.persistence` and `airtrail.persistence.uploads`) leave
-`storageClass` blank, which uses the cluster's default StorageClass
-(`standard-rwo`, GCE PD, on this cluster). A dedicated local-storage
-provisioner was tried and reverted: the cluster has no local SSD hardware,
-and GKE blocks the `rancher.io/local-path` provisioner's helper pod from
-running in a non-`kube-system` namespace (`system-node-critical`/
-`system-cluster-critical` priority classes are quota-restricted outside
-`kube-system`), so `local-path-provisioner` can't provision volumes here.
+Both the database volume (`db.persistence`) and the uploads volume
+(`airtrail.persistence.uploads`) leave `storageClass` blank, which uses the
+cluster default. The deploy workflow sets both to `local-path` on Talos
+(Rancher Local Path Provisioner; data lives on the node's user volume).
+`local-path` volumes are node-local, so they survive pod restarts but not
+losing the node.
 
 ## Key values
 
-| Key                                         | Description                                          | Default                          |
-|---------------------------------------------|------------------------------------------------------|----------------------------------|
-| `namespace`                                 | Namespace every resource is created in               | `airtrail`                       |
-| `env.origin`                                | Public URL AirTrail is served at (sets `ORIGIN`)     | `https://airtrail.georgetay.com` |
-| `secret.dbPassword`                         | Postgres password (A-Za-z0-9 only)                   | `CHANGEME` — override at install |
-| `secret.dbUrl`                              | Override to point at an external database            | auto-generated                   |
-| `db.persistence.size`                       | Size of the Postgres data volume                     | `5Gi`                            |
-| `db.persistence.storageClass`               | StorageClass for the Postgres volume                 | cluster default                  |
-| `airtrail.persistence.uploads.size`         | Size of the uploads volume                           | `1Gi`                            |
-| `airtrail.persistence.uploads.storageClass` | StorageClass for the uploads volume                  | cluster default                  |
-| `airtrail.ingress.enabled`                  | Expose AirTrail via Ingress                          | `true`                           |
-| `airtrail.ingress.hosts`                    | Ingress host/path rules                              | `airtrail.georgetay.com`         |
-| `env.mapProvider` / `env.map*`              | Optional basemap provider settings (see values.yaml) | unset                            |
+| Key                                         | Description                                           | Default                                      |
+|---------------------------------------------|-------------------------------------------------------|----------------------------------------------|
+| `namespace`                                 | Namespace every resource is created in                | `airtrail`                                   |
+| `db.cnpg.instances`                         | Postgres instances in the CNPG cluster                | `1`                                          |
+| `db.cnpg.imageName`                         | Postgres image for the cluster                        | `ghcr.io/cloudnative-pg/postgresql:18`       |
+| `db.persistence.size`                       | Size of the Postgres data volume                      | `10Gi`                                       |
+| `db.persistence.storageClass`               | StorageClass for the Postgres volume                  | cluster default                              |
+| `db.resources`                              | Resource requests/limits for the Postgres pod         | `{}`                                         |
+| `env.dbDatabaseName` / `env.dbUsername`     | Database and owner CNPG creates                       | `airtrail` / `airtrail`                      |
+| `env.uploadLocation`                        | Mount path of the uploads volume                      | `/app/uploads`                               |
+| `secret.existingSecret`                     | Name of the secret injected as env vars               | `airtrail-secret`                            |
+| `airtrail.persistence.uploads.size`         | Size of the uploads volume                            | `2Gi`                                        |
+| `airtrail.persistence.uploads.storageClass` | StorageClass for the uploads volume                   | cluster default                              |
+| `airtrail.ingress.enabled`                  | Expose AirTrail via Ingress                           | `true`                                       |
+| `airtrail.ingress.className`                | Ingress class                                         | `traefik`                                    |
+| `airtrail.ingress.hosts`                    | Ingress host/path rules                               | `airtrail.georgetay.com`                     |
+| `airtrail.ingress.tls`                      | Ingress TLS (empty: Cloudflare terminates TLS)        | `[]`                                         |
 
-**Always override `secret.dbPassword`** before deploying — see `values.yaml`
-for the full list of options, including the optional CARTO/Protomaps basemap
-variables.
-
-If you already manage the secret yourself, set `secret.create: false` and
-`secret.existingSecret: <name>`; the secret must contain the same keys as
-`templates/secret.yaml`.
+The CNPG operator is configured separately in the cluster repo; see its
+`operator.yaml` for the chart version and monitoring settings.

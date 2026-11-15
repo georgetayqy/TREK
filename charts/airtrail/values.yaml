@@ -2,21 +2,13 @@ nameOverride: ""
 fullnameOverride: ""
 namespace: airtrail
 
-# -- PostgreSQL database
+# -- PostgreSQL database, managed by the CloudNativePG operator (must be installed in the cluster).
+# The app reads DB_URL from the operator's <release>-db-app secret.
 db:
-  # CloudNativePG-managed Postgres (needs the CNPG operator). The app reads DB_URL from the
-  # operator's <release>-db-app secret. Set enabled=false to use the bundled postgres Deployment.
   cnpg:
-    enabled: true
     instances: 1
     imageName: "ghcr.io/cloudnative-pg/postgresql:18"
-  # Image for the bundled Postgres (cnpg.enabled=false) and its wait-for-db init container.
-  image:
-    repository: postgres
-    tag: "16-alpine"
-    pullPolicy: IfNotPresent
   persistence:
-    enabled: true
     size: 10Gi
     storageClass: ""  # "" = cluster default
   resources: {}
@@ -43,7 +35,7 @@ airtrail:
     className: "traefik"
     annotations: {}
     hosts:
-      - host: airtrail.georgetay.com
+      - host: airtrail-new.georgetay.com
         paths:
           - path: /
             pathType: Prefix

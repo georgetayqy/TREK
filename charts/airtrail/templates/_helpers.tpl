@@ -45,11 +45,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
-{{/* Host of the Postgres the app talks to: the CNPG read-write service, or the bundled db Service. */}}
+{{/* Read-write Service CNPG creates for the primary. */}}
 {{- define "airtrail.dbHost" -}}
-{{- if .Values.db.cnpg.enabled -}}
 {{- printf "%s-rw" (include "airtrail.dbFullname" .) -}}
-{{- else -}}
-{{- include "airtrail.dbFullname" . -}}
-{{- end -}}
 {{- end -}}
