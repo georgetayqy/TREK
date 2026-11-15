@@ -29,7 +29,10 @@ persistence:
 ingress:
   enabled: true
   className: "traefik"
-  annotations: {}
+  annotations:
+    cert-manager.io/cluster-issuer: null
+    external-dns.alpha.kubernetes.io/hostname: null
+    nginx.org/client-max-body-size: null
   hosts:
     - host: trek-new.georgetay.com
       paths:
