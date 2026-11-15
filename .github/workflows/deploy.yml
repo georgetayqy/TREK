@@ -117,7 +117,7 @@ jobs:
           # build time, so a cached layer from a different tag must not reuse.
           no-cache: true
 
-  deploy:
+  deploy-gke:
     name: Deploy to GKE via Helm
     needs: [version-bump, build-and-push]
     runs-on: ubuntu-latest
@@ -143,6 +143,46 @@ jobs:
           cluster_name: ${{ env.GKE_CLUSTER }}
           location: ${{ env.GKE_LOCATION }}
           project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm upgrade
+        run: |
+          helm upgrade --install "$HELM_RELEASE" ./charts/trek \
+            --namespace "$K8S_NAMESPACE" \
+            --create-namespace \
+            --set image.repository="$DOCKERHUB_REPO" \
+            --set image.tag="${{ needs.version-bump.outputs.version }}" \
+            --force-conflicts \
+            --wait --timeout 5m
+
+  deploy-tailscale:
+    name: Deploy to Tailscale cluster via Helm
+    needs: [version-bump, build-and-push]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Configure kubeconfig
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.kube"
+          printf '%s' "$KUBECONFIG_CONTENT" > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
