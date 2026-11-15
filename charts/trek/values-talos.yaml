@@ -2,6 +2,10 @@
 #   helm upgrade --install trek ./charts/trek -f charts/trek/values-talos.yaml
 env:
   APP_URL: "https://trek-new.georgetay.com"
+  # Cloudflare terminates TLS and cloudflared hands Traefik plain http (Traefik does not trust
+  # X-Forwarded-Proto here), so the app's own HTTPS redirect loops forever. Keep cookies secure.
+  FORCE_HTTPS: "false"
+  COOKIE_SECURE: "true"
   OIDC_CLIENT_ID: "hsVbDZf2cgKfg7RQTOGLmcBwQunu72hk"
 
 # Sealed against the Talos sealed-secrets controller (the base file holds the GKE-sealed data).
