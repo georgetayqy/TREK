@@ -16,6 +16,16 @@ spec:
   inheritedMetadata:
     labels:
       velero.io/exclude-from-backup: "true"
+  {{- if .Values.db.cnpg.backup.enabled }}
+  # Base backups + WAL archive to GCS via the Barman Cloud Plugin (needs cert-manager and the plugin,
+  # both deployed by personal-cluster). Config: db-objectstore.yaml; credentials: db-backup-secret.yaml.
+  # To restore, bootstrap a new Cluster with `bootstrap.recovery` + the same plugin ObjectStore.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ include "airtrail.dbFullname" . }}-backups
+  {{- end }}
   bootstrap:
     initdb:
       database: {{ .Values.env.dbDatabaseName | quote }}

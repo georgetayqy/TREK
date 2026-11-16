@@ -1,0 +1,20 @@
+{{- if .Values.db.cnpg.backup.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ include "airtrail.dbFullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "airtrail.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db
+spec:
+  # CNPG cron has a leading seconds field
+  schedule: {{ .Values.db.cnpg.backup.schedule | quote }}
+  immediate: true
+  backupOwnerReference: self
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  cluster:
+    name: {{ include "airtrail.dbFullname" . }}
+{{- end }}

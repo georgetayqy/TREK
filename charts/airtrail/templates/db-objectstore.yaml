@@ -1,0 +1,22 @@
+{{- if .Values.db.cnpg.backup.enabled }}
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ include "airtrail.dbFullname" . }}-backups
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "airtrail.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db
+spec:
+  retentionPolicy: {{ .Values.db.cnpg.backup.retentionPolicy | quote }}
+  configuration:
+    destinationPath: {{ .Values.db.cnpg.backup.destinationPath | quote }}
+    googleCredentials:
+      applicationCredentials:
+        name: {{ .Values.db.cnpg.backup.credentialsSecret }}
+        key: credentials.json
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+{{- end }}
