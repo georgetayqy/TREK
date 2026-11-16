@@ -11,6 +11,11 @@ spec:
   {{- with .Values.db.cnpg.imageName }}
   imageName: {{ . | quote }}
   {{- end }}
+  # Keep the DB PVC/pods out of Velero file-system backups (not crash-consistent);
+  # the Cluster manifest itself is still backed up.
+  inheritedMetadata:
+    labels:
+      velero.io/exclude-from-backup: "true"
   bootstrap:
     initdb:
       database: {{ .Values.env.dbDatabaseName | quote }}
