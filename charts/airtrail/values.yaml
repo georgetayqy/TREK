@@ -18,7 +18,7 @@ db:
       destinationPath: "gs://george-cluster-velero-backups/airtrail-db"
       credentialsSecret: "airtrail-db-gcs"
       retentionPolicy: "14d"
-      schedule: "0 30 18 * * *"  # daily 18:30 UTC = 02:30 SGT
+      schedule: "0 0 18 * * 6"  # weekly, Sat 18:00 UTC = Sun 02:00 SGT (same as the Velero schedule)
   persistence:
     size: 10Gi
     storageClass: ""  # "" = cluster default
