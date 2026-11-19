@@ -29,12 +29,28 @@ spec:
         - name: {{ .name }}
         {{- end }}
       {{- end }}
+      # Pod Security Standards "restricted": non-root, RuntimeDefault seccomp, no privilege
+      # escalation, all capabilities dropped. UID/GID 1000 is the image's `node` user.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: trek
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # The image entrypoint chowns the data dirs and drops root with gosu, neither of which
+          # works (or is needed) when already running as UID 1000 with fsGroup-owned volumes.
+          # Start node directly, as the entrypoint's final line does.
+          workingDir: /app/server
+          args: ["node", "--require", "tsconfig-paths/register", "dist/index.js"]
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

@@ -47,6 +47,14 @@ helm upgrade --install airtrail ./charts/airtrail \
   --set airtrail.persistence.uploads.storageClass=local-path
 ```
 
+Pods meet the Pod Security Standards **restricted** profile (the AirTrail pod runs as UID/GID 1000 with
+`RuntimeDefault` seccomp, no privilege escalation and all capabilities dropped; the CNPG-managed Postgres
+pods are restricted-compliant by default). To enforce it, label the namespace after creating it:
+
+```bash
+kubectl label ns airtrail pod-security.kubernetes.io/enforce=restricted --overwrite
+```
+
 The GitHub Actions workflow (`.github/workflows/deploy.yml`) runs exactly this
 for the Talos cluster only; AirTrail is not deployed to GKE.
 

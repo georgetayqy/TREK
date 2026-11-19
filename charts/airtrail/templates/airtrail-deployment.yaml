@@ -19,12 +19,23 @@ spec:
         app.kubernetes.io/component: app
     spec:
       # uploads volume must be writable by UID:GID 1000:1000, per upstream image requirements
+      # Pod Security Standards "restricted": non-root, RuntimeDefault seccomp, no privilege
+      # escalation, all capabilities dropped.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: airtrail
           image: "{{ .Values.airtrail.image.repository }}:{{ .Values.airtrail.image.tag }}"
           imagePullPolicy: {{ .Values.airtrail.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           envFrom:
             - secretRef:
                 name: {{ include "airtrail.secretName" . }}
