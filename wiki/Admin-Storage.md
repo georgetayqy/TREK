@@ -1,8 +1,10 @@
 # Admin: Storage
 
-The **Storage** tab (Admin Panel → Storage) controls where TREK stores each
+The **Storage** tab (Admin Panel > Configuration > Storage) controls where TREK stores each
 kind of content: which storage backends exist, which content category writes
 to which backend, and whether writes are replicated to additional backends.
+
+![Admin Storage tab: the Health strip with no replica failures, the two built-in backends with their usage and Test and edit buttons, and the category cards with their backend](assets/AdminStorage.png)
 
 ## Backends
 
@@ -16,15 +18,15 @@ A backend is a named place bytes can live. Two exist out of the box:
 You can **edit** a built-in to relocate its root directory, and **add**
 backends of type:
 
-- **Local** — a directory on a disk or mount reachable by the server.
-- **S3** — any S3-compatible service (AWS S3, Cloudflare R2, Backblaze B2,
+- **Local**: a directory on a disk or mount reachable by the server.
+- **S3**: any S3-compatible service (AWS S3, Cloudflare R2, Backblaze B2,
   Garage, MinIO/AIStor). Endpoint URL, bucket, credentials, and optionally
   region, key prefix, retries, and timeout. For self-hosted endpoints, use an
   IP address or `localhost` in the URL unless your server is configured for
   virtual-hosted bucket addressing.
 
 If `TREK_PLACE_PHOTO_DIR` is set, a read-only `place-photos-local` backend
-appears too — it is defined by that environment variable, not by this panel.
+appears too; it is defined by that environment variable, not by this panel.
 
 ### Replication (Mirror targets)
 
@@ -33,36 +35,36 @@ backend is then also copied to each selected target. Removing all targets
 turns replication off again.
 
 - A backend can serve as a **mirror target or as a category target, not
-  both** — only backends no category is stored on are offered in the list, and
+  both**: only backends no category is stored on are offered in the list, and
   saving a configuration that mixes the two is refused. A sync makes a target
   match its backend (see below), so anything else stored there would be
   deleted.
 - Writes go to the backend itself first (it stays the source of truth), then
   to each target in order. A slow or unreachable target slows every upload of
-  every category on that backend — ideal for backups, worth weighing before
+  every category on that backend, ideal for backups, worth weighing before
   replicating hot categories like trip documents.
 - Replica failures **never fail the original request**. They are recorded and
   shown in the **Health** strip at the top of the tab, with the backend, the
   object, the operation, and how long ago it happened. An empty strip means
-  every replicated write landed. Replica failures also notify admins — in-app
+  every replicated write landed. Replica failures also notify admins, in-app
   and over the configured webhook/ntfy/email channels (first failure
   immediately, then at most one summary per backend per hour). Preferences
   live in the admin Notifications tab.
 - Replication starts with the next write. To copy objects that existed before
-  you added a target, press **Sync now** on the backend's row — one sync runs
+  you added a target, press **Sync now** on the backend's row; one sync runs
   at a time, with progress and a cancel button; objects already present with
   matching sizes are skipped, and per-object failures land in the Health
   strip without stopping the run. A sync makes the target **match** the
   backend, not just catch up: it also deletes target objects that no longer
-  exist on the backend — it's not a trash can, so run it only when you want
+  exist on the backend; it's not a trash can, so run it only when you want
   the target pruned to match, and stray deletions land in the Health strip
   like any other replica failure.
 
 ### Test
 
 Every backend row has a **Test** button: the server writes, checks, and
-deletes a small probe object (`trek-probe/…`) on the backend — for a
-replicated backend, on the backend itself and each target individually — and
+deletes a small probe object (`trek-probe/…`) on the backend (for a
+replicated backend, on the backend itself and each target individually) and
 reports per-target results. "Connection OK" means credentials, bucket, and
 reachability all check out. Targets must be **saved** before Test can probe
 them; a just-added, unsaved backend used as a target reports an error until
@@ -75,22 +77,22 @@ assigned to exactly one backend:
 
 | Category | Id | What it stores |
 |----------|----|----------------|
-| Trip documents | `files` | File attachments uploaded to trips — tickets, PDFs, booking confirmations, and files shared in trip chat |
+| Trip documents | `files` | File attachments uploaded to trips, tickets, PDFs, booking confirmations, and files shared in trip chat |
 | Journey photos | `journey` | Photos and thumbnails attached to journey entries |
 | Cover images | `covers` | Trip and collection cover images, including covers fetched from Unsplash |
 | Profile pictures | `avatars` | User account profile pictures |
-| Place images | `places` | Images attached to places and collection places — uploaded or imported |
-| Google photo cache | `photos-google` | Cached copies of Google Places photos — re-fetchable, safe to lose |
-| TREK photo cache | `photos-trek` | Cached photos from the TREK photo service used by Memories — re-fetchable, safe to lose |
+| Place images | `places` | Images attached to places and collection places, uploaded or imported |
+| Google photo cache | `photos-google` | Cached copies of Google Places photos, re-fetchable, safe to lose |
+| TREK photo cache | `photos-trek` | Cached photos from the TREK photo service used by Memories, re-fetchable, safe to lose |
 | Backups | `backups` | Server backup archives created by the Backup panel or schedule |
 
 Reassigning a category changes where **new** objects go. If the category
 already holds objects, the panel asks first: **Move existing objects** copies
 everything to the new backend, switches the category, then sweeps any writes
-that raced the copy; **Just route new writes** keeps the previous behavior —
+that raced the copy; **Just route new writes** keeps the previous behavior:
 new objects go to the new backend, existing ones stay put and keep being
 served from wherever they already are. Replicating the Google photo cache or
-Place images is flagged as not recommended — both hold content that is
+Place images is flagged as not recommended; both hold content that is
 re-fetchable or provider-derived.
 
 The legacy `/uploads/photos` directory written by older TREK versions is not
@@ -100,18 +102,18 @@ writes there anymore and it cannot be reassigned.
 ### Moving a category's objects
 
 A category migration shares its one-at-a-time slot with mirror syncs (see
-*Replication* above) — starting a move while a sync (or another move) is
+*Replication* above); starting a move while a sync (or another move) is
 running is refused, and vice versa. Progress (done/total, copied/skipped/
 failed) shows inline with a cancel button.
 
 Cancelling before the category switches is completely safe: nothing has
-changed yet, the copy just stops. A failed copy behaves the same way — the
+changed yet, the copy just stops. A failed copy behaves the same way; the
 category is never switched if any object failed to copy. Once the switch has
 happened, the delta sweep (catching writes that landed on the old backend
 while the copy was running) always runs to completion, even if you cancel.
 
-The old objects are **not** deleted when a move finishes — that's what the
-reclaimable line means (`N objects (size) remain on <backend> — reclaim
+The old objects are **not** deleted when a move finishes; that's what the
+reclaimable line means (`N objects (size) remain on <backend>, reclaim
 manually`). It's left behind on purpose so you can confirm the new backend
 looks right before removing it yourself.
 
@@ -119,18 +121,131 @@ looks right before removing it yourself.
 
 The Backends section shows per-backend and per-category object counts and
 sizes, scanned nightly (04:15 server time) and on demand via **Refresh**. The
-stamp shows when the numbers were computed — reassigning categories does not
+stamp shows when the numbers were computed; reassigning categories does not
 retroactively move them until the next scan. The uploads backend's total
 includes the legacy photo library.
+
+## Unreferenced files
+
+Uploaded files can outlive what used them. When you delete or replace
+something that shows a file (a trip or list cover, a place image, a journal
+photo, an avatar, a trip file), TREK deletes that file about a day later,
+unless something still shows it by then: a copied trip, a journey that took
+over the trip cover, a saved place in a list, or the old value written back by
+an undo. The day is the longest any undo in TREK can bring a file back (a
+change the assistant proposed can still be applied for 24 hours). This runs
+whether or not deletion is switched on below, as deleting always did, with the
+same checks the nightly cleanup makes. A file whose category stays skipped
+(see below) for 30 days past its day, and every file released while 50,000
+already wait, is no longer waited for: the log says so with the number of
+files, and such files are then only removed by the nightly cleanup, once
+deletion is switched on.
+
+Deleting a whole list or journey works the same way for what it held: a list
+releases its cover and the images of its saved places, a journey the photos
+of its gallery that no trip or other journey shows, and deleting a user does
+this for every journey they own. Deleting a whole trip releases only its
+cover: the trip's files and its places' images are left to the nightly
+cleanup below. Journal photos of a journey deleted before your instance ran a
+version with this behaviour are the exception: their photo entries were kept,
+so TREK still counts those files as used and neither the release nor the
+nightly check removes them.
+
+Whatever is left over after that (files of deleted trips and users, files
+from before this check existed) is found by a check every night at 04:05
+server time. It looks at the covers, place images, avatars, trip files and journal
+photos for files that nothing in TREK names any more, and the **Unreferenced
+files** section shows what it found:
+
+- **Can be freed**: unused on every check for at least a week, so the nightly
+  check deletes them once deletion is on.
+- **Unused for less than a week**: these get their week first. A file that is
+  used again in the meantime (an undo, a copied trip) starts over.
+- **Freed by the last nightly cleanup**: what the last nightly check with deletion on
+  deleted. A check you start by hand never deletes, so it never changes this
+  figure.
+
+**Delete unreferenced files** is off after install and upgrade, so the check
+only reports. Switched on, the nightly check deletes a file once it has been
+unused for a week and one more look right before the delete still finds
+nothing that uses it. **Check now** starts a check in the background that only
+reports, whatever the switch says; the section shows that it is running and
+updates when it is done. Switching deletion on or off, starting a check,
+confirming a category (below) and every nightly check that deleted files are
+recorded in the [Audit-Log](Audit-Log); the nightly entry names how many files
+went per category.
+
+When more than a fifth of a category's files look unused, the check marks it
+and deletes nothing there until you confirm it with **Confirm** next to the
+category. You confirm the number shown: if a newer check found a clearly
+different number in the meantime, TREK asks you to look again first. A
+confirmation covers that number plus half as much again (at least a hundred
+more files), so the few files a busy instance leaves behind while the backlog
+drains do not undo it, and it lasts two weeks. Once the category is back under
+a fifth, the confirmation is used up; a later surge waits for you again. A
+long-running instance with many old leftovers usually needs this once.
+
+A category is skipped for that night, with the reason shown next to it, when:
+
+- not every part of TREK could be asked about it;
+- its files share a location with another category's;
+- another TREK installation keeps its files in the same place (see below), or
+  TREK could not leave its own mark there;
+- listing it or asking about it failed. What the earlier nights found stays,
+  so one failure does not restart anyone's week;
+- deleting failed on the storage backend: the check then stops deleting in
+  that category for the night;
+- a backup was being written when its files were due. Nothing is deleted
+  while a backup reads the uploads; the next night tries again. If this shows
+  every night, move the backup hour or the backup interval away from 04:05.
+
+**Several installations on one bucket or folder.** Each check leaves a small
+file named `trek-owner-<id>` at the top of every category it looks at, naming
+this installation. When it finds such a file of another installation there,
+it leaves that category alone, and so does the other installation once it
+sees this one's file. The day-later deletes above keep to the same rule.
+Backups leave these files out. If you moved an installation and a stale
+`trek-owner-<id>` of its old self remains, delete that one file to let the
+check work there again.
+
+TREK versions from before this check write no such file, so an installation
+cannot tell that an older TREK shares its bucket or folder. Keep deletion off
+on a location you share with an older TREK, or upgrade both first.
+
+**Which installation this is** lives in the file `.trek-install-id` in the
+data folder (next to `travel.db`), made on the first start. Backups never
+contain it and no restore writes it. When the database names another
+installation than that file, or none (a backup or a database file from
+another installation), TREK switches deletion off and forgets what earlier
+checks found, what you confirmed and what was waiting to be deleted, before
+anything else runs. Every restore does the same, also of a backup of this
+installation: one in the admin panel right after it, one with
+`RESTORE_FROM_BACKUP` on that start. A restore leaves the file
+`.trek-reclaim-reset` in the data folder until this is done, so a restart
+after a restore that failed half way does it as well; backups never contain
+that file either. A database file of this installation that you put in place
+by hand while TREK was stopped is not told apart: use a restore for that.
+Switch deletion on again once you have looked at the next report. A copy of the whole data folder carries the file with it and looks
+like the same installation: give a clone its own data folder, or delete
+`.trek-install-id` in the copy before its first start. If the file is lost or
+unreadable, nothing is deleted until it is there again; a new one makes this
+installation's old `trek-owner-<id>` files look like another installation's,
+so delete those once you are sure nothing else uses the location.
+
+Caches (place photos), backups, assistant attachments and journal thumbnails
+are cleaned up by their own routines and are never touched here. No check runs
+on a demo instance, none while a sync, a move or a restore is running, and a
+running check deletes nothing while a backup is being written or once you
+switch deletion off.
 
 ## Secrets and encryption
 
 Backend credentials (the S3 secret access key) are stored encrypted. Setting
-the `ENCRYPTION_KEY` environment variable explicitly is recommended — without
+the `ENCRYPTION_KEY` environment variable explicitly is recommended; without
 it the implicit key persisted in the data directory is used, which works but
 rides inside backup archives (someone holding a backup can decrypt the
 secrets it contains). If you later move from the implicit key to an explicit
-one, follow [[Encryption Key Rotation|Encryption-Key-Rotation]] — setting a
+one, follow [[Encryption Key Rotation|Encryption-Key-Rotation]]; setting a
 new key directly would orphan already-stored secrets. Saved secrets display
 as a masked placeholder; leaving the mask untouched when editing keeps the
 stored value.
@@ -139,12 +254,12 @@ stored value.
 
 For scripted deployments, place a `storage-config.json` in the data directory
 (in Docker: mount it at `/app/data/storage-config.json`). It is imported
-exactly once — on the first boot that has no stored storage configuration —
+exactly once, on the first boot that has no stored storage configuration,
 then ignored (a log line says so). An invalid file aborts boot with the exact
 validation error.
 
 ```jsonc
-// storage-config.json - secrets may be plaintext (encrypted on import)
+// storage-config.json: secrets may be plaintext (encrypted on import)
 // or already-encrypted enc:v1: values.
 {
   "backends": [
@@ -167,7 +282,7 @@ The panel presents this exact setup as **Mirror targets** on `backups-local`.
 
 To reset storage configuration (or re-import a seed file): stop the server,
 `sqlite3 data/travel.db "DELETE FROM app_settings WHERE key LIKE 'storage.%';"`,
-start it again — it boots on the built-in defaults, or re-imports the seed
+start it again; it boots on the built-in defaults, or re-imports the seed
 file if present.
 
 **Restore chicken-and-egg:** backups include the storage configuration. If
@@ -175,9 +290,11 @@ your only backup lives on S3 and the credentials are inside it: start a fresh
 instance, enter the S3 credentials here (or mount a seed file), then restore
 from the Backup panel.
 
+The phone admin has the same functions in its **Storage** section.
+
 ## Related pages
 
-- [[Backups|Backups]] — what a backup contains, restore procedure
+- [[Backups|Backups]]: what a backup contains, restore procedure
 - [[Environment Variables|Environment-Variables]]
 - [[Encryption Key Rotation|Encryption-Key-Rotation]]
 - [[Admin Panel Overview|Admin-Panel-Overview]]

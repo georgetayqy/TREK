@@ -2,8 +2,10 @@
 # Rebuild gosu with a current Go toolchain so the runtime image ships no stale
 # Go stdlib (Debian's apt gosu is built with an old Go that trips CVE scanners).
 # The binary and its runtime behaviour are identical to the apt package.
-FROM golang:1.25-alpine AS gosu-build
-RUN CGO_ENABLED=0 GOBIN=/out go install github.com/tianon/gosu@latest
+FROM golang:1.26-alpine AS gosu-build
+# Pinned to the commit of gosu's 1.19 tag: @latest made every build pick up whatever
+# was pushed last, and the tag itself is not a semver version go install accepts.
+RUN CGO_ENABLED=0 GOBIN=/out go install github.com/tianon/gosu@6456aaa0f3c854d199d0f037f068eb97515b7513
 
 # ── Stage 1: shared ──────────────────────────────────────────────────────────
 FROM node:24-alpine AS shared-builder
@@ -20,10 +22,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY shared/package.json ./shared/
 COPY client/package.json ./client/
-COPY client/scripts/patch-maplibre.mjs ./client/scripts/
 RUN npm ci --workspace=client
 COPY --from=shared-builder /app/shared/dist ./shared/dist
 COPY client/ ./client/
+# A prerelease build does not bump client/package.json, so the bundle takes its
+# version from the same build argument the server's VERSION file comes from.
+ARG APP_VERSION=dev
 RUN npm run build --workspace=client
 
 # ── Stage 3: server ──────────────────────────────────────────────────────────
@@ -37,7 +41,9 @@ COPY server/package.json ./server/
 RUN npm ci --workspace=server --ignore-scripts
 COPY --from=shared-builder /app/shared/dist ./shared/dist
 COPY server/ ./server/
-RUN npm run build --workspace=server
+# tsc needs more than the 2 GB heap Node picks on a host with about 12 GB of RAM;
+# on a bigger build machine the default is larger, so only small hosts failed.
+RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build --workspace=server
 
 # ── Stage 4: production runtime ──────────────────────────────────────────────
 FROM node:24-trixie-slim
@@ -64,11 +70,14 @@ COPY server/package.json ./server/
 # gypfile:false (npm/cli#9837). The only other install scripts among the runtime
 # deps are esbuild's binary check, redundant next to its optional platform
 # package, and a telemetry ping.
+# The upgrade takes the Debian security fixes the base image was built before
+# (zlib, 11/2026, failed the image scan until node:24-trixie-slim caught up).
 RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends tzdata dumb-init wget ca-certificates \
     libkitinerary-bin libsqlite3-0 && \
     npm ci --workspace=server --omit=dev --ignore-scripts && \
-    ln -sf "$(find /usr/lib -name kitinerary-extractor -type f | head -1)" /usr/local/bin/kitinerary-extractor; \
+    { ln -sf "$(find /usr/lib -name kitinerary-extractor -type f | head -1)" /usr/local/bin/kitinerary-extractor || true; } && \
     rm -rf /var/lib/apt/lists/* /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx && \
     chown -R node:node /app
 
@@ -85,7 +94,8 @@ ENV KITINERARY_EXTRACTOR_PATH=/usr/local/bin/kitinerary-extractor
 
 COPY --chown=node:node --from=server-builder /app/server/dist ./server/dist
 # Runtime data assets read from server/assets at runtime: airports.json (flight
-# transport search) and atlas/*.geojson.gz (Atlas country/region map). The build
+# transport search) and atlas/*.geojson.gz + atlas/admin1/*.geojson.gz (Atlas
+# country/region map). The build
 # only emits dist, so these must be copied explicitly or the features silently
 # degrade to empty in the image.
 COPY --chown=node:node --from=server-builder /app/server/assets ./server/assets
@@ -120,13 +130,29 @@ RUN mkdir -p /app/data/logs /app/uploads/files /app/uploads/covers /app/uploads/
 ENV NODE_ENV=production
 ENV NODE_USE_ENV_PROXY=1
 ENV PORT=3000
+# The version goes into a file, not into ENV. A container keeps its environment
+# when it is recreated on a newer image (Portainer's recreate, a copied run
+# config), so an APP_VERSION env var would keep announcing the old release and
+# the clients would never pick up the new bundle. The server reads this file
+# first (server/src/app-config/image-version.ts).
 ARG APP_VERSION=dev
-ENV APP_VERSION=${APP_VERSION}
+RUN if [ "$APP_VERSION" != "dev" ]; then printf '%s\n' "$APP_VERSION" > /app/server/VERSION; fi
+
+# OCI metadata: Renovate, Watchtower and the registries read the source label to
+# link an image update to its release notes (#1498). The release workflows add
+# the commit and the build time; a local build carries everything else.
+LABEL org.opencontainers.image.title="TREK" \
+      org.opencontainers.image.description="Self-hosted collaborative travel planner" \
+      org.opencontainers.image.url="https://github.com/liketrek/TREK" \
+      org.opencontainers.image.source="https://github.com/liketrek/TREK" \
+      org.opencontainers.image.documentation="https://github.com/liketrek/TREK/wiki" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.version="${APP_VERSION}"
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:3000/api/health || exit 1
+  CMD wget -qO- "http://localhost:${PORT:-3000}/api/health" || exit 1
 
 # Start-up lives in a script, not an inline `sh -c` string: container management
 # UIs re-tokenise Config.Cmd when you edit a container in place, and a command

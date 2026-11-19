@@ -4,18 +4,21 @@ import MCostsTab from '../../../../src/mobile/screens/trip/tabs/MCostsTab'
 import type { MTripShellApi, TripPlanner } from '../../../../src/mobile/screens/trip/MTripShell'
 import { budgetApi } from '../../../../src/api/client'
 import { localToday } from '../../../../src/components/Planner/today'
+import { clearAll } from '../../../../src/db/offlineDb'
 import { resetFreezeAttempts } from '../../../../src/components/Budget/useFreezeMissingRates'
 import { clearExchangeRateCache } from '../../../../src/hooks/useExchangeRates'
 import { useAuthStore } from '../../../../src/store/authStore'
 import { useSettingsStore } from '../../../../src/store/settingsStore'
+import { useTripStore } from '../../../../src/store/tripStore'
 import type { BudgetItem, Day, Trip } from '../../../../src/types'
 import { buildTrip, buildUser } from '../../../helpers/factories'
 import { buildPlanner, buildShell } from '../../../helpers/mobileTrip'
 import { resetAllStores, seedStore } from '../../../helpers/store'
 import { server } from '../../../helpers/msw/server'
 import { fireEvent, render, screen, waitFor, within } from '../../../helpers/render'
+import { setSizeClass } from '../../../helpers/sizeClass'
 
-// FE-MOB-COSTT-001 to FE-MOB-COSTT-049
+// FE-MOB-COSTT-001 to FE-MOB-COSTT-053
 
 // The add/edit expense sheet is the shared desktop-sized form; the panel only
 // owns when it opens and what happens on save, so it is stubbed here.
@@ -146,7 +149,11 @@ function rowOf(name: string): HTMLElement {
 }
 
 describe('MCostsTab', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // A settlement read online stays on the device and answers when the network
+    // drops (#2601). Each case starts without one, or the balances an earlier case
+    // left behind would answer the failing reads below.
+    await clearAll()
     resetAllStores()
     clearExchangeRateCache()
     seedStore(useAuthStore, { user: buildUser({ id: 1, username: 'Me' }) })
@@ -200,7 +207,9 @@ describe('MCostsTab', () => {
     expect(within(settle).getByText('$40.00')).toBeInTheDocument()
     expect(within(settle).getByText('$15.00')).toBeInTheDocument()
     expect(within(settle).getByText('$5.00')).toBeInTheDocument()
-    expect(within(settle).getByText('?')).toBeInTheDocument()
+    // Ghost is off the trip, but the server sends their name with the flow (#2604).
+    expect(within(settle).getByText('Ghost')).toBeInTheDocument()
+    expect(within(settle).queryByText('?')).not.toBeInTheDocument()
     expect(within(settle).getAllByText('costs.you')).toHaveLength(3)
     expect(within(settle).getAllByText('Ada')).toHaveLength(2)
   })
@@ -290,7 +299,8 @@ describe('MCostsTab', () => {
     expect(chips).toHaveLength(2)
     expect(chips[0]).toHaveAttribute('aria-pressed', 'true')
     expect(chips[1]).toHaveAttribute('aria-pressed', 'false')
-    expect(chips.map(c => c.textContent)).toEqual(['costs.youShort$40.00', '$40.00'])
+    // Your own chip carries your initial too, not the word "You" squeezed into the circle.
+    expect(chips.map(c => c.textContent)).toEqual(['M$40.00', '$40.00'])
   })
 
   it('FE-MOB-COSTT-017: toggles a member chip to paid', async () => {
@@ -381,10 +391,16 @@ describe('MCostsTab', () => {
     expect(dayTrigger).toHaveAttribute('aria-expanded', 'true')
   })
 
+  it('FE-MOB-COSTT-024b: edit and delete on a row name the expense (#2604)', async () => {
+    await renderTab()
+    expect(within(rowOf('Ramen')).getByRole('button', { name: 'common.edit: Ramen' })).toBeInTheDocument()
+    expect(within(rowOf('Ramen')).getByRole('button', { name: 'common.delete: Ramen' })).toBeInTheDocument()
+  })
+
   it('FE-MOB-COSTT-024: opens the edit sheet from a row and reloads on save', async () => {
     const p = planner()
     await renderTab(p)
-    fireEvent.click(within(rowOf('Ramen')).getByRole('button', { name: 'common.edit' }))
+    fireEvent.click(within(rowOf('Ramen')).getByRole('button', { name: /^common\.edit(:|$)/ }))
     expect(screen.getByText('sheet editing 11')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('sheet save'))
@@ -396,7 +412,7 @@ describe('MCostsTab', () => {
   it('FE-MOB-COSTT-025: deletes an expense after confirming and refreshes the settlement', async () => {
     const p = planner()
     await renderTab(p)
-    fireEvent.click(within(rowOf('Ramen')).getByRole('button', { name: 'common.delete' }))
+    fireEvent.click(within(rowOf('Ramen')).getByRole('button', { name: /^common\.delete(:|$)/ }))
     const dialog = screen.getByRole('dialog', { name: 'costs.confirm.deleteTitle' })
     expect(within(dialog).getByText('costs.confirm.deleteBody:Ramen')).toBeInTheDocument()
     fireEvent.click(within(dialog).getByText('common.delete'))
@@ -408,7 +424,7 @@ describe('MCostsTab', () => {
     const p = planner()
     vi.mocked(p.tripActions.deleteBudgetItem).mockRejectedValueOnce(new Error('offline'))
     await renderTab(p)
-    fireEvent.click(within(rowOf('Ramen')).getByRole('button', { name: 'common.delete' }))
+    fireEvent.click(within(rowOf('Ramen')).getByRole('button', { name: /^common\.delete(:|$)/ }))
     fireEvent.click(within(screen.getByRole('dialog')).getByText('common.delete'))
     await waitFor(() => expect(p.toast.error).toHaveBeenCalledWith('common.unknownError'))
   })
@@ -465,7 +481,7 @@ describe('MCostsTab', () => {
     fireEvent.change(within(dialog).getByPlaceholderText('0.00'), { target: { value: '12,5' } })
     expect(submit).toBeEnabled()
     fireEvent.click(submit)
-    expect(create).toHaveBeenCalledWith(7, { from_user_id: 1, to_user_id: 2, amount: 12.5, currency: 'USD', settled_at: localToday() })
+    expect(create).toHaveBeenCalledWith(7, { from_user_id: 1, to_user_id: 2, amount: 12.5, currency: 'USD', settled_at: localToday(), note: null })
     await waitFor(() => expect(settlementBases).toHaveLength(2))
   })
 
@@ -500,8 +516,8 @@ describe('MCostsTab', () => {
   it('FE-MOB-COSTT-032: a read-only member gets no add, edit or delete affordances', async () => {
     await renderTab(planner({ can: vi.fn(() => false) as unknown as TripPlanner['can'] }))
     expect(screen.queryByRole('button', { name: 'costs.addPayment' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'common.edit' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'common.delete' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^common\.edit(:|$)/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^common\.delete(:|$)/ })).not.toBeInTheDocument()
     expect(within(cardOf('Ramen')).getByRole('button', { pressed: false })).toBeDisabled()
   })
 
@@ -533,7 +549,7 @@ describe('MCostsTab', () => {
   it('FE-MOB-COSTT-035: cancelling the confirm keeps the expense', async () => {
     const p = planner()
     await renderTab(p)
-    fireEvent.click(within(rowOf('Ramen')).getByRole('button', { name: 'common.delete' }))
+    fireEvent.click(within(rowOf('Ramen')).getByRole('button', { name: /^common\.delete(:|$)/ }))
     fireEvent.click(within(screen.getByRole('dialog')).getByText('common.cancel'))
     expect(p.tripActions.deleteBudgetItem).not.toHaveBeenCalled()
     expect(screen.getByText('Ramen')).toBeInTheDocument()
@@ -641,7 +657,7 @@ describe('MCostsTab', () => {
     expect(within(card).getAllByText('+$58.00')).toHaveLength(2)
     expect(within(card).queryByText(/60\.00/)).not.toBeInTheDocument()
     // Named by what Bob entered, as the list names it (#2525), never re-converted.
-    expect(within(card).getByText('Museum · £30.00')).toBeInTheDocument()
+    expect(within(card).getByText('Museum (£30.00)')).toBeInTheDocument()
 
     fireEvent.click(bob)
     expect(bob).toHaveAttribute('aria-expanded', 'false')
@@ -656,6 +672,19 @@ describe('MCostsTab', () => {
     await waitFor(() => expect(within(card).getByText('common.unknownError')).toBeInTheDocument())
     expect(within(card).queryByText('$0.00')).not.toBeInTheDocument()
     expect(within(card).queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('FE-MOB-COSTT-051: a dropped connection shows the balances read last instead of an error (#2601)', async () => {
+    const first = await renderTab()
+    first.unmount()
+
+    serveSettlement(SETTLEMENT, true)
+    render(<MCostsTab planner={planner()} shell={buildShell()} />)
+    await screen.findByText('+$12.50')
+    // The second read went out and failed; the copy kept on the device answered it.
+    expect(settlementBases).toEqual(['USD', 'USD'])
+    expect(within(up(screen.getByText('costs.settleUp'), 3)).getByText('$40.00')).toBeInTheDocument()
+    expect(screen.queryByText('common.unknownError')).not.toBeInTheDocument()
   })
 
   it('FE-MOB-COSTT-040: the expense filters apply to payments the same way they do on desktop', async () => {
@@ -682,7 +711,7 @@ describe('MCostsTab', () => {
     const update = vi.spyOn(budgetApi, 'updateSettlement').mockResolvedValue({})
     await renderTab()
 
-    fireEvent.click(within(rowOf('costs.payment')).getByRole('button', { name: 'common.edit' }))
+    fireEvent.click(within(rowOf('costs.payment')).getByRole('button', { name: /^common\.edit(:|$)/ }))
     const dialog = screen.getByRole('dialog', { name: 'costs.editPayment' })
     expect(within(dialog).getByDisplayValue('25.00')).toBeInTheDocument()
 
@@ -690,7 +719,9 @@ describe('MCostsTab', () => {
     fireEvent.change(within(dialog).getByPlaceholderText('0.00'), { target: { value: '30' } })
     fireEvent.click(submit)
 
-    expect(update).toHaveBeenCalledWith(7, 501, { from_user_id: 1, to_user_id: 2, amount: 30, currency: 'USD', settled_at: '2026-04-28' })
+    // The repo first looks whether an older write to this payment still waits in the
+    // queue (#2601), so the request goes out a tick after the tap.
+    await waitFor(() => expect(update).toHaveBeenCalledWith(7, 501, { from_user_id: 1, to_user_id: 2, amount: 30, currency: 'USD', settled_at: '2026-04-28', note: null }))
     await waitFor(() => expect(settlementBases).toHaveLength(2))
   })
 
@@ -700,8 +731,10 @@ describe('MCostsTab', () => {
     const del = vi.spyOn(budgetApi, 'deleteSettlement').mockResolvedValue({ success: true })
     await renderTab()
 
-    fireEvent.click(within(rowOf('costs.payment')).getByRole('button', { name: 'costs.undo' }))
-    expect(del).toHaveBeenCalledWith(7, 502)
+    fireEvent.click(within(rowOf('costs.payment')).getByRole('button', { name: /^costs\.undo(:|$)/ }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // Sent once the queue holds no older write to this payment (#2601).
+    await waitFor(() => expect(del).toHaveBeenCalledWith(7, 502))
     await waitFor(() => expect(settlementBases).toHaveLength(2))
   })
 
@@ -718,7 +751,7 @@ describe('MCostsTab', () => {
     expect(within(row).getByText('£10.00 → $20.00')).toBeInTheDocument()
     expect(within(row).getByText('$20.00')).toBeInTheDocument()
 
-    fireEvent.click(within(row).getByRole('button', { name: 'common.edit' }))
+    fireEvent.click(within(row).getByRole('button', { name: /^common\.edit(:|$)/ }))
     const dialog = screen.getByRole('dialog', { name: 'costs.editPayment' })
     expect(within(dialog).getByDisplayValue('10.00')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: /GBP/ })).toBeInTheDocument()
@@ -726,13 +759,14 @@ describe('MCostsTab', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'common.save' }))
     // The pound rate the phone holds goes along; the server only uses it when the
     // currency changes and it has no rate of its own, so the frozen one stays.
-    expect(update).toHaveBeenCalledWith(7, 505, {
-      from_user_id: 1, to_user_id: 2, amount: 10, currency: 'GBP', settled_at: '2026-04-28',
+    await waitFor(() => expect(update).toHaveBeenCalledWith(7, 505, {
+      from_user_id: 1, to_user_id: 2, amount: 10, currency: 'GBP', settled_at: '2026-04-28', note: null,
       fallback_fx: { base: 'USD', rates: { GBP: 0.5 } },
-    })
+    }))
+    expect(update).toHaveBeenCalledTimes(1)
   })
 
-  it('FE-MOB-COSTT-045: a bill whose rate moved shows what was entered and what it was booked at (#2525)', async () => {
+  it('FE-MOB-COSTT-045: a bill whose rate moved still reads as the dollars typed (#2965)', async () => {
     // A euro trip read in dollars, the bill entered in dollars at a frozen 1.17 to the
     // euro while today the euro buys 1.1551. It is 685.26 EUR of trip money, $791.55
     // today, and that is what settle-up offers too; the row now says where the
@@ -761,17 +795,16 @@ describe('MCostsTab', () => {
     await renderTab(planner({ trip: { ...TRIP, currency: 'EUR' } as Trip, budgetItems: [hotel] }))
 
     const card = cardOf('Aparthotel Silver')
-    expect(within(card).getByText(/^\$801\.76 → 685,26\s€$/)).toBeInTheDocument()
-    expect(within(card).getByText('$791.55')).toBeInTheDocument()
-    // Each share is half of the booked euros, the figure the balances net.
-    expect(within(card).getAllByText('$395.77')).toHaveLength(2)
-    expect(within(card).queryByText('$400.88')).toBeNull()
-    expect(up(screen.getByText('costs.totalSpend'), 1).textContent).toContain('$791.55')
-    expect(screen.getByText('costs.spent:$791.55')).toBeInTheDocument()
+    expect(within(card).queryByText(/^\$801\.76 → /)).toBeNull()
+    expect(within(card).getByText('$801.76')).toBeInTheDocument()
+    // Each share is half of the dollars typed, the figure the balances net (#2965).
+    expect(within(card).getAllByText('$400.88')).toHaveLength(2)
+    expect(up(screen.getByText('costs.totalSpend'), 1).textContent).toContain('$801.76')
+    expect(screen.getByText('costs.spent:$801.76')).toBeInTheDocument()
 
     expect(screen.getAllByText('costs.payment')).toHaveLength(2)
     const paid = up(screen.getByText('Ada → costs.you'), 2)
-    expect(within(paid).getByText(/^\$400\.88 → 342,63\s€$/)).toBeInTheDocument()
+    expect(within(paid).getByText('$400.88')).toBeInTheDocument()
     expect(within(up(screen.getByText('Bob → costs.you'), 2)).getByText('$30.00')).toBeInTheDocument()
     expect(screen.queryByText('$34.65')).toBeNull()
   })
@@ -873,5 +906,66 @@ describe('MCostsTab', () => {
     expect(submit).toBeDisabled()
     fireEvent.click(submit)
     expect(create).not.toHaveBeenCalled()
+  })
+
+  it('FE-MOB-COSTT-050: reads the settlement again when an expense is saved outside the tab', async () => {
+    // A scanned receipt is reviewed in the trip sheets, which reload the items only.
+    const p = planner()
+    const { rerender, shell } = await renderTab(p)
+    expect(settlementBases).toHaveLength(1)
+
+    const bread = { ...RAMEN, id: 15, name: 'Bread', total_price: 18.1 } as BudgetItem
+    rerender(<MCostsTab planner={{ ...p, budgetItems: [...ITEMS, bread] }} shell={shell} />)
+    await waitFor(() => expect(settlementBases).toHaveLength(2))
+  })
+
+  it('FE-MOB-COSTT-052: a link to one expense opens its edit sheet for an editor', async () => {
+    render(<MCostsTab planner={planner()} shell={buildShell()} />, { initialEntries: ['/trips/7?expense=12'] })
+    expect(await screen.findByText('sheet editing 12')).toBeInTheDocument()
+  })
+
+  it('FE-MOB-COSTT-053: a link to one expense opens no edit sheet for a member who may not edit costs', async () => {
+    const reload = vi.fn(async () => undefined)
+    useTripStore.setState({ loadBudgetItems: reload })
+    const viewer = planner({ can: vi.fn(() => false) as unknown as TripPlanner['can'] })
+    render(<MCostsTab planner={viewer} shell={buildShell()} />, { initialEntries: ['/trips/7?expense=12'] })
+    await screen.findByText('+$12.50')
+    expect(screen.queryByText('sheet editing 12')).not.toBeInTheDocument()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('FE-MOB-COSTT-054: with room for two panes the summary stands beside the expenses, and the search keeps to their column', async () => {
+    setSizeClass('split')
+    await renderTab()
+    const summary = screen.getByRole('complementary', { name: 'budget.title' })
+    expect(within(summary).getByText('costs.totalSpend')).toBeInTheDocument()
+    expect(within(summary).queryByPlaceholderText('costs.searchPlaceholder')).not.toBeInTheDocument()
+
+    const expenses = screen.getByRole('region', { name: 'costs.expenses' })
+    expect(within(expenses).getByPlaceholderText('costs.searchPlaceholder')).toBeInTheDocument()
+    expect(within(expenses).getByRole('heading', { name: 'costs.expenses' })).toBeInTheDocument()
+  })
+
+  it('FE-MOB-COSTT-055: in Arabic a signed balance and an amount read as one left-to-right run, and a payment names who paid whom in reading order', async () => {
+    const payment = { id: 503, from_user_id: 3, to_user_id: 1, amount: 15, currency: 'USD', created_at: '2026-06-15T09:00:00Z' }
+    serveSettlement({ ...SETTLEMENT, settlements: [payment] })
+    // The page reads right to left for the whole render (the translation provider
+    // would otherwise set it back to the test's English).
+    Object.defineProperty(document.documentElement, 'dir', { configurable: true, get: () => 'rtl', set: () => {} })
+    try {
+      await renderTab()
+      const settle = up(screen.getByText('costs.settleUp'), 3)
+      // The sign stays in front of the figure instead of trailing it.
+      expect(within(settle).getByText('+$12.50')).toHaveAttribute('dir', 'ltr')
+      expect(within(settle).getByText('−$7.25')).toHaveAttribute('dir', 'ltr')
+      expect(within(settle).getByText('$40.00')).toHaveAttribute('dir', 'ltr')
+      // Names keep their own direction, so a Latin one loses its end when cut.
+      expect(within(settle).getByText('Ghost')).toHaveAttribute('dir', 'auto')
+      // Each name isolated, the arrow pointing left from the payer to the payee.
+      expect(screen.getByText('\u2068Bob\u2069 ← \u2068costs.you\u2069')).toBeInTheDocument()
+    } finally {
+      // Back to the prototype's reflected attribute.
+      delete (document.documentElement as { dir?: string }).dir
+    }
   })
 })

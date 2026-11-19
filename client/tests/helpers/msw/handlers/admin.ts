@@ -76,6 +76,33 @@ export const adminHandlers = [
     return HttpResponse.json({ enabled: body.enabled });
   }),
 
+  http.get('/api/admin/tours-wanderer', () => {
+    return HttpResponse.json({ enabled: false });
+  }),
+
+  http.put('/api/admin/tours-wanderer', async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    return HttpResponse.json({ enabled: body.enabled });
+  }),
+
+  http.get('/api/admin/tours-hiking-map', () => {
+    return HttpResponse.json({ enabled: true });
+  }),
+
+  http.put('/api/admin/tours-hiking-map', async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    return HttpResponse.json({ enabled: body.enabled });
+  }),
+
+  http.get('/api/admin/tours-ski-routing', () => {
+    return HttpResponse.json({ enabled: true });
+  }),
+
+  http.put('/api/admin/tours-ski-routing', async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    return HttpResponse.json({ enabled: body.enabled });
+  }),
+
   http.get('/api/admin/addons', () => {
     return HttpResponse.json({ addons: [] });
   }),
@@ -133,5 +160,30 @@ export const adminHandlers = [
 
   http.get('/api/auth/validate-keys', () => {
     return HttpResponse.json({ maps: true, weather: true });
+  }),
+
+  // The TREK API card's allowance panel, read whenever the settings tab renders it.
+  http.get('/api/admin/service-identity', () => {
+    return HttpResponse.json({ state: 'legacy', tier: 'legacy', keySource: null, services: [], lastSeenAt: null });
+  }),
+
+  // Sharing place details, inside the same card: not eligible, so no prompt opens in other tests.
+  http.get('/api/admin/places-contribute', () => {
+    const fields = { website: true, phone: true, email: true, opening_hours: true, description: true, image: true };
+    return HttpResponse.json({
+      termsVersion: 1,
+      ceiling: 'admin',
+      eligible: false,
+      ineligibleReason: 'not_production',
+      consent: { enabled: false, fields, termsVersion: null, decision: null, decidedBy: null, decidedAt: null },
+      showPrompt: false,
+      snoozedUntil: null,
+      active: false,
+      counts: { accepted: 0, duplicate: 0, rejected: 0, withheld: 0, retracted: 0 },
+      lastSuccessDay: null,
+      queue: { size: 0, cap: 5000, full: false },
+      pauseReason: null,
+      registrationOpen: false,
+    });
   }),
 ];

@@ -1,0 +1,102 @@
+/**
+ * Derive functions for the BOOT-STABLE values that Nest injects through a
+ * registerAs token (src/nest/app-config/tokens.ts) and nothing else reads.
+ *
+ * Every environment variable has exactly one owner. A variable derived here is
+ * owned by its token: `deriveAll()` (and so `readEnv()`) never reads it, which
+ * tests/unit/app-config/config-ownership.test.ts checks by recording the keys
+ * each side touches. A value that pre-container code needs, or that tests
+ * mutate mid-lifetime, belongs in derive.ts instead.
+ */
+import type { RawEnv } from './derive';
+import { csvListFiltered, parseBool, positiveIntOr, stripTrailingSlashes } from './parsers';
+
+/**
+ * Longer than the upstream idle timeout of the common reverse proxies and load
+ * balancers (60 s for nginx and most load balancers, 90 s for Traefik), so the
+ * proxy closes an idle upstream connection before Node does. The other way
+ * round the proxy reuses a socket Node just closed and answers that request
+ * with a 502. The headers timeout follows one second above, still well under
+ * Node's 300 s request timeout.
+ */
+export const DEFAULT_KEEP_ALIVE_TIMEOUT_MS = 95_000;
+
+/** What the pre-init Express layer and the HTTP server freeze when buildApp() runs. */
+export function deriveHttpBoot(raw: RawEnv) {
+  // env.schema.ts accepts 0 as a valid hop count, so `|| 1` would quietly turn
+  // "trust nothing" into "trust one hop" and let a forged X-Forwarded-For through.
+  const trustProxyHops = Number.parseInt(raw.TRUST_PROXY ?? '', 10);
+  return {
+    trustProxyRaw: raw.TRUST_PROXY,
+    trustProxy: Number.isFinite(trustProxyHops) ? trustProxyHops : 1,
+    hstsIncludeSubdomains: parseBool(raw.HSTS_INCLUDE_SUBDOMAINS) === true,
+    /** How long the HTTP server keeps an idle keep-alive connection open. */
+    keepAliveTimeoutMs: positiveIntOr(raw.HTTP_KEEP_ALIVE_TIMEOUT_MS, DEFAULT_KEEP_ALIVE_TIMEOUT_MS),
+  };
+}
+
+/** Where the storage registry puts its conditional place-photo backend. */
+export function deriveStorage(raw: RawEnv) {
+  return {
+    placePhotoDir: raw.TREK_PLACE_PHOTO_DIR,
+  };
+}
+
+/** The Transitous/MOTIS instance TransitService proxies to. */
+export function deriveTransit(raw: RawEnv) {
+  return {
+    apiBase: stripTrailingSlashes(raw.TRANSIT_API_URL || 'https://api.transitous.org'),
+  };
+}
+
+/** Where KitineraryExtractorService looks for its binary when the module starts. */
+export function deriveKitinerary(raw: RawEnv) {
+  return {
+    extractorPath: raw.KITINERARY_EXTRACTOR_PATH,
+    // Windows spells it Path; every other platform PATH. Split here so the
+    // probe gets a list and never re-implements the delimiter.
+    searchPath: (raw.PATH || raw.Path || '')
+      .split(process.platform === 'win32' ? ';' : ':')
+      .map((p) => p.trim())
+      .filter(Boolean),
+  };
+}
+
+/** The liketrek hosts that receive the installation key when nothing else is configured. */
+const DEFAULT_SERVICE_HOSTS = ['places.liketrek.com', 'photon.liketrek.com', 'valhalla.liketrek.com'];
+
+/** The address search of the TREK services, asked before Nominatim while the installation holds a key. */
+const DEFAULT_PHOTON_URL = 'https://photon.liketrek.com';
+/** The TREK services' Valhalla, asked through this server's routing relay. */
+const DEFAULT_VALHALLA_URL = 'https://valhalla.liketrek.com';
+/** Signs the Apple Wallet passes of bookings; only liketrek holds the pass certificate. */
+const DEFAULT_WALLET_PASS_URL = 'https://push.liketrek.com/v1/wallet/pass';
+
+/**
+ * How this installation identifies itself to the liketrek services. Unset is
+ * `auto`; any other value than `auto` switches them off, so a typo fails closed.
+ * A key from the environment wins over the stored one and stops registration.
+ */
+export function deriveServices(raw: RawEnv) {
+  const mode = raw.TREK_SERVICES?.trim().toLowerCase() || 'auto';
+  const hosts = csvListFiltered(raw.TREK_SERVICES_HOSTS?.toLowerCase());
+  return {
+    mode: mode === 'auto' ? ('auto' as const) : ('off' as const),
+    key: raw.TREK_SERVICES_KEY?.trim() || null,
+    hosts: hosts?.length ? hosts : DEFAULT_SERVICE_HOSTS,
+    photonUrl: stripTrailingSlashes(raw.TREK_PHOTON_URL?.trim() || DEFAULT_PHOTON_URL),
+    valhallaUrl: stripTrailingSlashes(raw.TREK_VALHALLA_URL?.trim() || DEFAULT_VALHALLA_URL),
+    walletPassUrl: raw.TREK_WALLET_SIGNER_URL?.trim() || DEFAULT_WALLET_PASS_URL,
+  };
+}
+
+/** One entry per token: the namespace it registers under and the function it derives with. */
+export const BOOT_DERIVERS = {
+  http: deriveHttpBoot,
+  storage: deriveStorage,
+  transit: deriveTransit,
+  kitinerary: deriveKitinerary,
+  services: deriveServices,
+} as const;
+
+export type BootNamespace = keyof typeof BOOT_DERIVERS;

@@ -57,16 +57,20 @@ const system_notice: TranslationStrings = {
   'system_notice.pager.goto': 'Μετάβαση στην ειδοποίηση {n}',
   'system_notice.pager.position': 'Ειδοποίηση {current} από {total}',
   'system_notice.release_notes.eyebrow': 'Ενημερώθηκε',
-  'system_notice.release_notes.headline': 'Τέσσερα πράγματα που το TREK κάνει πλέον μόνο του.',
-  'system_notice.release_notes.intro': 'Δικό του API τοποθεσιών, οδικά ταξίδια σχεδιασμένα από την αρχή ως το τέλος, το ιστορικό τοποθεσίας σας στα χέρια σας, και τα έγγραφά σας σε συγχρονισμό.',
+  'system_notice.release_notes.headline': 'Πρώτα το σωστό μέρος.',
+  'system_notice.release_notes.intro':
+    'Η αναζήτηση τοποθεσιών, η αναζήτηση διευθύνσεων και η δρομολόγηση τρέχουν πλέον στους δικούς διακομιστές του TREK, με χορηγία της dataforest cloud, και κάθε TREK μπορεί να μοιράζεται όσα ξέρει για τα μέρη με όλα τα άλλα.',
   'system_notice.release_notes.features_label': 'Τα σημαντικότερα',
   'system_notice.release_notes.features_aside': 'Και δεν είναι μόνο αυτά',
-  'system_notice.release_notes.feature_places_title': 'TREK Places API',
-  'system_notice.release_notes.feature_places_body': 'Ο πρώτος ανοιχτού κώδικα σχεδιαστής ταξιδιών με δικό του API τοποθεσιών. 73,6 εκατ. τοποθεσίες, χωρίς κλειδί, χωρίς όριο.',
-  'system_notice.release_notes.feature_roadtrip_title': 'Πρόσθετο «Οδικό ταξίδι»',
-  'system_notice.release_notes.feature_roadtrip_body': 'Σχεδιάζει τη διαδρομή μόνο του: δρομολόγιο, απόσταση, ώρες και στάσεις. Ανενεργό μέχρι να το ενεργοποιήσει ένας διαχειριστής.',
-  'system_notice.release_notes.feature_dawarich_title': 'Ενσωμάτωση Dawarich',
-  'system_notice.release_notes.feature_dawarich_body': 'Η εναλλακτική του Google Timeline που φιλοξενείτε μόνοι σας, τώρα ορατή μέσα από το TREK. Το TREK διαβάζει, και μόνο διαβάζει.',
+  'system_notice.release_notes.feature_search_title': 'Αναζήτηση τοποθεσιών που πετυχαίνει',
+  'system_notice.release_notes.feature_search_body':
+    'Πόλεις, νησιά, αξιοθέατα και αεροδρόμια με τον κωδικό τους βγαίνουν πρώτα, τα καφέ έρχονται από την περιοχή σας και οι προτάσεις εμφανίζονται όσο πληκτρολογείτε.',
+  'system_notice.release_notes.feature_share_title': 'Λεπτομέρειες τοποθεσιών, για όλους',
+  'system_notice.release_notes.feature_share_body':
+    'Μοιραστείτε ιστοσελίδες, ωράρια λειτουργίας και φωτογραφίες με κάθε TREK, πεδίο προς πεδίο, και οι αποθηκευμένες τοποθεσίες σας παίρνουν όσα πρόσθεσαν άλλοι.',
+  'system_notice.release_notes.feature_routing_title': 'Ταχύτερη δρομολόγηση',
+  'system_notice.release_notes.feature_routing_body':
+    'Μια ολόκληρη μέρα δρομολογείται μονομιάς με έως είκοσι στάσεις, μια αργή διαδρομή δεν καθυστερεί πια τις υπόλοιπες, και τα μέσα μαζικής μεταφοράς ρωτούν δεύτερο πάροχο όταν ο πρώτος δεν βρίσκει τίποτα.',
   'system_notice.release_notes.footnote': 'Και ακόμη μια μεγάλη λίστα με μικρότερες αλλαγές σε όλο το υπόλοιπο TREK.',
   'system_notice.release_notes.notes_label': 'Σημειώσεις έκδοσης',
   'system_notice.release_notes.note_eyebrow': 'Μια σημείωση από τον δημιουργό',
@@ -80,13 +84,11 @@ const system_notice: TranslationStrings = {
   'system_notice.release_notes.note_body_after':
     'Και τότε το ανοίξατε. Μέσα σε λίγους μήνες γίνατε χιλιάδες: αστέρια, αναφορές σφαλμάτων, μεταφράσεις σε γλώσσες που δεν μιλάω, pull requests από ανθρώπους που δεν έχω γνωρίσει ποτέ. Ακόμα ανοίγω το αποθετήριο πρώτο πράγμα κάθε πρωί, και ακόμα δεν μου φαίνεται εντελώς αληθινό.',
   'system_notice.release_notes.note_closing': 'Σας ευχαριστώ που είστε εδώ. Φιλικά, Maurice.',
-  'system_notice.release_notes.support_lead':
-    'Το TREK είναι δωρεάν και θα είναι πάντα, όμως οι servers, τα domains και τα πολλά ξενύχτια δεν είναι.',
+  'system_notice.release_notes.support_label': 'Μένουμε ανεξάρτητοι',
+  'system_notice.release_notes.support_lead': 'Χωρίς Google και σία.',
   'system_notice.release_notes.support_text':
-    'Αν έχει κερδίσει μια θέση στα ταξίδια σας, κεράστε με έναν καφέ και βοηθήστε να έρθει η επόμενη έκδοση.',
+    'Η αναζήτηση τοποθεσιών, η αναζήτηση διευθύνσεων και η δρομολόγηση τρέχουν στους δικούς διακομιστές του TREK, σήμερα με χορηγία της dataforest cloud. Το παλεύω κάθε μέρα, και για να μείνει έτσι χρειάζομαι τη στήριξή σας.',
   'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
   'system_notice.release_notes.cta_kofi': 'Στηρίξτε στο Ko-fi',
-  'system_notice.release_notes.feature_docsync_title': 'Συγχρονισμός εγγράφων',
-  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud και Synology Drive. Τα έγγραφα ενός ταξιδιού ρέουν και προς τις δύο κατευθύνσεις με τον χώρο που ήδη χρησιμοποιείτε.',
 };
 export default system_notice;

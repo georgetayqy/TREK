@@ -1,4 +1,4 @@
-// FE-COMP-JMAPTL-001 to FE-COMP-JMAPTL-016
+// FE-COMP-JMAPTL-001 to FE-COMP-JMAPTL-018
 
 const mapHandle = vi.hoisted(() => ({
   highlightMarker: vi.fn(),
@@ -150,7 +150,7 @@ describe('MobileMapTimeline', () => {
     await userEvent.click(segments[1])
 
     const { cards } = carouselOf(container)
-    expect(cards[1].querySelector('button')!.className).toContain('w-[164px]')
+    expect(cards[1].querySelector('button')!.className).toContain('scale-[1.18]')
   })
 
   it('FE-COMP-JMAPTL-003: the first entry starts out active and drives the map highlight', () => {
@@ -188,6 +188,16 @@ describe('MobileMapTimeline', () => {
 
     expect(lastMapProps.current.activeMarkerId).toBe('2')
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+  })
+
+  it('FE-COMP-JMAPTL-018: a tap on a marker card opens that entry straight away (#2885)', () => {
+    const onEntryClick = vi.fn()
+    renderTimeline({ onEntryClick })
+    const onMarkerCardClick = lastMapProps.current.onMarkerCardClick as (id: string) => void
+
+    act(() => { onMarkerCardClick('2') })
+
+    expect(onEntryClick).toHaveBeenCalledWith(entries[1])
   })
 
   it('FE-COMP-JMAPTL-007: a marker click for an unknown entry is ignored', () => {
@@ -275,13 +285,14 @@ describe('MobileMapTimeline', () => {
       carousel.getBoundingClientRect = () => fakeRect(0, 300)
       cards.forEach((c, i) => { c.getBoundingClientRect = () => fakeRect(i === 2 ? 30 : -400, 240) })
 
+      // The strip counts as landed 90 ms after its last scroll event.
       fireEvent.scroll(carousel)
-      act(() => { vi.advanceTimersByTime(100) })
+      act(() => { vi.advanceTimersByTime(60) })
       fireEvent.scroll(carousel)
-      act(() => { vi.advanceTimersByTime(100) })
+      act(() => { vi.advanceTimersByTime(60) })
       expect(lastMapProps.current.activeMarkerId).toBe('1')
 
-      act(() => { vi.advanceTimersByTime(100) })
+      act(() => { vi.advanceTimersByTime(40) })
       expect(lastMapProps.current.activeMarkerId).toBe('3')
     } finally {
       vi.useRealTimers()

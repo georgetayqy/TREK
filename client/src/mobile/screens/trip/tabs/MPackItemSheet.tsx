@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Copy, HandHelping, Share2, UserRound, Users } from 'lucide-react'
 import MSheet from '../../../components/MSheet'
-import { Eyebrow, FIELD_CLS, FormSheetFooter, FormSheetHeader } from '../sheets/PlSheetChrome'
+import { Eyebrow, FIELD_CLS, FormSheetBody, FormSheetFooter, FormSheetHeader } from '../sheets/PlSheetChrome'
 import { avatarSrc } from '../../../../utils/avatarSrc'
 import type { PackingItem, TripMember } from '../../../../types'
 import type { TripPlanner } from '../MTripShell'
-import { isPackingPlaceholder } from './listsModel'
+import { isPackingPlaceholder } from '../../../../components/Packing/packingListModel'
+import { packingBringerNames } from '../../../../components/Packing/packingBringers'
 
 export interface MPackItemSheetProps {
   planner: TripPlanner
@@ -108,7 +109,7 @@ export default function MPackItemSheet({
     }`
 
   return (
-    <MSheet open={open} onClose={onClose} ariaLabel={t('packing.editItem')}>
+    <MSheet open={open} onClose={onClose} form ariaLabel={t('packing.editItem')}>
       <FormSheetHeader
         title={t('packing.editItem')}
         subtitle={item.category || t('packing.defaultCategory')}
@@ -116,7 +117,7 @@ export default function MPackItemSheet({
         closeLabel={t('common.close')}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[6px] pt-1">
+      <FormSheetBody>
         <Eyebrow className="mb-[5px] uppercase">{t('packing.itemName')}</Eyebrow>
         <input
           type="text"
@@ -160,7 +161,7 @@ export default function MPackItemSheet({
               <div className="rounded-[14px] border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] p-3">
                 {item.owner_username && (
                   <div className="mb-[9px] font-geist text-[0.6875rem] text-m-muted">
-                    {t('packing.broughtBy', { name: item.owner_username })}
+                    {t('packing.broughtBy', { name: packingBringerNames(item) })}
                   </div>
                 )}
                 <div className="flex gap-2">
@@ -211,7 +212,7 @@ export default function MPackItemSheet({
                           key={m.id}
                           type="button"
                           onClick={() => toggleRecipient(m.id)}
-                          className="flex items-center gap-[8px] rounded-[9px] px-[8px] py-[7px] text-left"
+                          className="flex items-center gap-[8px] rounded-[9px] px-[8px] py-[7px] text-start"
                         >
                           <span className="flex h-[22px] w-[22px] flex-none items-center justify-center overflow-hidden rounded-full bg-m-act text-[0.625rem] font-bold text-m-actfg">
                             {src ? <img src={src} alt="" className="h-full w-full object-cover" /> : m.username[0]?.toUpperCase()}
@@ -227,7 +228,7 @@ export default function MPackItemSheet({
             )}
           </>
         )}
-      </div>
+      </FormSheetBody>
 
       <FormSheetFooter
         onCancel={onClose}

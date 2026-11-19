@@ -201,8 +201,8 @@ describe('useMVacay', () => {
     });
     const { result } = await mount();
 
-    expect(result.current.dayCtx.sharedMap?.['2026-07-01']).toEqual([{ color: '#f59e0b' }]);
-    expect(result.current.dayCtx.sharedMap?.['2026-07-02']).toEqual([{ color: '#f59e0b' }]);
+    expect(result.current.dayCtx.sharedMap?.['2026-07-01']).toEqual([expect.objectContaining({ color: '#f59e0b' })]);
+    expect(result.current.dayCtx.sharedMap?.['2026-07-02']).toEqual([expect.objectContaining({ color: '#f59e0b' })]);
     expect(result.current.dayCtx.sharedMap?.['2026-07-03']).toBeUndefined();
   });
 
@@ -248,6 +248,19 @@ describe('useMVacay', () => {
 
     act(() => { result.current.prevMonth(); });
     expect(result.current.monthSlot).toBe(11);
+  });
+
+  it('FE-MOB-MVAC-012b: a swipe selects only years the plan has, and names any slot and any year', async () => {
+    const setSelectedYear = vi.fn((_year: number) => undefined);
+    mocks.vacay = buildVacay({ years: [2025, 2026], setSelectedYear });
+    const { result } = await mount();
+
+    act(() => { result.current.selectYear(2025); });
+    act(() => { result.current.selectYear(2031); });
+    expect(setSelectedYear.mock.calls).toEqual([[2025]]);
+
+    expect(result.current.monthsFor(2025)[0]).toEqual({ year: 2025, month: 0 });
+    expect(result.current.monthNameLongFor(0)).toMatch(/jan/i);
   });
 
   it('FE-MOB-MVAC-013: only a fused plan allows selecting another member', async () => {
@@ -332,7 +345,7 @@ describe('useMVacay', () => {
     mocks.vacay = buildVacay({ plan: buildPlan({ company_holidays_enabled: true }) });
     act(() => { rerender(); });
     await act(async () => { await result.current.handleDayTap('2026-12-24'); });
-    expect(toggleCompanyHoliday).toHaveBeenCalledWith('2026-12-24');
+    expect(toggleCompanyHoliday.mock.calls[0][0]).toBe('2026-12-24');
   });
 
   it('FE-MOB-MVAC-019: the entitlement stepper caps at 365 and never drops below used', async () => {

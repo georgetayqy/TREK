@@ -6,7 +6,7 @@ const storage: TranslationStrings = {
   'storage.field.endpoint': 'Végpont URL',
   'storage.help.endpoint':
     'Az S3-kompatibilis szolgáltatás alap URL-je, pl. https://s3.example.com vagy http://127.0.0.1:9000.',
-  'storage.field.bucket': 'Bucket',
+  'storage.field.bucket': 'Bucket', // same-as-en
   'storage.field.accessKeyId': 'Hozzáférési kulcs azonosító',
   'storage.field.secretAccessKey': 'Titkos hozzáférési kulcs',
   'storage.field.region': 'Régió',
@@ -33,7 +33,7 @@ const storage: TranslationStrings = {
   'storage.backends.add': 'Backend hozzáadása',
   'storage.backends.usedBy': 'Használja: {categories}',
   'storage.backends.unused': 'Nincs kategóriához rendelve',
-  'storage.backends.envReadOnly': 'Környezeti változó definiálja — csak olvasható',
+  'storage.backends.envReadOnly': 'Környezeti változó definiálja (csak olvasható)',
   'storage.source.built-in': 'Beépített',
   'storage.source.env': 'Környezet',
   'storage.source.settings': 'Beállítások',
@@ -115,7 +115,8 @@ const storage: TranslationStrings = {
   'storage.sync.error': 'A szinkronizálás sikertelen: {error}',
   'storage.sync.prompt': 'A meglévő objektumok még nincsenek replikálva — szinkronizálsz most?',
   'storage.sync.dismiss': 'Elvetés',
-  'storage.usage.line': '{objects} objektum · {size}',
+  'storage.usage.line': '{count} objektum · {size}',
+  'storage.usage.line.one': '{count} objektum · {size}',
   'storage.usage.computed': 'A használat kiszámítva {age}',
   'storage.usage.never': 'A használat még nincs kiszámítva',
   'storage.usage.refresh': 'Frissítés',
@@ -124,7 +125,8 @@ const storage: TranslationStrings = {
 
   // Category migration (copy → flip → delta sweep)
   'storage.migrate.promptTitle': 'Áthelyezed a meglévő objektumokat az új backendre?',
-  'storage.migrate.promptLine': '{category}: {objects} objektum ({size}) innen: {from} ide: {to}',
+  'storage.migrate.promptLine': '{category}: {count} objektum ({size}) innen: {from} ide: {to}',
+  'storage.migrate.promptLine.one': '{category}: {count} objektum ({size}) innen: {from} ide: {to}',
   'storage.migrate.promptLineUnknown':
     '{category}: ismeretlen méret (a használat még nincs kiszámítva) innen: {from} ide: {to}',
   'storage.migrate.move': 'Meglévő objektumok áthelyezése',
@@ -134,10 +136,48 @@ const storage: TranslationStrings = {
   'storage.migrate.doneFailures': '{failed} sikertelen — ezek az objektumok nem lettek átmásolva az új backendre',
   'storage.migrate.failed': 'Az áthelyezés sikertelen: {error} — a kategória nem lett átváltva',
   'storage.migrate.cancelled': 'Áthelyezés megszakítva — semmi sem lett átváltva',
-  'storage.migrate.reclaimable': '{objects} objektum ({size}) marad a(z) {from} helyen — kézzel szabadítsd fel',
+  'storage.migrate.reclaimable': '{count} objektum ({size}) marad a(z) {from} helyen, kézzel szabadítsd fel',
+  'storage.migrate.reclaimable.one': '{count} objektum ({size}) marad a(z) {from} helyen, kézzel szabadítsd fel',
   'storage.migrate.cancel': 'Áthelyezés megszakítása',
   'storage.migrate.promptCancel': 'Mégse',
   'storage.migrate.queued': 'Várólistán: {categories}',
-  'storage.migrate.queueDropped': 'A következő áthelyezés nem indítható el — a hátralévő várólista törlésre került: {categories}',
+  'storage.migrate.queueDropped':
+    'A következő áthelyezés nem indítható el — a hátralévő várólista törlésre került: {categories}',
+  'storage.reclaim.title': 'Hivatkozás nélküli fájlok',
+  'storage.reclaim.hint':
+    'A TREK minden éjjel megkeresi azokat a feltöltött fájlokat, amelyeket már egyetlen utazás, hely, napló, gyűjtemény vagy felhasználó sem használ, például egy utazás törlése után.',
+  'storage.reclaim.check': 'Ellenőrzés most',
+  'storage.reclaim.checked': 'Utolsó ellenőrzés: {age}',
+  'storage.reclaim.never': 'Még nem lett ellenőrizve',
+  'storage.reclaim.delete': 'Hivatkozás nélküli fájlok törlése',
+  'storage.reclaim.deleteHint':
+    'Kikapcsolva az éjszakai ellenőrzés csak jelent. Bekapcsolva törlődik minden fájl, amelyet egy hete senki nem használt. A TREK-ben általad törölt fájlok mindkét esetben egy nappal később törlődnek, amikor már semmilyen visszavonás nem hozhatja vissza őket.',
+  'storage.reclaim.freeable': 'Felszabadítható',
+  'storage.reclaim.waiting': 'Kevesebb mint egy hete nem használt',
+  'storage.reclaim.deleted': 'Felszabadítva az utolsó éjszakai tisztításkor',
+  'storage.reclaim.nothing': 'Nem található hivatkozás nélküli fájl.',
+  'storage.reclaim.stopped': 'Az utolsó ellenőrzés idő előtt leállt, mert futás közben visszaállították az adatbázist.',
+  'storage.reclaim.skip.sources_missing': 'Kihagyva: a TREK nem minden része volt lekérdezhető',
+  'storage.reclaim.skip.shared_location': 'Kihagyva: a helyét egy másik kategóriával osztja meg',
+  'storage.reclaim.skip.list_failed': 'Kihagyva: a fájlokat nem sikerült listázni',
+  'storage.reclaim.skip.source_failed': 'Kihagyva: egy lekérdezés sikertelen volt',
+  'storage.reclaim.running': 'Ellenőrzés…',
+  'storage.reclaim.stoppedFailed': 'Az utolsó ellenőrzés hiba miatt leállt. Ma éjjel újra lefut.',
+  'storage.reclaim.skip.foreign_install': 'Kihagyva: egy másik TREK-telepítés használja ezt a tárhelyet',
+  'storage.reclaim.skip.owner_unknown': 'Kihagyva: a TREK nem tudta a sajátjaként megjelölni ezt a tárhelyet',
+  'storage.reclaim.skip.delete_failed': 'Leállítva: a tárhely megtagadott egy törlést',
+  'storage.reclaim.skip.interrupted': 'Leállt, mielőtt befejeződött volna, az adatok hiányosak',
+  'storage.reclaim.confirmNeeded':
+    'Ezeknek a fájloknak több mint ötöde használatlannak tűnik. Itt semmi sem törlődik, amíg meg nem erősíted, hogy ez várható.',
+  'storage.reclaim.confirm': 'Megerősítés',
+  'storage.reclaim.confirmed': 'Megerősítve a következő 14 napra.',
+  'storage.reclaim.error.reclaim_busy': 'Egy másik tárhelyfeladat fut. Próbáld újra egy pillanat múlva.',
+  'storage.reclaim.error.reclaim_demo': 'Demópéldányon nem érhető el.',
+  'storage.reclaim.error.reclaim_nothing_to_confirm': 'Már nincs mit megerősíteni. Előbb futtass egy ellenőrzést.',
+  'storage.reclaim.skip.backup_running': 'Kihagyva: mentés futott',
+  'storage.reclaim.error.reclaim_confirm_stale':
+    'A szám megváltozott a megjelenítése óta. Ellenőrizd az új értéket, és erősítsd meg újra.',
+  'storage.reclaim.error.reclaim_install_unknown':
+    'A TREK nem tudta beolvasni a telepítése azonosítóját, ezért nem töröl semmit. Ellenőrizd az adatmappát.',
 };
 export default storage;

@@ -3,14 +3,19 @@ import MTransportFormSheet from '../../../../src/mobile/screens/trip/sheets/MTra
 import type { TripPlanner } from '../../../../src/mobile/screens/trip/MTripShell'
 import { useAddonStore } from '../../../../src/store/addonStore'
 import { useTripStore } from '../../../../src/store/tripStore'
+import { useAuthStore } from '../../../../src/store/authStore'
+import { server } from '../../../helpers/msw/server'
+import { http, HttpResponse } from 'msw'
+import { buildBudgetItem, buildUser } from '../../../helpers/factories'
 import { useSettingsStore } from '../../../../src/store/settingsStore'
 import { isBlurred } from '../../../helpers/bookingCodeBlur'
 import type { Day, Reservation, TripMember } from '../../../../src/types'
 import { buildPlanner } from '../../../helpers/mobileTrip'
+import { plannerSave } from '../../../helpers/bookingSave'
 import { resetAllStores, seedStore } from '../../../helpers/store'
-import { act, fireEvent, render, screen } from '../../../helpers/render'
+import { act, fireEvent, render, screen, waitFor } from '../../../helpers/render'
 
-// FE-MOB-TRFRM-001 to FE-MOB-TRFRM-052
+// FE-MOB-TRFRM-001 to FE-MOB-TRFRM-062
 //
 // The sheet's own pickers (airport/location search, day select, time picker) and
 // the embedded transit panel are replaced by minimal controlled stand-ins so the
@@ -76,15 +81,17 @@ vi.mock('../../../../src/components/Planner/LocationSelect', () => ({
 }))
 
 vi.mock('../../../../src/components/Planner/TransitSearchPanel', () => ({
-  default: ({ day, places, onAdd, initialFrom, initialTime }: {
+  default: ({ day, places, onAdd, initialFrom, initialTime, walk }: {
     day: { id: number }
     places: { name: string }[]
     onAdd: (p: Record<string, unknown>) => void
     initialFrom: { name: string } | null
     initialTime: string | null
+    walk: { fromWalk: string } | null
   }) => (
     <div>
       <span data-testid="transit-day">{day.id}</span>
+      <span data-testid="transit-walk">{walk?.fromWalk ?? ''}</span>
       <span data-testid="transit-places">{places.map(p => p.name).join(',')}</span>
       <span data-testid="transit-from">{initialFrom?.name ?? ''}</span>
       <span data-testid="transit-time">{initialTime ?? ''}</span>
@@ -94,11 +101,23 @@ vi.mock('../../../../src/components/Planner/TransitSearchPanel', () => ({
 }))
 
 vi.mock('../../../../src/mobile/screens/trip/sheets/PlFileAttach', () => ({
-  default: ({ files, onAdd, onRemove }: { files: File[]; onAdd: (f: File[]) => void; onRemove: (i: number) => void }) => (
+  default: ({ files, onAdd, onRemove, canAttach = true, attached = [], linkable = [], onLink }: {
+    files: File[]
+    onAdd: (f: File[]) => void
+    onRemove: (i: number) => void
+    canAttach?: boolean
+    attached?: { id: number; original_name: string }[]
+    linkable?: { id: number; original_name: string }[]
+    onLink?: (f: { id: number; original_name: string }) => Promise<boolean>
+  }) => (
     <div>
-      <button type="button" onClick={() => onAdd([new File(['x'], 'extra.pdf')])}>attach-file</button>
+      {canAttach && <button type="button" onClick={() => onAdd([new File(['x'], 'extra.pdf')])}>attach-file</button>}
       {files.map((f, i) => (
         <button key={`${f.name}-${i}`} type="button" onClick={() => onRemove(i)}>{`drop-${f.name}`}</button>
+      ))}
+      {attached.map(f => <span key={f.id}>{`attached-${f.original_name}`}</span>)}
+      {linkable.map(f => (
+        <button key={f.id} type="button" onClick={() => { void onLink?.(f) }}>{`link-${f.original_name}`}</button>
       ))}
     </div>
   ),
@@ -117,8 +136,9 @@ const MEMBERS = [
 
 type SavePayload = Record<string, unknown> & { title: string }
 
-function makeSave(result: unknown = { id: 99 } as unknown) {
-  return vi.fn(async (_payload: SavePayload) => result)
+/** A save that stores `result` and runs the sheet's follow-up, as the planner does; null stores nothing. */
+function makeSave(result: { id: number } | null = { id: 99 }) {
+  return result ? plannerSave(result).save : vi.fn(async (_payload: SavePayload) => undefined)
 }
 
 function makePlanner(overrides: Record<string, unknown> = {}): TripPlanner {
@@ -216,7 +236,7 @@ describe('MTransportFormSheet', () => {
     setValue(timeInputs()[1], '11:00')
     setValue(screen.getByPlaceholderText('reservations.confirmationPlaceholder'), 'BUS-4711')
     setValue(screen.getByPlaceholderText('reservations.notesPlaceholder'), 'Seat 4 reserved')
-    fireEvent.click(screen.getByRole('button', { name: 'reservations.confirmed' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'reservations.confirmed' }))
 
     await submit()
 
@@ -232,7 +252,7 @@ describe('MTransportFormSheet', () => {
       location: null,
       confirmation_number: 'BUS-4711',
       notes: 'Seat 4 reserved',
-      metadata: null,
+      metadata: {},
       endpoints: [
         { role: 'from', sequence: 0, name: 'Osaka Station', code: null, lat: 34.7, lng: 135.5, timezone: null, local_date: '2026-05-01', local_time: '08:15' },
         { role: 'to', sequence: 1, name: 'Kyoto Station', code: null, lat: 34.98, lng: 135.75, timezone: null, local_date: '2026-05-02', local_time: '11:00' },
@@ -379,7 +399,7 @@ describe('MTransportFormSheet', () => {
     await submit()
 
     const payload = handleSaveTransport.mock.calls[0][0]
-    expect(payload.metadata).toBeNull()
+    expect(payload.metadata).toEqual({})
     expect(payload.endpoints).toEqual([])
     expect(payload.day_id).toBeNull()
   })
@@ -598,7 +618,7 @@ describe('MTransportFormSheet', () => {
     expect(screen.getByPlaceholderText('reservations.titlePlaceholder')).toHaveValue('LH 716')
     expect(screen.getByPlaceholderText('reservations.confirmationPlaceholder')).toHaveValue('ABC123')
     expect(screen.getByPlaceholderText('reservations.notesPlaceholder')).toHaveValue('Exit row')
-    expect(screen.getByRole('button', { name: 'reservations.confirmed' }).className).toContain('bg-m-act')
+    expect(screen.getByRole('radio', { name: 'reservations.confirmed' }).className).toContain('bg-m-act')
     // Endpoints are read in sequence order, not array order.
     expect(airportInputs().map(i => i.value)).toEqual(['FRA', 'HND'])
     expect(daySelects().map(s => s.value)).toEqual(['11', '12'])
@@ -775,7 +795,7 @@ describe('MTransportFormSheet', () => {
 
     await submit('common.update')
     const payload = handleSaveTransport.mock.calls[0][0]
-    expect(payload.metadata).toBeNull()
+    expect(payload.metadata).toEqual({})
     expect(payload.endpoints).toEqual([
       expect.objectContaining({ role: 'from', name: 'Osaka Station' }),
       expect.objectContaining({ role: 'to', sequence: 1, name: 'Nara Station' }),
@@ -846,7 +866,7 @@ describe('MTransportFormSheet', () => {
       handleSaveTransport,
     })
     renderSheet(planner)
-    expect(screen.queryByRole('button', { name: 'reservations.createExpense' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Create expense' })).not.toBeInTheDocument()
     await submit()
     expect(handleSaveTransport.mock.calls[0][0]).not.toHaveProperty('create_budget_entry')
   })
@@ -910,7 +930,7 @@ describe('MTransportFormSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'reservations.type.ferry' }))
     typeTitle('Ferry ticket')
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'reservations.createExpense' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Create expense' }))
     })
     expect(handleSaveTransport).toHaveBeenCalledTimes(1)
     expect(onOpenExpense).toHaveBeenCalledWith({
@@ -948,13 +968,24 @@ describe('MTransportFormSheet', () => {
     expect(screen.getByTestId('transit-from')).toHaveTextContent('Hotel')
     // A leg picked from the timeline's connector menu carries its departure (#2398).
     expect(screen.getByTestId('transit-time')).toHaveTextContent('08:15')
+    expect(screen.getByTestId('transit-walk')).toBeEmptyDOMElement()
+  })
+
+  it('FE-MOB-TRFRM-039b: a leg between two city walks hands the panel what it says of them (CW-08)', () => {
+    const walk = { dayId: 12, fromWalk: 'Old town', toWalk: 'Harbour', ends: null, endsNextDay: false, endsAtLeast: false, nextStarts: '13:00' }
+    renderSheet(makePlanner({
+      transportModalAutomated: true,
+      transportModalDayId: 12,
+      transitPrefill: { from: { name: 'Old bridge', lat: 52.51, lng: 13.42 }, to: null, time: null, walk },
+    }))
+    expect(screen.getByTestId('transit-walk')).toHaveTextContent('Old town')
   })
 
   it('FE-MOB-TRFRM-040: the transit panel saves its itinerary through the shared save path', async () => {
     const handleSaveTransport = makeSave()
     renderSheet(makePlanner({ transportModalAutomated: true, transportModalDayId: 12, handleSaveTransport }))
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'add-itinerary' })) })
-    expect(handleSaveTransport).toHaveBeenCalledWith({ title: 'U4 to Prater', type: 'transit' })
+    expect(handleSaveTransport).toHaveBeenCalledWith({ title: 'U4 to Prater', type: 'transit' }, undefined)
   })
 
   it('FE-MOB-TRFRM-041: switching between manual and automated swaps the form', () => {
@@ -1048,5 +1079,139 @@ describe('MTransportFormSheet', () => {
     const fields = locationInputs()
     expect(fields).toHaveLength(2)
     for (const field of fields) expect(field).toHaveAttribute('data-picks', 'Fushimi Inari')
+  })
+
+  // ── Files and costs of a saved transport (#2084) ───────────────────────────
+
+  const SHINKANSEN = {
+    id: 61, trip_id: 1, type: 'train', title: 'Shinkansen', status: 'confirmed', day_id: 12, metadata: {}, endpoints: [],
+  } as unknown as Reservation
+  const TRIP_FILES = [
+    { id: 7, trip_id: 1, reservation_id: 61, original_name: 'eticket.pdf', url: '/uploads/eticket.pdf', deleted_at: null },
+    { id: 8, trip_id: 1, original_name: 'railpass.pdf', url: '/uploads/railpass.pdf', deleted_at: null },
+  ]
+
+  it('FE-MOB-TRFRM-054: an edited transport lists its files and links another trip file to itself', async () => {
+    seedStore(useAuthStore, { user: buildUser({ id: 1 }) })
+    seedStore(useTripStore, { trip: { id: 1, user_id: 1, currency: 'EUR' } as never, files: TRIP_FILES as never })
+    let body: unknown = null
+    server.use(
+      http.post('/api/trips/1/files/8/link', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ success: true })
+      }),
+      http.get('/api/trips/1/files', () => HttpResponse.json({ files: TRIP_FILES })),
+    )
+    renderSheet(makePlanner({ editingTransport: SHINKANSEN }))
+    expect(screen.getByText('attached-eticket.pdf')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'link-railpass.pdf' }))
+    await waitFor(() => expect(body).toEqual({ reservation_id: 61 }))
+  })
+
+  it('FE-MOB-TRFRM-055: without upload permission the files of a transport are still shown, without the picker', () => {
+    seedStore(useTripStore, { files: TRIP_FILES as never })
+    renderSheet(makePlanner({ editingTransport: SHINKANSEN, canUploadFiles: false }))
+    expect(screen.getByText('attached-eticket.pdf')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'attach-file' })).not.toBeInTheDocument()
+    // Nobody is signed in here, so linking is not offered either.
+    expect(screen.queryByRole('button', { name: 'link-railpass.pdf' })).not.toBeInTheDocument()
+  })
+
+  it('FE-MOB-TRFRM-056: a linked expense of the transport opens in the cost sheet for editing', () => {
+    const fare = buildBudgetItem({ id: 90, trip_id: 1, name: 'Train fare', total_price: 140, reservation_id: 61 })
+    seedStore(useTripStore, { trip: { id: 1, currency: 'EUR' } as never, budgetItems: [fare] })
+    const onOpenExpense = vi.fn()
+    renderSheet(makePlanner({ editingTransport: SHINKANSEN }), onOpenExpense)
+    fireEvent.click(screen.getByText('Train fare'))
+    expect(onOpenExpense).toHaveBeenCalledWith({ editItem: fare })
+  })
+
+  it('FE-MOB-TRFRM-057: a new transport has nothing to link its costs to yet', () => {
+    seedStore(useTripStore, { trip: { id: 1, currency: 'EUR' } as never, budgetItems: [buildBudgetItem({ id: 91, trip_id: 1, name: 'Loose' })] })
+    renderSheet(makePlanner())
+    expect(screen.getByRole('button', { name: 'Create expense' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Link' })).not.toBeInTheDocument()
+  })
+
+  it('FE-MOB-TRFRM-058: files attached while editing a transport are uploaded against it (#2534)', async () => {
+    const handleSaveTransport = makeSave(SHINKANSEN)
+    const addFile = vi.fn(async (_tripId: number, _form: FormData) => undefined)
+    renderSheet(makePlanner({ editingTransport: SHINKANSEN, handleSaveTransport, tripActions: { addFile } }))
+    fireEvent.click(screen.getByRole('button', { name: 'attach-file' }))
+
+    await submit('common.update')
+    expect(addFile).toHaveBeenCalledTimes(1)
+    const fd = addFile.mock.calls[0][1] as FormData
+    expect(fd.get('reservation_id')).toBe('61')
+    expect(fd.get('description')).toBe('Shinkansen')
+    expect((fd.get('file') as File).name).toBe('extra.pdf')
+  })
+
+  it('FE-MOB-TRFRM-061: a failed upload keeps the sheet and the file left, and the retry updates the same booking (#2883)', async () => {
+    const { save, failures } = plannerSave({ id: 99 })
+    const addFile = vi.fn(async (_tripId: number, _form: FormData) => undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('413'))
+    const planner = makePlanner({ importReviewActive: true, handleSaveTransport: save, tripActions: { addFile } })
+    renderSheet(planner)
+    typeTitle('Flight with docs')
+    fireEvent.click(screen.getByRole('button', { name: 'attach-file' }))
+    fireEvent.click(screen.getByRole('button', { name: 'attach-file' }))
+
+    await submit()
+    await waitFor(() => expect(failures).toHaveLength(1))
+    expect(planner.advanceImportReview).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('button', { name: 'drop-extra.pdf' })).toHaveLength(1)
+    expect(save.mock.calls[0][1]?.saved).toBeUndefined()
+
+    await submit()
+    await waitFor(() => expect(planner.advanceImportReview).toHaveBeenCalledTimes(1))
+    expect(save.mock.calls[1][1]?.saved).toEqual({ id: 99 })
+    expect(addFile).toHaveBeenCalledTimes(3)
+    expect((addFile.mock.calls[2][1] as FormData).get('reservation_id')).toBe('99')
+  })
+
+  it('FE-MOB-TRFRM-062: the next transport of an import review is added, not written over the one saved before it', async () => {
+    // The review keeps the sheet open and only swaps the draft, so the open flag never changes.
+    const { save } = plannerSave({ id: 99 })
+    const review = { importReviewActive: true, handleSaveTransport: save }
+    const first = makePlanner({ ...review, transportPrefill: { type: 'bus', title: 'Shuttle', metadata: {}, endpoints: [] } })
+    const { rerender, onOpenExpense } = renderSheet(first)
+    await submit()
+    await waitFor(() => expect(first.advanceImportReview).toHaveBeenCalledTimes(1))
+
+    const second = makePlanner({ ...review, transportPrefill: { type: 'train', title: 'Amtrak', metadata: {}, endpoints: [] } })
+    rerender(<MTransportFormSheet planner={second} onOpenExpense={onOpenExpense} />)
+    expect(screen.getByPlaceholderText('reservations.titlePlaceholder')).toHaveValue('Amtrak')
+    await submit()
+    await waitFor(() => expect(second.advanceImportReview).toHaveBeenCalledTimes(1))
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(save.mock.calls[1][1]?.saved).toBeUndefined()
+  })
+
+  it('FE-MOB-TRFRM-059: a failed transport edit keeps the attached files off the server', async () => {
+    const handleSaveTransport = vi.fn(async (_payload: SavePayload) => undefined)
+    const addFile = vi.fn(async (_tripId: number, _form: FormData) => undefined)
+    renderSheet(makePlanner({ editingTransport: SHINKANSEN, handleSaveTransport, tripActions: { addFile } }))
+    fireEvent.click(screen.getByRole('button', { name: 'attach-file' }))
+
+    await submit('common.update')
+    expect(handleSaveTransport).toHaveBeenCalled()
+    expect(addFile).not.toHaveBeenCalled()
+  })
+
+  it('FE-MOB-TRFRM-060: editing a bus with a stored price sends an empty metadata object, not null, so the price survives (#2233)', async () => {
+    const handleSaveTransport = makeSave()
+    const editingTransport = {
+      id: 62, trip_id: 1, type: 'bus', title: 'Airport shuttle', status: 'confirmed', day_id: 12,
+      metadata: { price: '45', priceCurrency: 'EUR' }, endpoints: [],
+    } as unknown as Reservation
+    renderSheet(makePlanner({ editingTransport, handleSaveTransport }))
+    typeTitle('Airport shuttle (late)')
+
+    await submit('common.update')
+    // The server reads null as "clear the column" and only carries the expense
+    // price over into an object, so null here would wipe price / priceCurrency.
+    expect(handleSaveTransport.mock.calls[0][0].metadata).toEqual({})
   })
 })

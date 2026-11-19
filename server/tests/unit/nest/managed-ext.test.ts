@@ -7,10 +7,11 @@
  * carries none of them. A stray controller or provider slipping in would be
  * invisible in review and obvious only to whoever it shipped to.
  */
-import { describe, it, expect } from 'vitest';
+import { MANAGED_PUBLIC_ROUTES, ManagedExtModule } from '../../../src/nest/managed/managed-ext.module';
 import { MODULE_METADATA } from '@nestjs/common/constants';
 import { Test } from '@nestjs/testing';
-import { ManagedExtModule } from '../../../src/nest/managed/managed-ext.module';
+
+import { describe, it, expect } from 'vitest';
 
 const meta = (key: string): unknown[] => (Reflect.getMetadata(key, ManagedExtModule) as unknown[]) ?? [];
 
@@ -22,6 +23,11 @@ describe('ManagedExtModule', () => {
       imports: meta(MODULE_METADATA.IMPORTS),
       exports: meta(MODULE_METADATA.EXPORTS),
     }).toEqual({ controllers: [], providers: [], imports: [], exports: [] });
+  });
+
+  it('MANAGED-EXT-003: declares no route that answers without a session', () => {
+    // The boot gate adds these to its allow-list; the public build adds nothing.
+    expect(MANAGED_PUBLIC_ROUTES).toEqual([]);
   });
 
   it('MANAGED-EXT-002: compiles as a module, so app.module can import it unconditionally', async () => {

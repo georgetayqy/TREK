@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { tripsApi, authApi, reservationsApi } from '../../api/client'
 import { tripRepo } from '../../repo/tripRepo'
+import { isEffectivelyOffline } from '../../sync/networkMode'
+import { useServerPing } from '../../sync/useServerPing'
 import { useAuthStore } from '../../store/authStore'
 import { useTranslation } from '../../i18n'
 import { useToast } from '../../components/shared/Toast'
 import { getApiErrorMessage } from '../../types'
 import { localIsoToday } from './dashboardModel'
+import { heroTrip } from '../../utils/heroTrip'
+import { useTripSearch } from './useTripSearch'
 import type { TripCreateRequest } from '@trek/shared'
 import {
   type DashboardTrip,
@@ -62,14 +66,18 @@ export function useDashboard() {
     }
   }, [searchParams])
 
-  useEffect(() => { loadTrips() }, [])
+  useEffect(() => { void loadTrips() }, [])
 
   // Travel stats + upcoming reservations power the atlas row and the sidebar.
-  // Both are best-effort: a failure just leaves that section empty.
-  useEffect(() => {
+  // Both are best-effort: a failure just leaves that section empty. Every trip
+  // mutation below reloads them, so the counters and the booking dates don't
+  // lag behind a created, copied or redated trip until the next visit. #2604
+  const loadSideData = () => {
     authApi.travelStats().then(setStats).catch(() => {})
     reservationsApi.upcoming().then((r: { reservations: UpcomingReservation[] }) => setUpcoming(r.reservations || [])).catch(() => {})
-  }, [])
+  }
+
+  useEffect(() => { loadSideData() }, [])
 
   const loadTrips = async () => {
     setIsLoading(true)
@@ -86,20 +94,34 @@ export function useDashboard() {
     }
   }
 
+  // A trip created, copied or deleted by this user elsewhere (another tab, an MCP
+  // client) is read back quietly, one read per burst: no loading state and no
+  // toast, since nobody here asked for it. trips:changed goes to the acting user
+  // only; trip:deleted goes to the trip's room, which this page is never in.
+  const refreshQuietly = async () => {
+    try {
+      const { trips, archivedTrips } = await tripRepo.list()
+      setTrips(sortTrips(trips))
+      setArchivedTrips(sortTrips(archivedTrips))
+      loadSideData()
+    } catch {
+      // The list on screen stays; the next visit reads it again.
+    }
+  }
+  useServerPing('trips:changed', true, refreshQuietly)
+
   // Re-run both the trip fetch and the auth check so a recovered backend clears
   // the error banner (loadUser resets authCheckFailed on success). #1283
   const retryLoad = () => {
     loadUser({ silent: true })
-    loadTrips()
+    void loadTrips()
   }
 
   const today = localIsoToday()
   // A trip the hero features on its own merit: one that is running, else the next
   // one coming up. Only that one is taken out of the grid below, so the same trip
   // isn't shown twice.
-  const featured = trips.find(t => t.start_date && t.end_date && t.start_date <= today && t.end_date >= today)
-    || trips.find(t => t.start_date && t.start_date >= today)
-    || null
+  const featured = heroTrip(trips, today)
   // With neither, the hero still shows something rather than sitting empty — but
   // that trip is only borrowed for the header and must stay in the grid, or a user
   // whose trips are all finished (or undated) sees "No trips yet". #1706
@@ -122,6 +144,7 @@ export function useDashboard() {
       const data = await tripsApi.create(tripData)
       setTrips(prev => sortTrips([data.trip, ...prev]))
       toast.success(t('dashboard.toast.created'))
+      loadSideData()
       return data
     } catch (err: unknown) {
       throw new Error(getApiErrorMessage(err, t('dashboard.toast.createError')))
@@ -131,57 +154,68 @@ export function useDashboard() {
   const handleUpdate = async (tripData: TripCreateRequest) => {
     if (!editingTrip) return
     try {
-      const data = await tripsApi.update(editingTrip.id, tripData)
+      const data = await tripRepo.update(editingTrip.id, tripData)
       setTrips(prev => sortTrips(prev.map(t => t.id === editingTrip.id ? data.trip : t)))
       toast.success(t('dashboard.toast.updated'))
+      loadSideData()
     } catch (err: unknown) {
       throw new Error(getApiErrorMessage(err, t('dashboard.toast.updateError')))
     }
   }
 
+  // A refusal says why (no right to archive or delete this trip, say) rather
+  // than only that it failed; the generic line stays for a failure without one.
   const confirmDelete = async () => {
     if (!deleteTrip) return
+    // Deleting, copying and creating a trip are the server's to do; archiving
+    // and editing its name wait in the offline queue.
+    if (isEffectivelyOffline()) { toast.error(t('common.needsConnection')); setDeleteTrip(null); return }
     try {
       await tripsApi.delete(deleteTrip.id)
       setTrips(prev => prev.filter(t => t.id !== deleteTrip.id))
       setArchivedTrips(prev => prev.filter(t => t.id !== deleteTrip.id))
       toast.success(t('dashboard.toast.deleted'))
-    } catch {
-      toast.error(t('dashboard.toast.deleteError'))
+      loadSideData()
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, t('dashboard.toast.deleteError')))
     }
     setDeleteTrip(null)
   }
 
   const handleArchive = async (id: number) => {
     try {
-      const data = await tripsApi.archive(id)
+      const data = await tripRepo.update(id, { is_archived: true })
       setTrips(prev => prev.filter(t => t.id !== id))
       setArchivedTrips(prev => sortTrips([data.trip, ...prev]))
       toast.success(t('dashboard.toast.archived'))
-    } catch {
-      toast.error(t('dashboard.toast.archiveError'))
+      loadSideData()
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, t('dashboard.toast.archiveError')))
     }
   }
 
   const handleUnarchive = async (id: number) => {
     try {
-      const data = await tripsApi.unarchive(id)
+      const data = await tripRepo.update(id, { is_archived: false })
       setArchivedTrips(prev => prev.filter(t => t.id !== id))
       setTrips(prev => sortTrips([data.trip, ...prev]))
       toast.success(t('dashboard.toast.restored'))
-    } catch {
-      toast.error(t('dashboard.toast.restoreError'))
+      loadSideData()
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, t('dashboard.toast.restoreError')))
     }
   }
 
   const confirmCopy = async () => {
     if (!copyTrip) return
+    if (isEffectivelyOffline()) { toast.error(t('common.needsConnection')); setCopyTrip(null); return }
     try {
       const data = await tripsApi.copy(copyTrip.id, { title: `${copyTrip.title} (${t('dashboard.copySuffix')})` })
       setTrips(prev => sortTrips([data.trip, ...prev]))
       toast.success(t('dashboard.toast.copied'))
-    } catch {
-      toast.error(t('dashboard.toast.copyError'))
+      loadSideData()
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, t('dashboard.toast.copyError')))
     }
     setCopyTrip(null)
   }
@@ -193,7 +227,10 @@ export function useDashboard() {
     setArchivedTrips(patch)
   }
 
-  const gridTrips = tripFilter === 'archive' ? archivedTrips
+  // While a search runs it spans every trip, archived ones included (#2190).
+  const search = useTripSearch(trips, archivedTrips, locale)
+  const gridTrips = search.active ? search.results
+    : tripFilter === 'archive' ? archivedTrips
     : tripFilter === 'completed' ? rest.filter(t => getTripStatus(t) === 'past')
     : rest.filter(t => getTripStatus(t) !== 'past')
 
@@ -203,11 +240,14 @@ export function useDashboard() {
     // data + derived
     spotlight, heroBundle, stats, upcoming, gridTrips, isLoading,
     loadError: loadError || authCheckFailed, retryLoad,
+    // Pull-to-refresh on mobile: the same quiet read, no loading state.
+    refreshQuietly,
     // ui state
     tripFilter, setTripFilter, viewMode, toggleViewMode,
     showForm, setShowForm, editingTrip, setEditingTrip,
     deleteTrip, setDeleteTrip, copyTrip, setCopyTrip, applyCoverUpdate,
     allSubOpen, setAllSubOpen,
+    search,
     // actions
     handleCreate, handleUpdate, confirmDelete, handleArchive, handleUnarchive, confirmCopy,
   }

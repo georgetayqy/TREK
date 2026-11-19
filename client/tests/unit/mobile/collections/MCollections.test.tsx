@@ -1,12 +1,15 @@
-// FE-MOB-COLSCR-001 to FE-MOB-COLSCR-031
+// FE-MOB-COLSCR-001 to FE-MOB-COLSCR-034
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '../../../helpers/render'
+import { render, screen, fireEvent, waitFor, within } from '../../../helpers/render'
+import { setSizeClass } from '../../../helpers/sizeClass'
 import MCollections from '../../../../src/mobile/screens/collections/MCollections'
 import { ALL_SAVED } from '../../../../src/store/collectionStore'
 
 const mocks = vi.hoisted(() => ({ coll: {} as Record<string, unknown> }))
 
+const routeTransition = vi.hoisted(() => ({ skipNextRouteTransition: vi.fn() }))
+vi.mock('../../../../src/mobile/routeTransition', () => routeTransition)
 vi.mock('../../../../src/pages/collections/useCollections', () => ({
   useCollections: () => mocks.coll,
 }))
@@ -146,6 +149,7 @@ function makeHook(over: Record<string, unknown> = {}): Record<string, unknown> {
     categories: [],
     collections: [list(1, 'Hamburg')],
     ownedLists: [list(1, 'Hamburg')],
+    writableLists: [list(1, 'Hamburg')],
     sharedLists: [],
     activeCollection: list(1, 'Hamburg'),
     isAllSaved: false,
@@ -159,6 +163,8 @@ function makeHook(over: Record<string, unknown> = {}): Record<string, unknown> {
     mappable: [place(10, 'Elbphilharmonie', { lat: 53.5, lng: 10 })],
     members: [],
     incomingInvites: [],
+    orderedInvites: [],
+    routeInvite: null,
     counts: { all: 1, idea: 1, want: 0, visited: 0 },
     view: 'list',
     statusFilter: 'all',
@@ -186,6 +192,7 @@ function makeHook(over: Record<string, unknown> = {}): Record<string, unknown> {
     copyIds: null, openCopyForSelectedPlace: vi.fn(), openCopyForSelection: vi.fn(), closeCopy: vi.fn(), handleCopyToTrip: vi.fn(),
     handleSelectList: vi.fn(), handleDeleteList: vi.fn(),
     handleStatusChange: vi.fn(), handleRatePlace: vi.fn(), handleDeleteSelected: vi.fn(),
+    handleAcceptInvite: vi.fn(), handleDeclineInvite: vi.fn(),
     allVisibleSelected: false, handleSelectAll: vi.fn(),
     listPickerMode: null, setListPickerMode: vi.fn(), handleMoveToList: vi.fn(), handleDuplicateToList: vi.fn(),
     ...over,
@@ -202,21 +209,22 @@ describe('MCollections', () => {
     mocks.coll = makeHook()
   })
 
-  it('FE-MOB-COLSCR-001: shows only the spinner while the first load is in flight', () => {
+  it('FE-MOB-COLSCR-001: shows only the placeholders while the first load is in flight', () => {
     mocks.coll = makeHook({ loading: true, collections: [], places: [], visiblePlaces: [] })
     render(<MCollections />)
 
     expect(screen.queryByPlaceholderText('collections.search')).not.toBeInTheDocument()
-    expect(document.querySelector('.animate-spin')).not.toBeNull()
+    expect(document.querySelector('[data-skeleton]')).not.toBeNull()
   })
 
-  it('FE-MOB-COLSCR-002: with no lists at all it offers the first-list CTA', () => {
+  it('FE-MOB-COLSCR-002: with no lists at all the dock + button starts the first one; the screen has no button of its own', async () => {
     mocks.coll = makeHook({ collections: [], ownedLists: [], activeCollection: null, activeId: null, canShare: false })
-    render(<MCollections />)
+    render(<MCollections />, { initialEntries: ['/collections?create=place'] })
 
     expect(screen.getByText('collections.empty.firstTitle')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /collections.newList/ }))
-    expect(fn('setEditorTarget')).toHaveBeenCalledWith('new')
+    expect(screen.queryByRole('button', { name: /^collections.newList$/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(fn('setEditorTarget')).toHaveBeenCalledWith('new'))
+    expect(fn('setShowAddPlace')).not.toHaveBeenCalled()
     expect(screen.queryByPlaceholderText('collections.search')).not.toBeInTheDocument()
   })
 
@@ -262,6 +270,8 @@ describe('MCollections', () => {
 
     fireEvent.click(screen.getByText('Julien Tipps'))
     expect(fn('handleSelectList')).toHaveBeenCalledWith(2)
+    // Another list is the same screen: the URL change must not slide a page in.
+    expect(routeTransition.skipNextRouteTransition).toHaveBeenCalled()
     // Picking closes the dropdown again.
     expect(screen.queryByText('Julien Tipps')).not.toBeInTheDocument()
   })
@@ -435,6 +445,16 @@ describe('MCollections', () => {
     expect(screen.getByRole('button', { name: /collections.duplicateToList/ })).toBeInTheDocument()
   })
 
+  it('FE-MOB-COLSCR-017b: an editor keeps copy and duplicate but cannot move places out of the list', () => {
+    mocks.coll = makeHook({ selectMode: true, selectedIds: [10], canEdit: true, canDelete: false, isOwner: false })
+    render(<MCollections />)
+
+    expect(screen.queryByRole('button', { name: /collections.moveToList/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /common.delete/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /collections.duplicateToList/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /collections.copyToTrip/ })).toBeInTheDocument()
+  })
+
   it('FE-MOB-COLSCR-018: the list view renders rows, the loading state and both empty states', () => {
     render(<MCollections />)
     expect(screen.getByText('Elbphilharmonie')).toBeInTheDocument()
@@ -445,7 +465,7 @@ describe('MCollections', () => {
 
     mocks.coll = makeHook({ places: [], visiblePlaces: [], placesLoading: true })
     const loadingView = render(<MCollections />)
-    expect(loadingView.container.querySelector('.animate-spin')).not.toBeNull()
+    expect(loadingView.container.querySelector('[data-skeleton]')).not.toBeNull()
 
     mocks.coll = makeHook({ places: [], visiblePlaces: [] })
     render(<MCollections />)
@@ -521,7 +541,9 @@ describe('MCollections', () => {
       selectedIds: [10, 11],
       copyIds: [10],
       listPickerMode: 'move',
+      // The add sheet offers the owned lists, the move picker every writable one.
       ownedLists: [list(1, 'Hamburg'), list(2, 'Kopenhagen')],
+      writableLists: [list(1, 'Hamburg'), list(2, 'Kopenhagen')],
     })
     render(<MCollections />)
 
@@ -564,7 +586,7 @@ describe('MCollections', () => {
   })
 
   it('FE-MOB-COLSCR-022: the list picker duplicates in copy mode', () => {
-    mocks.coll = makeHook({ listPickerMode: 'copy', selectedIds: [10], ownedLists: [list(1, 'Hamburg'), list(2, 'Kopenhagen')] })
+    mocks.coll = makeHook({ listPickerMode: 'copy', selectedIds: [10], writableLists: [list(1, 'Hamburg'), list(2, 'Kopenhagen')] })
     render(<MCollections />)
 
     fireEvent.click(screen.getByText('listpicker-pick'))
@@ -646,5 +668,49 @@ describe('MCollections', () => {
     render(<MCollections />)
 
     expect(screen.getByText('add-target:null::1')).toBeInTheDocument()
+  })
+})
+
+// #2645: the phone had no way to answer a list invite, and the notification's
+// link landed on "Start your first collection".
+describe('MCollections: invites (#2645)', () => {
+  const invite = { collection_id: 14, name: 'Lisbon', from: { id: 4, username: 'Lena' } }
+
+  it('FE-MOB-COLSCR-032: with no lists of their own, the invite can be accepted or declined', () => {
+    mocks.coll = makeHook({
+      collections: [], ownedLists: [], activeCollection: null, activeId: null, canShare: false,
+      incomingInvites: [invite], orderedInvites: [invite], routeInvite: invite,
+    })
+    render(<MCollections />)
+
+    expect(screen.getByText('Lisbon')).toBeInTheDocument()
+    expect(screen.getByText(/Lena/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /collections.invites.accept/ }))
+    expect(fn('handleAcceptInvite')).toHaveBeenCalledWith(14)
+    fireEvent.click(screen.getByRole('button', { name: 'collections.invites.decline' }))
+    expect(fn('handleDeclineInvite')).toHaveBeenCalledWith(14)
+  })
+
+  it('FE-MOB-COLSCR-033: invites sit above the lists too, in the order the hook gives', () => {
+    const other = { collection_id: 3, name: 'Rome', from: { id: 5, username: 'Tom' } }
+    mocks.coll = makeHook({ incomingInvites: [other, invite], orderedInvites: [invite, other] })
+    render(<MCollections />)
+
+    const names = screen.getAllByText(/^(Lisbon|Rome)$/).map(el => el.textContent)
+    expect(names).toEqual(['Lisbon', 'Rome'])
+    expect(screen.getByPlaceholderText('collections.search')).toBeInTheDocument()
+  })
+
+  it('FE-MOB-COLSCR-034: with room for two panes the lists stand beside the places and the head names the list', () => {
+    setSizeClass('split')
+    render(<MCollections />)
+    const lists = screen.getByRole('navigation', { name: 'collections.title' })
+    expect(within(lists).getByRole('button', { name: /Hamburg/ })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('heading', { name: 'Hamburg' })).toBeInTheDocument()
+
+    fireEvent.click(within(lists).getByRole('button', { name: /collections.allSaved/ }))
+    expect(fn('handleSelectList')).toHaveBeenCalledWith(ALL_SAVED)
+    fireEvent.click(within(lists).getByRole('button', { name: /collections.newList/ }))
+    expect(fn('setEditorTarget')).toHaveBeenCalledWith('new')
   })
 })

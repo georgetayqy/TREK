@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bookmark, Calendar, ChevronDown, ChevronUp, Eye, Pencil, Trash2 } from 'lucide-react'
+import { Bookmark, Calendar, ChevronDown, ChevronUp, Eye, Pencil, Trash2, MapPin } from 'lucide-react'
 import MSheet from '../../../components/MSheet'
 import type { MTripSheetsProps } from '../MTripShell'
 import { useTranslation } from '../../../../i18n'
 import { useAddonStore } from '../../../../store/addonStore'
 import { useSaveToCollectionStore } from '../../../../store/saveToCollectionStore'
-import { collectionTargetFromPlace } from '../lib/collectionTarget'
+import { placeToSaveTarget } from '../../../../components/Collections/saveTarget'
+import { useTourDayAssignment } from '../../../../components/Tours/useTourDayAssignment'
+import { stageKeysOfTour } from '../../../../components/Tours/stages/stageSpread'
 import type { Place } from '../../../../types'
+import { TileHeader } from './MTripSheetUi'
 
 interface BrowseActionsPayload {
   placeId?: number
@@ -26,10 +29,13 @@ export default function MBrowseActionsSheet({ planner, shell }: MTripSheetsProps
 
   const canEditPlaces = planner.can('place_edit', planner.trip)
   const canEditDays = planner.can('day_edit', planner.trip)
+  const isTourPlace = (placeId: number) => planner.isTourPlace(placeId)
   const collectionsEnabled = useAddonStore(s => s.isEnabled('collections'))
   const openSavePicker = useSaveToCollectionStore(s => s.open)
 
   const [daysOpen, setDaysOpen] = useState(false)
+  // A tour goes onto a day by the rules every tour list shares (PR1-18); a place keeps its own way.
+  const dayAssignment = useTourDayAssignment({ canAssign: canEditDays, onAssignToDay: planner.handleAssignToDay })
   useEffect(() => { setDaysOpen(open && Boolean(payload.dayPicker)) }, [open, payload.dayPicker])
 
   // Hold the last place so the card content survives the exit animation.
@@ -53,12 +59,19 @@ export default function MBrowseActionsSheet({ planner, shell }: MTripSheetsProps
 
   const saveToCollection = () => {
     shell.closeSheet()
-    openSavePicker(collectionTargetFromPlace(place))
+    openSavePicker(placeToSaveTarget(place))
   }
 
-  const assignToDay = (dayId: number) => {
-    shell.closeSheet()
-    planner.handleAssignToDay(place.id, dayId)
+  // A multi-day tour can still go from a day that holds it, as stages (MDT-02); the plan asks which way.
+  const staged = stageKeysOfTour(planner.tours.find(tour => tour.place_id === place.id)).length > 1
+  const tourUnavailableOnDay = (dayId: number) =>
+    isTourPlace(place.id) && !dayAssignment.isAvailable(place.id, dayId, staged ? 'stages' : 'whole')
+
+  const assignToDay = async (dayId: number) => {
+    const assigned = isTourPlace(place.id)
+      ? await dayAssignment.assign(place.id, dayId, staged ? 'ask' : undefined)
+      : await planner.handleAssignToDay(place.id, dayId)
+    if (assigned !== false) shell.closeSheet()
   }
 
   const deletePlace = () => {
@@ -66,31 +79,32 @@ export default function MBrowseActionsSheet({ planner, shell }: MTripSheetsProps
     planner.handleDeletePlace(place.id)
   }
 
-  const rowCls = 'flex w-full items-center gap-3 px-2 py-[11px] text-left text-[0.84375rem] font-medium'
+  const rowCls = 'flex w-full items-center gap-3 px-2 py-[11px] text-start text-[0.84375rem] font-medium'
 
   return (
     <MSheet open={open && !!livePlace} onClose={shell.closeSheet} variant="card" material="glass" ariaLabel={place.name}>
-      <div className="flex-none border-b border-[color:var(--m-rowbr)] px-[18px] pb-[11px] pt-4">
-        <div className="truncate text-[1.03125rem] font-bold">{place.name}</div>
-        {(place.address || place.description) && (
-          <div className="mt-[2px] truncate font-geist text-[0.6875rem] text-m-muted">
-            {place.address || place.description}
-          </div>
-        )}
+      <div className="flex-none px-[18px] pt-4">
+        <TileHeader
+          icon={<MapPin size={19} strokeWidth={1.8} />}
+          title={place.name}
+          sub={place.address || place.description || undefined}
+          onClose={shell.closeSheet}
+          closeLabel={t('common.close')}
+        />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-[10px] pb-3 pt-[6px]">
+      <div className="m-scroll-fade mt-2 min-h-0 flex-1 overflow-y-auto px-[10px] pb-3 pt-[10px]">
         <button type="button" onClick={viewDetails} className={rowCls}>
           <Eye size={16} strokeWidth={2} className="flex-none text-m-muted" />
           {t('mobileTrip.viewDetails')}
         </button>
-        {canEditPlaces && (
+        {canEditPlaces && !isTourPlace(place.id) && (
           <button type="button" onClick={editPlace} className={rowCls}>
             <Pencil size={16} strokeWidth={2} className="flex-none text-m-muted" />
             {t('common.edit')}
           </button>
         )}
-        {collectionsEnabled && (
+        {collectionsEnabled && !isTourPlace(place.id) && (
           <button type="button" onClick={saveToCollection} className={rowCls}>
             <Bookmark size={16} strokeWidth={2} className="flex-none text-m-muted" />
             {t('inspector.saveToCollection')}
@@ -111,8 +125,9 @@ export default function MBrowseActionsSheet({ planner, shell }: MTripSheetsProps
                   <button
                     key={d.id}
                     type="button"
-                    onClick={() => assignToDay(d.id)}
-                    className={`flex w-full items-center gap-2 px-3 py-[10px] text-left ${i > 0 ? 'border-t border-[color:var(--m-rowbr)]' : ''}`}
+                    disabled={tourUnavailableOnDay(d.id)}
+                    onClick={() => { void assignToDay(d.id) }}
+                    className={`flex w-full items-center gap-2 px-3 py-[10px] text-start disabled:cursor-default disabled:opacity-40 ${i > 0 ? 'border-t border-[color:var(--m-rowbr)]' : ''}`}
                   >
                     <span className="min-w-0 flex-1 truncate text-[0.78125rem] font-semibold">
                       {/* A day_number of 0 is as unusable as a missing one — both take the row position. */}
@@ -131,7 +146,7 @@ export default function MBrowseActionsSheet({ planner, shell }: MTripSheetsProps
             )}
           </>
         )}
-        {canEditPlaces && (
+        {canEditPlaces && !isTourPlace(place.id) && (
           <button type="button" onClick={deletePlace} className={`${rowCls} text-[color:var(--m-st-danger)]`}>
             <Trash2 size={16} strokeWidth={2} className="flex-none" />
             {t('common.delete')}

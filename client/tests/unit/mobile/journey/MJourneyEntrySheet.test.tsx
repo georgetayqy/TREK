@@ -4,7 +4,6 @@ import { http, HttpResponse } from 'msw';
 import { localIsoDate } from '../../../../src/utils/localDate';
 import userEvent from '@testing-library/user-event';
 import { mapsApi, weatherApi } from '../../../../src/api/client';
-import { useAddonStore } from '../../../../src/store/addonStore';
 import MJourneyEntrySheet from '../../../../src/mobile/screens/journey/MJourneyEntrySheet';
 import type { GalleryPhoto, JourneyEntry, JourneyPhoto } from '../../../../src/store/journeyStore';
 import type { ResilientResult, UploadProgress } from '../../../../src/utils/uploadQueue';
@@ -252,6 +251,7 @@ interface MountOptions {
   withProviderHook?: boolean;
   upload?: UploadFn;
   strict?: boolean;
+  photoProviders?: { id: string; name: string }[];
 }
 
 const defaultUpload: UploadFn = async (_entryId, files, cbs) => {
@@ -274,6 +274,7 @@ function mountSheet(sheetEntry: JourneyEntry, opts: MountOptions = {}) {
       readOnly={opts.readOnly ?? false}
       userId={42}
       trips={[]}
+      photoProviders={opts.photoProviders}
       onClose={onClose}
       onSave={onSave}
       onUploadPhotos={onUploadPhotos}
@@ -391,9 +392,11 @@ describe('MJourneyEntrySheet full editor', () => {
     await user.type(screen.getByPlaceholderText('Give this moment a name...'), 'Rome');
     await user.type(screen.getByPlaceholderText('Write your story...'), 'Great day');
     // Through the picker's manual entry — the calendar's own path would depend
-    // on which month it opens on.
+    // on which month it opens on. The keyboard button sits in the picker's
+    // popup, so the date keeps the field's width: open the calendar first.
     // The keyboard button and the input it opens share a name — they never
     // exist at the same time, so the same query reaches first one, then the other.
+    fireEvent.click(screen.getAllByRole('button').find(b => b.getAttribute('aria-haspopup') === 'dialog')!);
     fireEvent.click(screen.getByLabelText('Enter date manually'));
     const manual = screen.getByLabelText('Enter date manually');
     fireEvent.change(manual, { target: { value: '18.03.2026' } });
@@ -431,6 +434,8 @@ describe('MJourneyEntrySheet full editor', () => {
       tags: ['food', 'city'],
       pros_cons: { pros: ['Gelato'], cons: ['Crowds'] },
       type: undefined,
+      is_draft: false,
+      stats_excluded: undefined,
     }, undefined);
   });
 
@@ -678,46 +683,43 @@ describe('MJourneyEntrySheet full editor', () => {
   });
 
   it('FE-MOB-JENTRY-020: promoting a photo to first persists the new sort order', async () => {
-    const patched: Array<{ id: string; body: unknown }> = [];
-    server.use(http.patch('/api/journeys/photos/:id', async ({ params, request }) => {
-      patched.push({ id: String(params.id), body: await request.json() });
-      return HttpResponse.json({ ok: true });
+    const sent: Array<{ id: string; body: unknown }> = [];
+    server.use(http.put('/api/journeys/entries/:id/photos/reorder', async ({ params, request }) => {
+      sent.push({ id: String(params.id), body: await request.json() });
+      return HttpResponse.json({ success: true });
     }));
     const user = userEvent.setup();
     mountSheet(buildEntry({ id: 5, photos: [buildPhoto(100), buildPhoto(101)] }));
 
     await user.click(screen.getByRole('button', { name: '1st' }));
 
-    await waitFor(() => expect(patched).toHaveLength(2));
-    expect(patched).toEqual([
-      { id: '101', body: { sort_order: 0 } },
-      { id: '100', body: { sort_order: 1 } },
-    ]);
+    // The whole order goes out in one request, not one PATCH per photo.
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toEqual({ id: '5', body: { orderedIds: [101, 100] } });
     const order = Array.from(document.querySelectorAll('.h-16 img')).map(i => i.getAttribute('src'));
     expect(order[0]).toBe('/api/photos/101/thumbnail');
   });
 
-  it('FE-MOB-JENTRY-049: promoting a photo under StrictMode still patches each photo once', async () => {
-    const patched: Array<{ id: string; body: unknown }> = [];
-    server.use(http.patch('/api/journeys/photos/:id', async ({ params, request }) => {
-      patched.push({ id: String(params.id), body: await request.json() });
-      return HttpResponse.json({ ok: true });
+  it('FE-MOB-JENTRY-049: promoting a photo under StrictMode still sends the order once', async () => {
+    const sent: unknown[] = [];
+    server.use(http.put('/api/journeys/entries/:id/photos/reorder', async ({ request }) => {
+      sent.push(await request.json());
+      return HttpResponse.json({ success: true });
     }));
     const user = userEvent.setup();
     mountSheet(buildEntry({ id: 5, photos: [buildPhoto(100), buildPhoto(101)] }), { strict: true });
 
     await user.click(screen.getByRole('button', { name: '1st' }));
 
-    await waitFor(() => expect(patched.length).toBeGreaterThanOrEqual(2));
-    // Let a doubled batch land before counting, otherwise the extra PATCHes slip in
-    // after the assertion.
+    await waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(1));
+    // Let a doubled request land before counting, otherwise it slips in after the assertion.
     await act(async () => { await new Promise(r => setTimeout(r, 20)); });
-    expect(patched.map(p => p.id)).toEqual(['101', '100']);
+    expect(sent).toEqual([{ orderedIds: [101, 100] }]);
   });
 
   it('FE-MOB-JENTRY-050: a refused reorder snaps the strip back and says so', async () => {
     let attempts = 0;
-    server.use(http.patch('/api/journeys/photos/:id', () => {
+    server.use(http.put('/api/journeys/entries/:id/photos/reorder', () => {
       attempts += 1;
       return HttpResponse.json({ error: 'sort rejected' }, { status: 500 });
     }));
@@ -726,8 +728,8 @@ describe('MJourneyEntrySheet full editor', () => {
 
     await user.click(screen.getByRole('button', { name: '1st' }));
 
-    await waitFor(() => expect(attempts).toBe(2));
     await waitFor(() => expect(toastSpy).toHaveBeenCalledWith('sort rejected', 'error', undefined));
+    expect(attempts).toBe(1);
     const order = Array.from(document.querySelectorAll('.h-16 img')).map(i => i.getAttribute('src'));
     expect(order).toEqual(['/api/photos/100/thumbnail', '/api/photos/101/thumbnail']);
   });
@@ -744,6 +746,18 @@ describe('MJourneyEntrySheet full editor', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(onSave.mock.calls[0][0]).toMatchObject({ mood: null, weather: null });
+  });
+
+  it('FE-MOB-JENTRY-2905: the picked neutral mood is framed in its own colour and pressed, unlike the chips at rest', async () => {
+    const user = userEvent.setup();
+    mountSheet(buildEntry({ id: 5 }));
+
+    await user.click(screen.getByRole('button', { name: 'Neutral' }));
+    const neutral = screen.getByRole('button', { name: 'Neutral' });
+    expect(neutral).toHaveAttribute('aria-pressed', 'true');
+    expect(neutral.className).not.toContain('text-m-muted');
+    expect(neutral.style.borderColor).toBe('rgb(154, 154, 161)');
+    expect(screen.getByRole('button', { name: 'Good' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('FE-MOB-JENTRY-022: picks a searched location and stores its coordinates', async () => {
@@ -809,7 +823,7 @@ describe('MJourneyEntrySheet full editor', () => {
     fireEvent.change(screen.getByPlaceholderText('Search location...'), { target: { value: 'Roma' } });
 
     await waitFor(() => expect(calls).toBe(1), { timeout: 3000 });
-    expect(document.querySelector('.absolute.left-0.right-0.top-full')).not.toBeInTheDocument();
+    expect(document.querySelector('.absolute.inset-x-0.top-full')).not.toBeInTheDocument();
   });
 
   it('FE-MOB-JENTRY-036: leaves the strip untouched when the link call returns nothing', async () => {
@@ -828,23 +842,25 @@ describe('MJourneyEntrySheet full editor', () => {
     expect(screen.queryByText('All photos already added')).not.toBeInTheDocument();
   });
 
-  it('FE-MOB-JENTRY-037: a partly accepted order keeps what the server took', async () => {
+  it('FE-MOB-JENTRY-037: the server takes the whole order or none of it, so a refusal never leaves a half order', async () => {
     const patched: number[] = [];
-    server.use(http.patch('/api/journeys/photos/:id', ({ params }) => {
-      const id = Number(params.id);
-      patched.push(id);
-      if (id === 100) return new HttpResponse(null, { status: 500 });
-      return HttpResponse.json({ ok: true });
-    }));
+    server.use(
+      http.patch('/api/journeys/photos/:id', ({ params }) => {
+        patched.push(Number(params.id));
+        return HttpResponse.json({ ok: true });
+      }),
+      http.put('/api/journeys/entries/:id/photos/reorder', () => new HttpResponse(null, { status: 409 })),
+    );
     const user = userEvent.setup();
     mountSheet(buildEntry({ id: 5, photos: [buildPhoto(100), buildPhoto(101)] }));
 
     await user.click(screen.getByRole('button', { name: '1st' }));
 
-    await waitFor(() => expect(patched).toEqual([101, 100]));
-    // 101 is first on the server now; snapping the strip back would hide that.
+    await waitFor(() => expect(toastSpy).toHaveBeenCalled());
+    // No per-photo writes any more, and the strip shows the order the server kept.
+    expect(patched).toEqual([]);
     const order = Array.from(document.querySelectorAll('.h-16 img')).map(i => i.getAttribute('src'));
-    expect(order).toEqual(['/api/photos/101/thumbnail', '/api/photos/100/thumbnail']);
+    expect(order).toEqual(['/api/photos/100/thumbnail', '/api/photos/101/thumbnail']);
   });
 
   it('FE-MOB-JENTRY-024: shows no suggestions when the location search fails', async () => {
@@ -859,7 +875,7 @@ describe('MJourneyEntrySheet full editor', () => {
 
     await waitFor(() => expect(calls).toBe(1), { timeout: 3000 });
     expect(screen.getByDisplayValue('Roma')).toBeInTheDocument();
-    expect(document.querySelector('.absolute.left-0.right-0.top-full')).not.toBeInTheDocument();
+    expect(document.querySelector('.absolute.inset-x-0.top-full')).not.toBeInTheDocument();
   });
 
   it('FE-MOB-JENTRY-025: asks before discarding a dirty editor', async () => {
@@ -1160,15 +1176,10 @@ describe('MJourneyEntrySheet quick capture edge cases', () => {
 // FE-MOB-JENTRY-041 to FE-MOB-JENTRY-047 — external photo providers in the phone
 // editor (#1808), mirroring the desktop EntryEditor mechanics.
 
-const immichAddon = { id: 'immich', name: 'Immich', type: 'photo_provider', icon: 'camera', enabled: true };
-
-function seedAddons(addons: Array<Record<string, unknown>>) {
-  useAddonStore.setState({ addons: addons as never, loaded: true });
-}
+const immich = [{ id: 'immich', name: 'Immich' }];
 
 function useConnectedImmich() {
   server.use(
-    http.get('/api/integrations/memories/immich/status', () => HttpResponse.json({ connected: true })),
     http.post('/api/integrations/memories/immich/search', () => HttpResponse.json({
       assets: [{ id: 'asset-1', takenAt: '2026-03-15T09:00:00.000Z', mediaType: 'image' }],
       hasMore: false,
@@ -1184,27 +1195,32 @@ describe('MJourneyEntrySheet external photos', () => {
 
   afterEach(() => {
     delete window.__addToast;
-    useAddonStore.setState({ addons: [], loaded: false });
   });
 
-  it('FE-MOB-JENTRY-041: hides the button while no provider is connected', async () => {
-    let probes = 0;
-    seedAddons([immichAddon]);
-    server.use(http.get('/api/integrations/memories/immich/status', () => {
-      probes += 1;
-      return HttpResponse.json({ connected: false });
-    }));
+  it('FE-MOB-JENTRY-041: hides the button while no provider is connected', () => {
     mountSheet(buildEntry({ id: 5 }));
-
-    await waitFor(() => expect(probes).toBe(1));
     expect(screen.queryByRole('button', { name: 'External photos' })).not.toBeInTheDocument();
   });
 
+  it('FE-MOB-JENTRY-2908: a connected provider is there on the first render, without a probe of its own', () => {
+    let probes = 0;
+    server.use(http.get('/api/integrations/memories/immich/status', () => {
+      probes += 1;
+      return HttpResponse.json({ connected: true });
+    }));
+    mountSheet(buildEntry({ id: 5 }), { photoProviders: immich });
+
+    const external = screen.getByRole('button', { name: 'External photos' });
+    // The icons keep their width when a third button shares the row.
+    expect(external.querySelector('svg')).toHaveClass('shrink-0');
+    expect(screen.getByRole('button', { name: 'From Gallery' }).querySelector('svg')).toHaveClass('shrink-0');
+    expect(probes).toBe(0);
+  });
+
   it('FE-MOB-JENTRY-042: opens the embedded picker for a connected provider', async () => {
-    seedAddons([immichAddon, { id: 'budget', name: 'Budget', type: 'feature', icon: 'wallet', enabled: true }]);
     useConnectedImmich();
     const user = userEvent.setup();
-    mountSheet(buildEntry({ id: 5, location_lat: 41.9, location_lng: 12.5, location_name: 'Rome' }));
+    mountSheet(buildEntry({ id: 5, location_lat: 41.9, location_lng: 12.5, location_name: 'Rome' }), { photoProviders: immich });
 
     await user.click(await screen.findByRole('button', { name: 'External photos' }));
 
@@ -1215,20 +1231,18 @@ describe('MJourneyEntrySheet external photos', () => {
   });
 
   it('FE-MOB-JENTRY-043: stays out of the quick capture sheet', async () => {
-    seedAddons([immichAddon]);
     useConnectedImmich();
     Object.defineProperty(navigator, 'geolocation', { configurable: true, value: undefined });
-    mountSheet(buildEntry(), { quickCapture: true });
+    mountSheet(buildEntry(), { quickCapture: true, photoProviders: immich });
 
     expect(await screen.findByRole('button', { name: 'Gallery' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'External photos' })).not.toBeInTheDocument();
   });
 
   it('FE-MOB-JENTRY-044: queues a picked photo and sends it after the save', async () => {
-    seedAddons([immichAddon]);
     useConnectedImmich();
     const user = userEvent.setup();
-    const { onSave, onAddProviderPhotos, onDone } = mountSheet(buildEntry({ id: 5 }));
+    const { onSave, onAddProviderPhotos, onDone } = mountSheet(buildEntry({ id: 5 }), { photoProviders: immich });
 
     await user.click(await screen.findByRole('button', { name: 'External photos' }));
     await user.click(await screen.findByAltText(''));
@@ -1248,10 +1262,9 @@ describe('MJourneyEntrySheet external photos', () => {
   });
 
   it('FE-MOB-JENTRY-045: drops the queue again from the panel header', async () => {
-    seedAddons([immichAddon]);
     useConnectedImmich();
     const user = userEvent.setup();
-    const { onAddProviderPhotos } = mountSheet(buildEntry({ id: 5 }));
+    const { onAddProviderPhotos } = mountSheet(buildEntry({ id: 5 }), { photoProviders: immich });
 
     await user.click(await screen.findByRole('button', { name: 'External photos' }));
     await user.click(await screen.findByAltText(''));
@@ -1264,11 +1277,10 @@ describe('MJourneyEntrySheet external photos', () => {
   });
 
   it('FE-MOB-JENTRY-046: a failed provider add keeps the queue and does not create a second entry', async () => {
-    seedAddons([immichAddon]);
     useConnectedImmich();
     const user = userEvent.setup();
     // A brand new entry: the first save creates it, the provider write then fails.
-    const { onSave, onAddProviderPhotos, onDone } = mountSheet(buildEntry());
+    const { onSave, onAddProviderPhotos, onDone } = mountSheet(buildEntry(), { photoProviders: immich });
     onAddProviderPhotos.mockRejectedValueOnce(new Error('immich down'));
 
     await user.click(await screen.findByRole('button', { name: 'External photos' }));
@@ -1292,10 +1304,9 @@ describe('MJourneyEntrySheet external photos', () => {
   });
 
   it('FE-MOB-JENTRY-047: a skeleton with only provider photos is promoted to an entry', async () => {
-    seedAddons([immichAddon]);
     useConnectedImmich();
     const user = userEvent.setup();
-    const { onSave } = mountSheet(buildEntry({ id: 9, type: 'skeleton', title: 'Venice' }));
+    const { onSave } = mountSheet(buildEntry({ id: 9, type: 'skeleton', title: 'Venice' }), { photoProviders: immich });
 
     await user.click(await screen.findByRole('button', { name: 'External photos' }));
     await user.click(await screen.findByAltText(''));
@@ -1330,5 +1341,26 @@ describe('MJourneyEntrySheet clips', () => {
     expect(document.querySelector('img[src="/api/photos/200/thumbnail"]')).not.toBeInTheDocument();
     expect(document.querySelector('img[src="/api/photos/201/thumbnail"]')).toBeInTheDocument();
     expect(document.querySelectorAll('svg.lucide-play')).toHaveLength(1);
+  });
+});
+
+// FE-MOB-JENTRY-057: the phone half of the location field that snapped back (#2615).
+
+describe('MJourneyEntrySheet location field', () => {
+  it('FE-MOB-JENTRY-057: emptying the location keeps the field empty, drops the pin and saves no place', async () => {
+    const user = userEvent.setup();
+    const { onSave } = mountSheet(buildEntry({ id: 5, location_name: 'Rome', location_lat: 41.9, location_lng: 12.5 }));
+    const input = screen.getByPlaceholderText('Search location...');
+    expect(input).toHaveValue('Rome');
+    expect(document.querySelector('svg.lucide-map-pin')).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'Rom' } });
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input).toHaveValue('');
+    expect(document.querySelector('svg.lucide-map-pin')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ location_name: null, location_lat: null, location_lng: null });
   });
 });

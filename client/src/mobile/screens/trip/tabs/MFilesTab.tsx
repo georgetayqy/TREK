@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
-import { Link, Loader2, MoreVertical, Star } from 'lucide-react'
+import { Link, Loader2, MoreVertical, Star, Wallet } from 'lucide-react'
 import MDancingTrek from '../../../components/MDancingTrek'
 import { useTranslation, translateApiError } from '../../../../i18n'
-import { filesApi } from '../../../../api/client'
+import { fileRepo } from '../../../../repo/fileRepo'
 import { openFile } from '../../../../utils/fileDownload'
-import { isMedia, formatSize } from '../../../../components/Files/FileManager.helpers'
+import { isMedia, isWalletPass, formatSize } from '../../../../components/Files/FileManager.helpers'
 import type { TripFile } from '../../../../types'
 import { TabScroller } from './tabChrome'
 import type { MTabScreenProps } from './tabModel'
@@ -13,14 +13,15 @@ import MFileLinkSheet from './MFileLinkSheet'
 import MFileTrashSheet from './MFileTrashSheet'
 import MDocSyncSheet from './MDocSyncSheet'
 import { canManageDocSync } from '../../../../components/Files/docsync/useDocSync'
+import { filesFromClipboard } from '../../../../components/Files/fileActions'
 import { useAuthStore } from '../../../../store/authStore'
 import MFileLightbox from './MFileLightbox'
+import { FilePreviewPane, FileTile } from './MFilesBoard'
+import { useIsSplit, useIsWide } from '../../../../hooks/sizeClass'
 import {
   FILE_FILTERS, buildFileLinkLabels, formatFileDate, getFileTypeMeta,
   matchesFileFilter, sortFilesStarredFirst, type FileFilterId,
 } from './filesModel'
-
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 /**
  * Tab 5 — Dateien. Real `planner.files` (already non-deleted, §7.2), the
@@ -28,9 +29,8 @@ const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
  * (spec 03 §5.2). Upload and Trash are triggered from the shell's header
  * (shell.uploadFilesSignal / shell.openFilesTrashSignal, watched below, same
  * pattern as useTodoList.ts's addItemSignal) since those buttons live outside
- * this panel. Star/rename-note/link run straight against filesApi (§7.3);
- * add/delete run through planner.tripActions (§7.3 — the only two file
- * mutations the store owns).
+ * this panel. Star/rename-note/link run through fileRepo, so offline they
+ * wait in the queue; add/delete run through planner.tripActions (§7.3).
  */
 export default function MFilesTab({ planner, shell }: MTabScreenProps) {
   const { t } = planner
@@ -40,10 +40,16 @@ export default function MFilesTab({ planner, shell }: MTabScreenProps) {
   const [menuFileId, setMenuFileId] = useState<number | null>(null)
   const [linkFileId, setLinkFileId] = useState<number | null>(null)
   const currentUser = useAuthStore(st => st.user)
+  const maxUploadMb = useAuthStore(st => st.maxUploadMb)
   const [trashOpen, setTrashOpen] = useState(false)
   const [docSyncOpen, setDocSyncOpen] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [uploading, setUploading] = useState(false)
+  // Wide: the files as a grid of tiles. Split: the picked one previewed beside
+  // the grid (MFilesBoard), so a tap picks a file there instead of opening it.
+  const wide = useIsWide()
+  const split = useIsSplit()
+  const [pickedId, setPickedId] = useState<number | null>(null)
 
   const menuFile = menuFileId != null ? files.find(f => f.id === menuFileId) ?? null : null
   const linkFile = linkFileId != null ? files.find(f => f.id === linkFileId) ?? null : null
@@ -60,9 +66,10 @@ export default function MFilesTab({ planner, shell }: MTabScreenProps) {
   }, [shell.uploadFilesSignal])
 
   const uploadFiles = async (list: File[]) => {
-    const tooBig = list.filter(f => f.size > MAX_UPLOAD_BYTES)
-    const okFiles = list.filter(f => f.size <= MAX_UPLOAD_BYTES)
-    if (tooBig.length > 0) planner.toast.error(t('files.uploadErrorSize'))
+    const maxBytes = maxUploadMb * 1024 * 1024
+    const tooBig = list.filter(f => f.size > maxBytes)
+    const okFiles = list.filter(f => f.size <= maxBytes)
+    if (tooBig.length > 0) planner.toast.error(t('files.uploadErrorSize', { max: maxUploadMb }))
     if (okFiles.length === 0) return
     setUploading(true)
     let uploaded = 0
@@ -91,15 +98,7 @@ export default function MFilesTab({ planner, shell }: MTabScreenProps) {
 
   const onPaste = (e: ClipboardEvent<HTMLDivElement>) => {
     if (!planner.canUploadFiles) return
-    const items = e.clipboardData?.items
-    if (!items) return
-    const pasted: File[] = []
-    for (const item of Array.from(items)) {
-      if (item.kind === 'file') {
-        const f = item.getAsFile()
-        if (f) pasted.push(f)
-      }
-    }
+    const pasted = filesFromClipboard(e.clipboardData)
     if (pasted.length > 0) {
       e.preventDefault()
       void uploadFiles(pasted)
@@ -124,13 +123,13 @@ export default function MFilesTab({ planner, shell }: MTabScreenProps) {
     lastDocSyncSignal.current = shell.openDocSyncSignal
   }, [shell.openDocSyncSignal])
 
-  // ── Star toggle (ungated, §7.6) — direct filesApi call + store refresh, same as §7.3. ──
+  // ── Star toggle (ungated, §7.6): through fileRepo, then a store refresh. ──
   const toggleStar = async (file: TripFile) => {
     try {
-      await filesApi.toggleStar(planner.tripId, file.id)
+      await fileRepo.toggleStar(planner.tripId, file.id)
       planner.tripActions.loadFiles(planner.tripId)
     } catch {
-      planner.toast.error(t('files.toast.assignError'))
+      planner.toast.error(t('files.toast.starError'))
     }
   }
 
@@ -151,11 +150,12 @@ export default function MFilesTab({ planner, shell }: MTabScreenProps) {
     }
   }
 
+  const picked = split ? (visible.find(f => f.id === pickedId) ?? visible[0] ?? null) : null
+
   const visibleFilters = FILE_FILTERS.filter(f => f.id !== 'collab' || files.some(x => x.note_id != null))
   const isEmpty = files.length === 0
 
-  return (
-    <TabScroller>
+  const body = (
       <div onPaste={onPaste} tabIndex={-1} className="flex min-h-full flex-col">
         <input ref={inputRef} type="file" multiple className="hidden" onChange={onPickFiles} />
 
@@ -199,6 +199,21 @@ export default function MFilesTab({ planner, shell }: MTabScreenProps) {
 
             {visible.length === 0 ? (
               <div className="pt-14 text-center font-geist text-[0.8125rem] text-m-faint">{t('mobileTrip.filesEmpty')}</div>
+            ) : wide ? (
+              <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(156px,1fr))] gap-3">
+                {visible.map(file => (
+                  <FileTile
+                    key={file.id}
+                    file={file}
+                    selected={split ? picked?.id === file.id : undefined}
+                    canStar={planner.can('file_edit', planner.trip)}
+                    onPick={() => (split ? setPickedId(file.id) : openRow(file))}
+                    onStar={() => void toggleStar(file)}
+                    onMenu={() => setMenuFileId(file.id)}
+                    t={t}
+                  />
+                ))}
+              </div>
             ) : (
               <div className="flex flex-col">
                 {visible.map(file => (
@@ -216,7 +231,10 @@ export default function MFilesTab({ planner, shell }: MTabScreenProps) {
           </>
         )}
       </div>
+  )
 
+  const sheets = (
+    <>
       <MFileMenuSheet
         planner={planner}
         file={menuFile}
@@ -241,9 +259,42 @@ export default function MFilesTab({ planner, shell }: MTabScreenProps) {
           t={t}
         />
       )}
+    </>
+  )
+
+  if (split && picked) {
+    return (
+      <div className="flex h-full">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden pb-[calc(var(--bottom-nav-h,84px)+22px)] pe-3 ps-6 pt-[calc(var(--m-safe-top,12px)+58px)]">
+          {body}
+        </div>
+        <aside
+          aria-label={t('common.preview')}
+          className="m-pane-trail min-h-0 flex-none overflow-y-auto overflow-x-hidden border-s border-[color:var(--m-rowbr)] px-5 pb-[calc(var(--bottom-nav-h,84px)+22px)] pt-[calc(var(--m-safe-top,12px)+58px)]"
+        >
+          <FilePreviewPane
+            file={picked}
+            planner={planner}
+            onOpen={() => openRow(picked)}
+            onStar={() => void toggleStar(picked)}
+            onLinks={() => setLinkFileId(picked.id)}
+            onMenu={() => setMenuFileId(picked.id)}
+          />
+        </aside>
+        {sheets}
+      </div>
+    )
+  }
+  return (
+    <TabScroller wide={wide ? 'full' : 'readable'}>
+      {body}
+      {sheets}
     </TabScroller>
   )
 }
+
+/** The product's name, the same in every language. */
+const APPLE_WALLET = 'Apple Wallet'
 
 function FileRow({ file, planner, onOpen, onStar, onMenu }: {
   file: TripFile
@@ -261,7 +312,7 @@ function FileRow({ file, planner, onOpen, onStar, onMenu }: {
 
   return (
     <div className="mt-2 flex items-center gap-[11px] rounded-2xl border border-[color:var(--m-rowbr)] bg-m-sheetop px-[11px] py-[10px]">
-      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-[11px] text-left">
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-[11px] text-start">
         <div
           className="flex h-[42px] w-[42px] flex-none flex-col items-center justify-center gap-[2px] rounded-[13px]"
           style={{ background: `${meta.color}22`, color: meta.color }}
@@ -271,11 +322,18 @@ function FileRow({ file, planner, onOpen, onStar, onMenu }: {
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[0.8125rem] font-bold text-m-ink">{file.original_name}</div>
+          <div dir="auto" className="truncate text-[0.8125rem] font-bold text-m-ink">{file.original_name}</div>
 
           <div className="mt-1 flex flex-wrap items-center gap-1">
+            {isWalletPass(file.mime_type, file.original_name) && (
+              // A tap hands the pass to Apple Wallet (native/wallet.ts), or downloads it into Wallet on the web.
+              <span className="flex items-center gap-[3px] whitespace-nowrap rounded-full bg-m-act px-[7px] py-[2px] font-geist text-[length:calc(8.5px*var(--fs-scale-caption,1))] font-bold text-m-actfg">
+                <Wallet size={9} strokeWidth={2.4} aria-hidden="true" />
+                {APPLE_WALLET}
+              </span>
+            )}
             {!!file.file_size && (
-              <span className="whitespace-nowrap rounded-full bg-[color:var(--m-ic)] px-[7px] py-[2px] font-geist text-[0.53125rem] font-bold text-m-muted">
+              <span dir="ltr" className="whitespace-nowrap rounded-full bg-[color:var(--m-ic)] px-[7px] py-[2px] font-geist text-[0.53125rem] font-bold text-m-muted">
                 {formatSize(file.file_size)}
               </span>
             )}
@@ -283,25 +341,32 @@ function FileRow({ file, planner, onOpen, onStar, onMenu }: {
               {formatFileDate(file.created_at, locale)}
             </span>
             {file.uploaded_by_name && (
-              <span className="flex items-center gap-[3px] rounded-full bg-[color:var(--m-ic)] py-[2px] pl-[3px] pr-[7px]">
+              <span className="flex items-center gap-[3px] rounded-full bg-[color:var(--m-ic)] py-[2px] ps-[3px] pe-[7px]">
                 <span className="flex h-3 w-3 flex-none items-center justify-center rounded-full bg-m-act font-geist text-[0.40625rem] font-extrabold text-m-actfg">
                   {file.uploaded_by_name[0]?.toUpperCase()}
                 </span>
-                <span className="max-w-[92px] truncate font-geist text-[0.53125rem] font-bold text-m-muted">{file.uploaded_by_name}</span>
+                <span dir="auto" className="max-w-[92px] truncate font-geist text-[0.53125rem] font-bold text-m-muted">{file.uploaded_by_name}</span>
               </span>
             )}
           </div>
 
           {linkLabels.length > 0 && (
+            // One badge per link, the kind beside the name, so two links never run
+            // together; the last one that does not fit ends in an ellipsis.
             <div className="mt-1 flex items-center gap-1 overflow-hidden text-m-faint">
               <Link size={9} strokeWidth={2.4} className="flex-none" />
-              <span className="truncate font-geist text-[0.5625rem] font-bold">{linkLabels.join('  ·  ')}</span>
+              {linkLabels.map((label, i) => (
+                <span key={i} className="flex min-w-0 flex-none items-center gap-[3px] rounded-full bg-[color:var(--m-ic)] px-[6px] py-px font-geist text-[0.5625rem] font-bold last:flex-initial">
+                  <span className="flex-none uppercase tracking-[.06em]">{label.kind}</span>
+                  {label.name && <span className="min-w-0 truncate text-m-muted">{label.name}</span>}
+                </span>
+              ))}
             </div>
           )}
         </div>
       </button>
 
-      <button
+      {planner.can('file_edit', planner.trip) && <button
         type="button"
         onClick={e => { e.stopPropagation(); onStar() }}
         aria-label={starred ? t('files.unstar') : t('files.star')}
@@ -310,7 +375,7 @@ function FileRow({ file, planner, onOpen, onStar, onMenu }: {
         }`}
       >
         <Star size={13} strokeWidth={2.4} fill={starred ? 'currentColor' : 'none'} />
-      </button>
+      </button>}
       <button
         type="button"
         onClick={e => { e.stopPropagation(); onMenu() }}

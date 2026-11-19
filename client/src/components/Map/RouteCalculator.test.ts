@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../tests/helpers/msw/server'
 import { pluginsApi, type PluginRouteResult } from '../../api/client'
@@ -15,9 +15,8 @@ import {
   calculateAlternatives,
   avoidedClasses,
   routeEngineFor,
-  sameRoad,
-  furthestFrom,
 } from './RouteCalculator'
+import { legSegment } from './routeText'
 
 // Every route now goes to the FOSSGIS per-profile hosts. The car-only project-osrm.org
 // demo ignored the profile in the URL, so walking routes followed the road network.
@@ -388,6 +387,12 @@ function pluginRouteResult(over: Partial<PluginRouteResult> = {}): PluginRouteRe
   }
 }
 
+// FOSSGIS: OSRM routes the days and Valhalla only what OSRM cannot. Where Valhalla routes
+// every day is valhallaDayRoute.test.ts.
+beforeEach(() => {
+  useSettingsStore.setState(st => ({ settings: { ...st.settings, routing_valhalla_provider: 'fossgis' } }))
+})
+
 afterEach(() => {
   vi.restoreAllMocks()
   useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, distance_unit: 'metric' } })
@@ -425,6 +430,23 @@ describe('calculateRouteWithLegs', () => {
 
     expect(hits).toBe(1)
     expect(second).toBe(first)
+  })
+
+  it('FE-COMP-ROUTECALCULATOR-035b: a route answered once is still there after a reload, without asking the router (#2794)', async () => {
+    let hits = 0
+    server.use(http.get(`${FOSSGIS.driving}/:coords`, () => { hits++; return HttpResponse.json(buildLegsResponse()) }))
+    const wps = freshWaypoints()
+    const first = await calculateRouteWithLegs(wps)
+    const { offlineDb } = await import('../../db/offlineDb')
+    await vi.waitFor(async () => expect(await offlineDb.routeCache.count()).toBeGreaterThan(0))
+
+    // A reload: the module, and with it the cache in memory, starts over.
+    vi.resetModules()
+    const reloaded = await import('./RouteCalculator')
+    const again = await reloaded.calculateRouteWithLegs(wps)
+
+    expect(hits).toBe(1)
+    expect(again).toEqual(first)
   })
 
   it('FE-COMP-ROUTECALCULATOR-036: switching the distance unit re-fetches instead of reusing stale text (#1300)', async () => {
@@ -897,7 +919,8 @@ describe('calculateAlternatives', () => {
 
   it('FE-COMP-ROUTECALCULATOR-053: an instance with its own OSRM is never sent to the public Valhalla', async () => {
     let valhallaCalls = 0
-    useSettingsStore.setState(st => ({ settings: { ...st.settings, routing_base_url: 'https://osrm.example.org' } }))
+    // No routing service chosen: the own OSRM alone decides.
+    useSettingsStore.setState(st => ({ settings: { ...st.settings, routing_base_url: 'https://osrm.example.org', routing_valhalla_provider: '' } }))
     server.use(
       http.get('https://osrm.example.org/route/v1/driving/:coords', ({ request }) => {
         const exclude = new URL(request.url).searchParams.get('exclude')
@@ -1203,37 +1226,6 @@ describe('a trip that avoids something', () => {
     expect(plain.avoidance).toBeUndefined()
   })
 
-  it('FE-COMP-ROUTECALCULATOR-064: a road that runs the whole of another and turns off to a point and back is not that road', () => {
-    // The shape of a leg bent by a via: every point of the plain road lies on it, so
-    // asked only one way round the two read as one.
-    const plainRoad = { coordinates: [[61, 10], [61, 11], [61, 12]] as [number, number][], distance: 100_000, duration: 3600 }
-    const spur = { coordinates: [[61, 10], [61, 11], [61.3, 11], [61, 11], [61, 12]] as [number, number][], distance: 166_000, duration: 5400 }
-
-    expect(sameRoad(plainRoad, spur)).toBe(false)
-    expect(sameRoad(spur, plainRoad)).toBe(false)
-    expect(sameRoad(plainRoad, { ...plainRoad, distance: 104_000, duration: 3900 })).toBe(true)
-  })
-
-  it('FE-COMP-ROUTECALCULATOR-065: one road drawn with a different spacing of points is still one road', () => {
-    // Two engines' lines of one long road share almost no vertex. Measured to the nearest
-    // sampled vertex, a point on the same road sat half a sample off it: kilometres here.
-    // The dense line is sampled every tenth vertex, 0.05 degrees apart; the sparse one sits
-    // exactly between those samples, 1.8 km from the nearest, on the very same road.
-    const dense = Array.from({ length: 2001 }, (_, i) => [50, i * 0.005] as [number, number])
-    const sparse: [number, number][] = [
-      [50, 0],
-      ...Array.from({ length: 200 }, (_, i) => [50, 0.025 + i * 0.05] as [number, number]),
-      [50, 10],
-    ]
-    const a = { coordinates: dense, distance: 700_000, duration: 25_000 }
-    const b = { coordinates: sparse, distance: 712_000, duration: 27_000 }
-
-    expect(sameRoad(a, b)).toBe(true)
-    const off = furthestFrom([[50.02, 5]], dense)
-    expect(off?.index).toBe(0)
-    expect(off?.km).toBeCloseTo(2.22, 1)
-  })
-
   it('FE-COMP-ROUTECALCULATOR-066: the avoidance offer beside an OSRM leg says when it crosses by ferry', async () => {
     server.use(
       http.get(`${FOSSGIS.driving}/:coords`, () => HttpResponse.json({ code: 'Ok', routes: [{ geometry: { coordinates: [[10, 63], [11, 63], [12, 63]] }, distance: 100000, duration: 3600 }] })),
@@ -1244,5 +1236,30 @@ describe('a trip that avoids something', () => {
 
     expect(routes).toHaveLength(2)
     expect(routes[1]).toMatchObject({ avoids: 'motorway', engine: 'valhalla', hasFerry: true })
+  })
+})
+
+describe('legSegment', () => {
+  const waypoints = [{ lat: 48, lng: 2 }, { lat: 50, lng: 4 }, { lat: 52, lng: 6 }]
+
+  it('spans waypoint i to i + 1 with the label at the midpoint', () => {
+    const seg = legSegment({ distance: 1500, duration: 600 }, 1, waypoints)
+    expect(seg.from).toEqual([50, 4])
+    expect(seg.to).toEqual([52, 6])
+    expect(seg.mid).toEqual([51, 5])
+    expect(seg.distance).toBe(1500)
+    expect(seg.duration).toBe(600)
+  })
+
+  it('formats driving as measured and walking at 5 km/h', () => {
+    const seg = legSegment({ distance: 5000, duration: 600 }, 0, waypoints)
+    expect(seg.drivingText).toBe('10 min')
+    expect(seg.walkingText).toBe('1 h 0 min')
+    expect(seg.durationText).toBeUndefined()
+  })
+
+  it('writes short metric distances in metres', () => {
+    useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, distance_unit: 'metric' } })
+    expect(legSegment({ distance: 420.4, duration: 60 }, 0, waypoints).distanceText).toBe('420 m')
   })
 })

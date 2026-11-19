@@ -1,5 +1,5 @@
 /**
- * MAPS-AUTO-001..013: the suggestion list behind the place search box.
+ * MAPS-AUTO-001..026: the suggestion list behind the place search box.
  *
  * This is the path the index was built for. Nominatim's usage policy names
  * autocomplete as unacceptable use in its own words, whatever the rate, and the
@@ -9,6 +9,14 @@
  * (`gers:` ids), and that nothing about a slow or missing index leaves somebody
  * typing into a box that never answers.
  */
+import type { AppSettingsRepository } from '../../../src/db/repositories/AppSettings.repository';
+import type { UsersRepository } from '../../../src/db/repositories/Users.repository';
+import { PHOTON_GRACE_MS } from '../../../src/nest/maps/maps-index.helpers';
+import type { PlacePhotoCacheService } from '../../../src/nest/place-photos/place-photo-cache.service';
+import { noGoogleQuota } from '../../helpers/google-quota';
+import { buildMapsParts, buildMapsService } from '../../helpers/maps-service';
+import type { MapsAutocompleteResult } from '@trek/shared';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { mockSearch } = vi.hoisted(() => ({
@@ -21,11 +29,10 @@ vi.mock('../../../src/nest/maps/trek-places.client', async (importOriginal) => (
   trekPlacesSearch: mockSearch,
 }));
 
-vi.mock('../../../src/config', () => ({ JWT_SECRET: 'test-secret', ENCRYPTION_KEY: '0'.repeat(64) }));
-
-import { MapsService } from '../../../src/nest/maps/maps.service';
-import type { DatabaseService } from '../../../src/nest/database/database.service';
-import type { PlacePhotoCacheService } from '../../../src/nest/place-photos/place-photo-cache.service';
+// keyedProvider/resolveMapsKey (maps.service.ts) go through instance-api-keys.ts
+// on every call now. No per-user key is configured anywhere here; the instance
+// rows a case needs come from make()'s `rows`, read through AppSettingsRepository.
+const noUsers = { getApiKeyColumn: async () => null } as unknown as UsersRepository;
 
 // The index switch is an environment variable now, not an admin row: it decides
 // whether a search leaves the instance at all, so it is pinned by the operator
@@ -42,6 +49,7 @@ vi.mock('../../../src/app-config', async (importOriginal) => {
   };
 });
 
+type Suggestion = MapsAutocompleteResult['suggestions'][number];
 
 const INPUT = 'Café Kröpel';
 
@@ -77,25 +85,63 @@ const osmHit = (over: Record<string, unknown> = {}) => ({
  * app_settings the instance holds, by key: a Google key, the provider choice,
  * the Google-only switch. Anything else reads as absent.
  *
- * Keyed on the statement rather than answering everything the same way: the
- * same `get` also resolves the Google key, and a blanket answer would hand
- * `'false'` to the key resolver and send the fallback at Google for real.
+ * Keyed on the setting rather than answering everything the same way: the
+ * same `getValue` also resolves the Google key (`maps_api_key`), and a blanket
+ * answer would hand `'false'` to the key resolver and send the fallback at
+ * Google for real.
  */
 function make(enabled = true, rows: Record<string, string> = {}) {
   trekPlaces.on = enabled;
-  const database = {
-    get: vi.fn((sql: string, key?: unknown) =>
-      typeof key === 'string' && sql.includes('app_settings') && rows[key] !== undefined ? { value: rows[key] } : undefined,
-    ),
-  } as unknown as DatabaseService;
-  return new MapsService(database, {} as PlacePhotoCacheService);
+  return buildMapsService(
+    {} as PlacePhotoCacheService,
+    settings(rows),
+    noUsers,
+    {} as never,
+    {} as never,
+    noGoogleQuota,
+  );
 }
+
+function settings(rows: Record<string, string>): AppSettingsRepository {
+  return {
+    getValue: async (key: string) => (rows[key] !== undefined ? rows[key] : null),
+  } as unknown as AppSettingsRepository;
+}
+
+/**
+ * The service with Photon answering `rows` (null: the services are off). The
+ * client itself is pinned in osm.photon.test.ts; here only what the keystroke
+ * path does with its answer matters.
+ */
+function withPhoton(rows: Suggestion[] | null, settingRows: Record<string, string> = {}) {
+  trekPlaces.on = true;
+  const parts = buildMapsParts({} as PlacePhotoCacheService, settings(settingRows), noUsers, {} as never, {} as never);
+  const photon = vi.spyOn(parts.osm, 'suggestPhoton').mockResolvedValue(rows && { rows, lead: null });
+  return { svc: parts.svc, photon };
+}
+
+const photonRow = (over: Partial<Suggestion> = {}): Suggestion => ({
+  placeId: 'way:518071791',
+  mainText: 'Kröpeliner Tor',
+  secondaryText: 'Kröpeliner Straße, Rostock, Deutschland',
+  source: 'openstreetmap',
+  lat: 54.0893,
+  lng: 12.1325,
+  ...over,
+});
 
 /** Google's autocomplete envelope, which is not the shape its text search answers in. */
 const googleSuggestions = (name: string) => ({
   ok: true,
   json: async () => ({
-    suggestions: [{ placePrediction: { placeId: 'g1', structuredFormat: { mainText: { text: name }, secondaryText: { text: 'Chiyoda' } } } }],
+    suggestions: [
+      {
+        placePrediction: {
+          placeId: 'g1',
+          structuredFormat: { mainText: { text: name }, secondaryText: { text: 'Chiyoda' } },
+        },
+      },
+    ],
   }),
 });
 
@@ -120,7 +166,8 @@ describe('MapsService.autocompletePlaces', () => {
     expect(result.suggestions[0].placeId).toBe('gers:abc-123');
     expect(result.suggestions[1].placeId).toBe('gers:def-456');
     expect(result.suggestions[0].mainText).toBe('Café Kröpeliner');
-    expect(result.suggestions[0].secondaryText).toBe('Rostock, DE');
+    // The country by name, not its ISO code (#2592).
+    expect(result.suggestions[0].secondaryText).toBe('Rostock, Germany');
   });
 
   it('MAPS-AUTO-002: a place with no locality gets an empty line, not the word "undefined"', async () => {
@@ -142,8 +189,7 @@ describe('MapsService.autocompletePlaces', () => {
     });
 
     // Eight, not ten: the suggestion list is what a person reads while typing.
-    expect(mockSearch).toHaveBeenCalledWith(INPUT,
-      { lat: 54.1, lng: 12.2, limit: 8, sources: 'index,osm' });
+    expect(mockSearch).toHaveBeenCalledWith(INPUT, { lat: 54.1, lng: 12.2, limit: 8, sources: 'index,osm' });
   });
 
   it('MAPS-AUTO-004: without a bias the index is asked without coordinates rather than with zeroes', async () => {
@@ -154,8 +200,7 @@ describe('MapsService.autocompletePlaces', () => {
     // A 0/0 bias is a point in the Atlantic, and the index treats a bias as
     // permission to relax the match — which is how the shops around a landmark
     // start outranking the landmark.
-    expect(mockSearch).toHaveBeenCalledWith(INPUT,
-      { lat: undefined, lng: undefined, limit: 8, sources: 'index,osm' });
+    expect(mockSearch).toHaveBeenCalledWith(INPUT, { lat: undefined, lng: undefined, limit: 8, sources: 'index,osm' });
   });
 
   it('MAPS-AUTO-005: an index that found nothing falls through instead of answering empty', async () => {
@@ -193,15 +238,11 @@ describe('MapsService.autocompletePlaces', () => {
   });
 
   it('MAPS-AUTO-009: index and layer hits keep their own id form in one list', async () => {
-    mockSearch.mockResolvedValue([hit(), osmHit(), hit({ gers: 'def-456' })]);
+    mockSearch.mockResolvedValue([hit(), osmHit(), hit({ gers: 'def-456', name: 'Kirby Cafe Tenjin' })]);
 
     const { suggestions } = await make().autocompletePlaces(1, INPUT);
 
-    expect(suggestions.map(s => s.placeId)).toEqual([
-      'gers:abc-123',
-      'node:9712313',
-      'gers:def-456',
-    ]);
+    expect(suggestions.map((s) => s.placeId)).toEqual(['gers:abc-123', 'node:9712313', 'gers:def-456']);
     // A local name equal to the label would be a repeated line, not a hint.
     const same = osmHit({ local_name: 'Tokio Hauptbahnhof' });
     mockSearch.mockResolvedValue([same]);
@@ -219,7 +260,7 @@ describe('MapsService.autocompletePlaces', () => {
     // told a place from OpenStreetMap came out of the TREK index, which is the
     // one thing the mark beside a suggestion exists to answer.
     expect(source).toBe('trek-places');
-    expect(suggestions.map(s => s.source)).toEqual(['trek-places', 'openstreetmap']);
+    expect(suggestions.map((s) => s.source)).toEqual(['trek-places', 'openstreetmap']);
   });
 
   it('MAPS-AUTO-011: a suggestion carries the coordinates the index already gave, so the pick needs no second hop', async () => {
@@ -270,8 +311,11 @@ describe('MapsService.autocompletePlaces', () => {
     // A key, but the admin picked OpenStreetMap: Google holds no slot, so
     // there is nothing for the switch to hand the keystroke to.
     mockSearch.mockClear();
-    const osmOnly = await make(true, { maps_api_key: 'key', places_google_only: 'true', places_provider: 'openstreetmap' })
-      .autocompletePlaces(1, INPUT);
+    const osmOnly = await make(true, {
+      maps_api_key: 'key',
+      places_google_only: 'true',
+      places_provider: 'openstreetmap',
+    }).autocompletePlaces(1, INPUT);
     expect(mockSearch).toHaveBeenCalledTimes(1);
     expect(osmOnly.source).toBe('trek-places');
 
@@ -280,5 +324,228 @@ describe('MapsService.autocompletePlaces', () => {
     const off = await make(true, { maps_api_key: 'key', places_google_only: 'false' }).autocompletePlaces(1, INPUT);
     expect(mockSearch).toHaveBeenCalledTimes(1);
     expect(off.source).toBe('trek-places');
+  });
+
+  it('MAPS-AUTO-014: the country is named in the language the search was made in (#2592)', async () => {
+    const hakata = hit({ name: 'Kirby Cafe Hakata', address: { locality: '福岡市博多区', country: 'JP' } });
+    mockSearch.mockResolvedValue([hakata]);
+
+    const named = async (lang?: string) =>
+      (await make().autocompletePlaces(1, INPUT, lang)).suggestions[0].secondaryText;
+
+    expect(await named('en')).toBe('福岡市博多区, Japan');
+    expect(await named('de')).toBe('福岡市博多区, Japan');
+    expect(await named('fr')).toBe('福岡市博多区, Japon');
+    expect(await named('ja')).toBe('福岡市博多区, 日本');
+    // TREK's own codes for Brazilian Portuguese and Greek are not BCP 47 tags.
+    expect(await named('br')).toBe('福岡市博多区, Japão');
+    expect(await named('gr')).toBe('福岡市博多区, Ιαπωνία');
+    expect(await named(undefined)).toBe('福岡市博多区, Japan');
+  });
+
+  it('MAPS-AUTO-015: a country the runtime cannot name stays as the index sent it', async () => {
+    mockSearch.mockResolvedValue([
+      hit({ address: { locality: 'Rostock', country: 'JPN' } }),
+      hit({ gers: 'x', address: { locality: 'Rostock', country: '' } }),
+    ]);
+
+    const { suggestions } = await make().autocompletePlaces(1, INPUT, 'not a locale!');
+
+    expect(suggestions[0].secondaryText).toBe('Rostock, JPN');
+    expect(suggestions[1].secondaryText).toBe('Rostock');
+  });
+
+  it('MAPS-AUTO-016: a layer row for a place the index already listed is dropped, as the search list does (#2592)', async () => {
+    // The reported case: the index's Kirby Cafe Hakata and the layer's Kirby
+    // Cafe six metres away are one shop, and the list showed it twice. The
+    // layer's Kirby Cafe in Tokyo is another shop and stays.
+    mockSearch.mockResolvedValue([
+      hit({
+        gers: 'hakata',
+        name: 'Kirby Cafe Hakata',
+        lat: 33.59052848815918,
+        lng: 130.4105987548828,
+        address: { locality: '福岡市博多区', country: 'JP' },
+      }),
+      osmHit({
+        id: 'osm:node/1',
+        osm_id: 1,
+        name: 'Kirby Cafe',
+        local_name: 'カービィカフェ',
+        lat: 35.7103685,
+        lng: 139.8118977,
+      }),
+      hit({ gers: 'emmetsburg', name: "Kirby's Cafe", lat: 43.11215019226074, lng: -94.69049072265625 }),
+      osmHit({
+        id: 'osm:node/2',
+        osm_id: 2,
+        name: 'Kirby Cafe',
+        local_name: 'カービィカフェ',
+        lat: 33.5905723,
+        lng: 130.4106152,
+      }),
+      // The same name a hundred metres off is kept, exactly as the search
+      // list keeps it: index coordinates are not that precise, but a chain's
+      // second branch round the corner is not a duplicate either.
+      osmHit({
+        id: 'osm:node/3',
+        osm_id: 3,
+        name: "Kirby's Café",
+        local_name: null,
+        lat: 43.1122282,
+        lng: -94.6917042,
+      }),
+      // The index carries the local name, the layer labels it with the exonym
+      // that matched: compared on the name written on the building instead.
+      hit({ gers: 'hasedera', name: '長谷寺', lat: 35.3124, lng: 139.5333 }),
+      osmHit({
+        id: 'osm:way/4',
+        osm_type: 'way',
+        osm_id: 4,
+        name: 'Hase-dera',
+        local_name: '長谷寺',
+        lat: 35.31245,
+        lng: 139.53335,
+      }),
+    ]);
+
+    const { suggestions } = await make().autocompletePlaces(1, INPUT, 'en');
+
+    expect(suggestions.map((s) => s.placeId)).toEqual([
+      'gers:hakata',
+      'node:1',
+      'gers:emmetsburg',
+      'node:3',
+      'gers:hasedera',
+    ]);
+  });
+  it('MAPS-AUTO-017: the search language goes to the index, which names localities in it (#2592)', async () => {
+    mockSearch.mockResolvedValue([hit()]);
+
+    await make().autocompletePlaces(1, INPUT, 'br');
+
+    expect(mockSearch).toHaveBeenCalledWith(INPUT, expect.objectContaining({ sources: 'index,osm', lang: 'br' }));
+  });
+
+  it('MAPS-AUTO-018: a layer row reads as its town and country, like an index row (#2592)', async () => {
+    // What the service answers for "kirby cafe" with a language: the two layer
+    // rows used to repeat カービィカフェ under "Kirby Cafe" with no place at all.
+    const tokyo = osmHit({ name: 'Kirby Cafe', local_name: 'カービィカフェ', lat: 35.7103685, lng: 139.8118977 });
+    const rows = (locality: string) => [
+      { ...tokyo, locality },
+      hit({ gers: 'emmetsburg', name: "Kirby's Cafe", lat: 43.11215, lng: -94.69049 }),
+    ];
+
+    mockSearch.mockResolvedValue(rows('Sumida'));
+    expect((await make().autocompletePlaces(1, INPUT, 'en')).suggestions[0].secondaryText).toBe('Sumida, Japan');
+
+    mockSearch.mockResolvedValue(rows('Sumida'));
+    expect((await make().autocompletePlaces(1, INPUT, 'fr')).suggestions[0].secondaryText).toBe('Sumida, Japon');
+
+    mockSearch.mockResolvedValue(rows('Tokio'));
+    expect((await make().autocompletePlaces(1, INPUT, 'de')).suggestions[0].secondaryText).toBe('Tokio, Japan');
+  });
+
+  it('MAPS-AUTO-019: without a locality the layer row keeps its local name, and never prints a blank', async () => {
+    mockSearch.mockResolvedValue([
+      osmHit({ id: 'osm:node/1', osm_id: 1, locality: null }),
+      osmHit({ id: 'osm:node/2', osm_id: 2, name: 'Same', local_name: 'Same', lat: 1, lng: 1, locality: null }),
+      osmHit({ id: 'osm:node/3', osm_id: 3, name: 'Old service', local_name: '旧', lat: 2, lng: 2 }),
+    ]);
+
+    const { suggestions } = await make().autocompletePlaces(1, INPUT, 'en');
+
+    expect(suggestions.map((s) => s.secondaryText)).toEqual(['東京駅丸の内駅舎', '', '旧']);
+  });
+
+  it('MAPS-AUTO-020: a locality out at sea, where no country is, stands alone', async () => {
+    mockSearch.mockResolvedValue([osmHit({ lat: 0.5, lng: -30, locality: 'Somewhere' })]);
+
+    const { suggestions } = await make().autocompletePlaces(1, INPUT, 'en');
+
+    expect(suggestions[0].secondaryText).toBe('Somewhere');
+  });
+
+  it('MAPS-AUTO-021: Photon is asked beside the index and its places join the list (#2877)', async () => {
+    mockSearch.mockResolvedValue([hit(), hit({ gers: 'def-456', name: 'Café Central', lat: 54.2, lng: 12.2 })]);
+    const { svc, photon } = withPhoton([
+      photonRow(),
+      photonRow({ placeId: 'node:7', mainText: 'Kröpeliner Straße', lat: 54.09, lng: 12.135 }),
+    ]);
+    const bias = { low: { lat: 54, lng: 12 }, high: { lat: 54.2, lng: 12.2 } };
+
+    const result = await svc.autocompletePlaces(1, INPUT, 'de', bias);
+
+    expect(photon).toHaveBeenCalledWith(INPUT, 'de', { lat: 54.1, lng: 12.1 }, expect.any(AbortSignal));
+    expect(result.source).toBe('trek-places');
+    expect(result.suggestions.map((s) => s.placeId)).toEqual([
+      'gers:abc-123',
+      'way:518071791',
+      'gers:def-456',
+      'node:7',
+    ]);
+    expect(result.suggestions[1]).toMatchObject({ source: 'openstreetmap', mainText: 'Kröpeliner Tor' });
+  });
+
+  it('MAPS-AUTO-022: what only Photon found is the answer when the index has nothing, named as OpenStreetMap', async () => {
+    mockSearch.mockResolvedValue([]);
+    const { svc } = withPhoton([photonRow()]);
+
+    const result = await svc.autocompletePlaces(1, INPUT);
+
+    expect(result).toEqual({ suggestions: [photonRow()], source: 'openstreetmap' });
+  });
+
+  it('MAPS-AUTO-023: an index failure keeps what Photon found instead of throwing it away', async () => {
+    mockSearch.mockRejectedValue(new Error('places api down'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { svc } = withPhoton([photonRow()]);
+
+    const result = await svc.autocompletePlaces(1, INPUT);
+
+    expect(warn).toHaveBeenCalledWith('TREK Places autocomplete failed, falling back:', 'places api down');
+    expect(result.suggestions).toEqual([photonRow()]);
+  });
+
+  it('MAPS-AUTO-024: the Google-only switch skips Photon the way it skips the index', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(googleSuggestions('Tokyo Station'));
+    vi.stubGlobal('fetch', fetchMock);
+    const { svc, photon } = withPhoton([photonRow()], { maps_api_key: 'key', places_google_only: 'true' });
+
+    const result = await svc.autocompletePlaces(1, INPUT);
+
+    expect(photon).not.toHaveBeenCalled();
+    expect(result.source).toBe('google');
+    vi.unstubAllGlobals();
+  });
+
+  it('MAPS-AUTO-025: once the index has answered, a slow Photon gets a moment more and is then dropped', async () => {
+    mockSearch.mockResolvedValue([hit()]);
+    const { svc, photon } = withPhoton(null);
+    photon.mockImplementation(() => new Promise(() => undefined));
+    const started = Date.now();
+
+    const result = await svc.autocompletePlaces(1, INPUT);
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(PHOTON_GRACE_MS - 50);
+    expect(result).toEqual({
+      suggestions: [expect.objectContaining({ placeId: 'gers:abc-123' })],
+      source: 'trek-places',
+    });
+    // The question nobody waits for any more is called off, which is no miss for Photon.
+    expect((photon.mock.calls[0][3] as AbortSignal).aborted).toBe(true);
+  });
+
+  it('MAPS-AUTO-026: with nothing from the index, Photon is waited for past that moment', async () => {
+    mockSearch.mockResolvedValue([]);
+    const { svc, photon } = withPhoton(null);
+    photon.mockImplementation(
+      () =>
+        new Promise((resolve) => setTimeout(() => resolve({ rows: [photonRow()], lead: null }), PHOTON_GRACE_MS + 100)),
+    );
+
+    const result = await svc.autocompletePlaces(1, INPUT);
+
+    expect(result).toEqual({ suggestions: [photonRow()], source: 'openstreetmap' });
   });
 });

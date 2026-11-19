@@ -6,7 +6,13 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.prevMonth': 'Предыдущий месяц',
   'mobileVacay.nextMonth': 'Следующий месяц',
   'mobileVacay.usedCount': 'Использовано: {count}',
+  'mobileVacay.usedCount.one': 'Использовано: {count}',
+  'mobileVacay.usedCount.few': 'Использовано: {count}',
+  'mobileVacay.usedCount.many': 'Использовано: {count}',
   'mobileVacay.leftCount': 'Осталось: {count}',
+  'mobileVacay.leftCount.one': 'Осталось: {count}',
+  'mobileVacay.leftCount.few': 'Осталось: {count}',
+  'mobileVacay.leftCount.many': 'Осталось: {count}',
   'mobileVacay.left': 'осталось',
   'mobileVacay.modeCompany': 'Компания',
   'mobileVacay.decreaseAllowance': 'Уменьшить лимит',
@@ -14,6 +20,8 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.companyLegend': 'Корпоративные дни',
   'mobileVacay.editCalendar': 'Изменить календарь',
   'mobileVacay.viewYear': 'Просмотр года',
+  'mobileVacay.people': 'Люди',
+  'mobileVacay.legend': 'Легенда',
 };
 
 export default mobileVacay;

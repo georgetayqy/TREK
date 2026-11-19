@@ -16,7 +16,7 @@ const system_notice: TranslationStrings = {
   'system_notice.thank_you_support.highlight_opensource': '在 GitHub 上 100% 开源',
   'system_notice.thank_you_support.highlight_free': '永久免费——绝无付费档位',
   'system_notice.thank_you_support.highlight_community': '与社区一起共建',
-  'system_notice.thank_you_support.cta_bmc': 'Buy Me a Coffee',
+  'system_notice.thank_you_support.cta_bmc': '请我喝杯咖啡',
   'system_notice.thank_you_support.cta_kofi': '在 Ko-fi 上支持',
   'system_notice.pager.prev': '上一条通知',
   'system_notice.pager.next': '下一条通知',
@@ -54,16 +54,20 @@ const system_notice: TranslationStrings = {
     '3.0.14 版本升级检测到一个或多个由存储账户中首尾空白字符引发的用户名或邮箱冲突。受影响的账户已自动重命名。请检查服务器日志中以 **[migration] WHITESPACE COLLISION** 开头的行，以确认哪些账户需要审查。',
   // The release modal. One stable set of keys: each big release swaps the copy in place.
   'system_notice.release_notes.eyebrow': '更新已安装',
-  'system_notice.release_notes.headline': 'TREK 现在能自己完成的四件事。',
-  'system_notice.release_notes.intro': '自有的地点 API、从头到尾规划的公路旅行、掌握在你手中的位置记录，以及保持同步的文档。',
+  'system_notice.release_notes.headline': '对的地方，排在最前。',
+  'system_notice.release_notes.intro':
+    '地点搜索、地址搜索和路线规划现在运行在 TREK 自己的服务器上，由 dataforest cloud 赞助。而且每个 TREK 都能把它对地点的了解分享给所有其他 TREK。',
   'system_notice.release_notes.features_label': '本次重头戏',
   'system_notice.release_notes.features_aside': '远不止这些',
-  'system_notice.release_notes.feature_places_title': 'TREK Places API',
-  'system_notice.release_notes.feature_places_body': '首个拥有自有地点 API 的开源旅行规划器。7360 万个地点，无需密钥，没有配额。',
-  'system_notice.release_notes.feature_roadtrip_title': '公路旅行扩展',
-  'system_notice.release_notes.feature_roadtrip_body': '自动规划行车：路线、距离、时长和停靠点。管理员开启前默认关闭。',
-  'system_notice.release_notes.feature_dawarich_title': 'Dawarich 集成',
-  'system_notice.release_notes.feature_dawarich_body': 'Google Timeline 的自托管替代方案，现在可以直接在 TREK 里查看。TREK 只读取，仅此而已。',
+  'system_notice.release_notes.feature_search_title': '一搜就准的地点搜索',
+  'system_notice.release_notes.feature_search_body':
+    '城市、岛屿、地标，以及按代码搜索的机场排在最前，咖啡馆则从你身边找起，边输入边出建议。',
+  'system_notice.release_notes.feature_share_title': '地点详情，大家共享',
+  'system_notice.release_notes.feature_share_body':
+    '把网站、营业时间和照片逐项分享给每一个 TREK，你保存的地点也会自动补上别人添加的信息。',
+  'system_notice.release_notes.feature_routing_title': '更快的路线规划',
+  'system_notice.release_notes.feature_routing_body':
+    '一整天最多二十个停靠点，一次就能规划完。一条慢路线不再拖累其他路线，公共交通在第一个服务商找不到结果时，会再问第二个。',
   'system_notice.release_notes.footnote': '除此之外，TREK 的其他部分还有一长串小改动。',
   'system_notice.release_notes.notes_label': '更新说明',
   'system_notice.release_notes.note_eyebrow': '来自维护者的话',
@@ -76,12 +80,11 @@ const system_notice: TranslationStrings = {
   'system_notice.release_notes.note_body_after':
     '后来，你们真的来了。短短几个月，就来了成千上万的你们：有人点星标、报 bug，有人把它翻译成我不会说的语言，还有素未谋面的人提交 pull request。直到今天，我每天早上第一件事仍是打开仓库看看，而这一切还是有点不像真的。',
   'system_notice.release_notes.note_closing': '谢谢你来到这里，Maurice 敬上。',
-  'system_notice.release_notes.support_lead': 'TREK 现在免费，以后也永远免费，但服务器、域名和无数个深夜可不是免费的。',
+  'system_notice.release_notes.support_label': '保持独立',
+  'system_notice.release_notes.support_lead': '不靠 Google 之流。',
   'system_notice.release_notes.support_text':
-    '如果它已经在你的旅行中占有一席之地，请我喝杯咖啡，帮我把下一个版本继续做出来吧。',
-  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+    '地点搜索、地址搜索和路线规划都运行在 TREK 自己的服务器上，目前由 dataforest cloud 赞助。我每天都在为此努力，而要一直保持下去，需要你的支持。',
+  'system_notice.release_notes.cta_bmc': '请我喝杯咖啡',
   'system_notice.release_notes.cta_kofi': '在 Ko-fi 上支持',
-  'system_notice.release_notes.feature_docsync_title': '文档同步',
-  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx、Papra、Nextcloud、OpenCloud 和 Synology Drive。行程的文档与你已在运行的存储双向流动。',
 };
 export default system_notice;

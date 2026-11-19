@@ -1,95 +1,22 @@
-import { useState, useEffect, useRef } from 'react'
-import { Key, Trash2, User, Loader2, Shield } from 'lucide-react'
-import { adminApi } from '../../../api/client'
-import { useToast } from '../../../components/shared/Toast'
+import { Key, Trash2, User, Shield } from 'lucide-react'
+import { SCOPES_PREVIEW, useMcpTokensAdmin } from '../../../components/Admin/useMcpTokensAdmin'
 import { useTranslation } from '../../../i18n'
+import { useFormatDate } from '../../../hooks/useDateFormat'
 import { MAdminCard } from './MAdminUi'
 import MConfirmSheet from '../settings/MConfirmSheet'
-
-interface AdminOAuthSession {
-  id: number
-  client_id: string
-  client_name: string
-  user_id: number
-  username: string
-  scopes: string[]
-  access_token_expires_at: string
-  refresh_token_expires_at: string
-  created_at: string
-}
-
-interface AdminMcpToken {
-  id: number
-  name: string
-  token_prefix: string
-  created_at: string
-  last_used_at: string | null
-  user_id: number
-  username: string
-}
-
-const SCOPES_PREVIEW = 6
+import MSkeleton from '../../components/MSkeleton'
 
 // Mobile MCP tokens admin section: OAuth sessions + long-lived MCP tokens, each
 // as a card list with loading/empty states, expandable scope chips and a
 // delete confirm sheet. Drop-in for the desktop AdminMcpTokensPanel — no props,
-// same adminApi calls and state machine, only the presentation is mobile.
+// the state machine lives in useMcpTokensAdmin, only the presentation is mobile.
 export default function MAdminMcpTokensPanel() {
-  const [sessions, setSessions] = useState<AdminOAuthSession[]>([])
-  const [sessionsLoading, setSessionsLoading] = useState(true)
-  const [tokens, setTokens] = useState<AdminMcpToken[]>([])
-  const [tokensLoading, setTokensLoading] = useState(true)
-  const [expandedScopes, setExpandedScopes] = useState<Set<number>>(new Set())
-  const [revokeConfirmId, setRevokeConfirmId] = useState<number | null>(null)
-  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
-
-  const toggleScopes = (id: number) =>
-    setExpandedScopes(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  const toast = useToast()
-  const { t, locale } = useTranslation()
-
-  // The loader runs once, but a language switch while the requests are in flight
-  // must still toast in the current locale — hence the ref instead of the closure.
-  const latest = useRef({ t, toast })
-  latest.current = { t, toast }
-
-  useEffect(() => {
-    adminApi.oauthSessions()
-      .then(d => setSessions(d.sessions || []))
-      .catch(() => latest.current.toast.error(latest.current.t('admin.oauthSessions.loadError')))
-      .finally(() => setSessionsLoading(false))
-
-    adminApi.mcpTokens()
-      .then(d => setTokens(d.tokens || []))
-      .catch(() => latest.current.toast.error(latest.current.t('admin.mcpTokens.loadError')))
-      .finally(() => setTokensLoading(false))
-  }, [])
-
-  const handleRevoke = async (id: number) => {
-    try {
-      await adminApi.revokeOAuthSession(id)
-      setSessions(prev => prev.filter(s => s.id !== id))
-      setRevokeConfirmId(null)
-      toast.success(t('admin.oauthSessions.revokeSuccess'))
-    } catch {
-      toast.error(t('admin.oauthSessions.revokeError'))
-    }
-  }
-
-  const handleDelete = async (id: number) => {
-    try {
-      await adminApi.deleteMcpToken(id)
-      setTokens(prev => prev.filter(tk => tk.id !== id))
-      setDeleteConfirmId(null)
-      toast.success(t('admin.mcpTokens.deleteSuccess'))
-    } catch {
-      toast.error(t('admin.mcpTokens.deleteError'))
-    }
-  }
+  const {
+    sessions, sessionsLoading, tokens, tokensLoading, expandedScopes, toggleScopes,
+    revokeConfirmId, setRevokeConfirmId, deleteConfirmId, setDeleteConfirmId, handleRevoke, handleDelete,
+  } = useMcpTokensAdmin()
+  const { t } = useTranslation()
+  const { formatDate } = useFormatDate()
 
   return (
     <div className="space-y-3">
@@ -108,9 +35,7 @@ export default function MAdminMcpTokensPanel() {
         </div>
         <MAdminCard>
           {sessionsLoading ? (
-            <div className="flex items-center justify-center py-10">
-              <Loader2 className="h-5 w-5 animate-spin text-m-faint" />
-            </div>
+            <MSkeleton variant="rows" count={3} framed={false} />
           ) : sessions.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-10">
               <Shield className="h-8 w-8 text-m-faint" />
@@ -134,7 +59,7 @@ export default function MAdminMcpTokensPanel() {
                         {session.username}
                       </span>
                       <span className="text-m-faint">·</span>
-                      <span>{new Date(session.created_at).toLocaleDateString(locale)}</span>
+                      <span>{formatDate(new Date(session.created_at))}</span>
                     </div>
                     <div className="mt-[6px] flex flex-wrap gap-1">
                       {visible.map(scope => (
@@ -188,9 +113,7 @@ export default function MAdminMcpTokensPanel() {
         </div>
         <MAdminCard>
           {tokensLoading ? (
-            <div className="flex items-center justify-center py-10">
-              <Loader2 className="h-5 w-5 animate-spin text-m-faint" />
-            </div>
+            <MSkeleton variant="rows" count={3} framed={false} />
           ) : tokens.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-10">
               <Key className="h-8 w-8 text-m-faint" />
@@ -211,11 +134,11 @@ export default function MAdminMcpTokensPanel() {
                       {token.username}
                     </span>
                     <span className="text-m-faint">·</span>
-                    <span>{new Date(token.created_at).toLocaleDateString(locale)}</span>
+                    <span>{formatDate(new Date(token.created_at))}</span>
                     <span className="text-m-faint">·</span>
                     <span>
                       {token.last_used_at
-                        ? new Date(token.last_used_at).toLocaleDateString(locale)
+                        ? formatDate(new Date(token.last_used_at))
                         : t('admin.mcpTokens.never')}
                     </span>
                   </div>

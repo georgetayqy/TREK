@@ -2,8 +2,12 @@
    - ENCRYPTION_KEY encrypts stored secrets (API keys, MFA, SMTP, OIDC) at rest.
    - By default, the chart creates a Kubernetes Secret from `secretEnv.ENCRYPTION_KEY` in values.yaml.
    - To generate a random key at install (preserved across upgrades), set `generateEncryptionKey: true`.
-   - To use an existing Kubernetes secret, set `existingSecret` to the secret name. The secret must
-     contain a key matching `existingSecretKey` (defaults to `ENCRYPTION_KEY`).
+   - To use an existing Kubernetes secret, set `existingSecret` to the secret name. The chart then
+     renders no Secret of its own and reads every secret env var from that secret: `ENCRYPTION_KEY`
+     (renamable via `existingSecretKey`), plus `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `OIDC_CLIENT_SECRET`,
+     `UNSPLASH_ACCESS_KEY`, `PLACES_API_KEY`, `AMAP_API_KEY`, `AMAP_API_SECRET`,
+     `VAPID_PRIVATE_KEY`, `SMTP_PASS`, `MAPBOX_ACCESS_TOKEN`, `CARTO_API_KEY` and
+     `DEMO_ADMIN_PASS`. Missing keys are simply left unset, so only provide the ones you use.
    - If left empty, the server resolves the key automatically: existing installs fall back to
      data/.jwt_secret (encrypted data stays readable with no manual action); fresh installs
      auto-generate a key persisted to the data PVC.
@@ -27,3 +31,12 @@
      The other values for that volume (size, storageClassName, annotations) are then ignored.
    - With `persistence.enabled=false` the volumes use an emptyDir — storage is ephemeral and is lost
      when the pod restarts. Use only for testing.
+{{- if .Values.httpRoute.enabled }}
+
+6. HTTPRoute:
+   - The chart creates an HTTPRoute v1 to the existing TREK Service. The Gateway, GatewayClass,
+     listeners, TLS certificates and allowedRoutes are managed by your cluster operator.
+   - Ingress and HTTPRoute may be enabled together.
+   - Timeout fields are Standard Channel in Gateway API v1.2, but controller support varies. Omit
+     them to use controller defaults; `0s` disables the corresponding timeout where supported.
+{{- end }}

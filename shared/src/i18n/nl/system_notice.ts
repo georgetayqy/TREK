@@ -9,8 +9,8 @@ const system_notice: TranslationStrings = {
   'system_notice.welcome_v1.highlight_plan': "Dag-voor-dag reisschema's",
   'system_notice.welcome_v1.highlight_share': 'Samenwerken met reisgezelschap',
   'system_notice.welcome_v1.highlight_offline': 'Werkt offline op mobiel',
-  'system_notice.dev_test_modal.title': '[Dev] Test notice',
-  'system_notice.dev_test_modal.body': 'This is a dev-only test notice.',
+  'system_notice.dev_test_modal.title': '[Dev] Testmelding',
+  'system_notice.dev_test_modal.body': 'Dit is een testmelding alleen voor ontwikkelaars.',
   'system_notice.thank_you_support.title': 'Bedankt voor het gebruik van TREK',
   'system_notice.thank_you_support.body':
     'Even een kort bedankje dat je TREK hebt geïnstalleerd — het betekent echt veel voor me.\n\nIk ben een solo-ontwikkelaar en bouw TREK in mijn vrije tijd. Het begon als een klein hulpmiddel voor mijn eigen reizen, en ik ben oprecht overweldigd door de steun en de interesse vanuit de community sindsdien. TREK is met heel veel hart gemaakt aan mijn kant — maar ook dankzij de vele geweldige externe bijdragers die hebben geholpen het vorm te geven.\n\n**TREK is open source en volledig gratis — en dat zal het voor altijd blijven. Geen betaalde versies, geen abonnementen, geen addertjes onder het gras. Dat beloof ik.**\n\nAls TREK nuttig voor je is en je de ontwikkeling ervan wilt steunen, helpt een klein kopje koffie me oprecht om te blijven bouwen — absoluut geen druk, maar elk kopje houdt de late avonden gaande.\n\nBedankt dat je er bent.\n\n— Maurice',
@@ -56,16 +56,20 @@ const system_notice: TranslationStrings = {
     'De 3.0.14-upgrade heeft één of meer conflicten in gebruikersnaam of e-mailadres gedetecteerd, veroorzaakt door spaties aan het begin of einde van opgeslagen waarden. Getroffen accounts zijn automatisch hernoemd. Controleer de serverlogboeken op regels die beginnen met **[migration] WHITESPACE COLLISION** om te achterhalen welke accounts moeten worden beoordeeld.',
   // The release modal. One stable set of keys: each big release swaps the copy in place.
   'system_notice.release_notes.eyebrow': 'Update geïnstalleerd',
-  'system_notice.release_notes.headline': 'Vier dingen die TREK nu zelf doet.',
-  'system_notice.release_notes.intro': 'Een eigen plaatsen-API, roadtrips van begin tot eind gepland, je locatiegeschiedenis in eigen hand, en je documenten gesynchroniseerd.',
+  'system_notice.release_notes.headline': 'De juiste plek, eerst.',
+  'system_notice.release_notes.intro':
+    'Plaatsen zoeken, adressen zoeken en routeplanning draaien nu op eigen servers van TREK, gesponsord door dataforest cloud, en elke TREK kan wat hij over plaatsen weet delen met alle andere.',
   'system_notice.release_notes.features_label': 'De hoogtepunten',
   'system_notice.release_notes.features_aside': 'Lang niet alles',
-  'system_notice.release_notes.feature_places_title': 'TREK Places API',
-  'system_notice.release_notes.feature_places_body': 'De eerste open source reisplanner met een eigen plaatsen-API. 73,6 miljoen plaatsen, geen sleutel, geen quotum.',
-  'system_notice.release_notes.feature_roadtrip_title': 'Roadtrip-addon',
-  'system_notice.release_notes.feature_roadtrip_body': 'Plant de rit zelf: route, afstand, uren en stops. Uit totdat een admin het inschakelt.',
-  'system_notice.release_notes.feature_dawarich_title': 'Dawarich-integratie',
-  'system_notice.release_notes.feature_dawarich_body': 'Het zelfgehoste antwoord op Google Timeline, nu rechtstreeks leesbaar in TREK. TREK leest, en alleen dat.',
+  'system_notice.release_notes.feature_search_title': 'Plaatsen zoeken dat klopt',
+  'system_notice.release_notes.feature_search_body':
+    'Steden, eilanden, bezienswaardigheden en luchthavens op hun code komen eerst, cafés komen uit je omgeving en suggesties verschijnen terwijl je typt.',
+  'system_notice.release_notes.feature_share_title': 'Plaatsdetails, gedeeld',
+  'system_notice.release_notes.feature_share_body':
+    'Deel websites, openingstijden en foto’s met elke TREK, veld voor veld, en je opgeslagen plaatsen nemen over wat anderen hebben toegevoegd.',
+  'system_notice.release_notes.feature_routing_title': 'Snellere routes',
+  'system_notice.release_notes.feature_routing_body':
+    'Een hele dag wordt in één keer gepland met tot twintig stops, één trage route houdt de rest niet meer op en het openbaar vervoer vraagt een tweede aanbieder als de eerste niets vindt.',
   'system_notice.release_notes.footnote': 'En daarnaast een lange lijst kleinere wijzigingen in de rest van TREK.',
   'system_notice.release_notes.notes_label': 'Release notes',
   'system_notice.release_notes.note_eyebrow': 'Een woord van de maintainer',
@@ -79,13 +83,11 @@ const system_notice: TranslationStrings = {
   'system_notice.release_notes.note_body_after':
     'En toen kwamen jullie. Binnen een paar maanden waren jullie met duizenden: sterren, bugmeldingen, vertalingen in talen die ik niet spreek, pull requests van mensen die ik nooit heb ontmoet. Nog altijd kijk ik elke ochtend als eerste in de repository, en het voelt nog steeds niet helemaal echt.',
   'system_notice.release_notes.note_closing': 'Bedankt dat je er bent. Groetjes, Maurice.',
-  'system_notice.release_notes.support_lead':
-    'TREK is gratis en blijft dat ook, maar servers, domeinen en heel wat late avonden zijn dat niet.',
+  'system_notice.release_notes.support_label': 'Onafhankelijk blijven',
+  'system_notice.release_notes.support_lead': 'Zonder Google en co.',
   'system_notice.release_notes.support_text':
-    'Als TREK een plek in je reizen heeft verdiend, trakteer me dan op een kopje koffie en help zo de volgende release op weg.',
+    'Plaatsen zoeken, adressen zoeken en routeplanning draaien op eigen servers van TREK, vandaag gesponsord door dataforest cloud. Daar vecht ik elke dag voor, en om het zo te houden is jouw steun nodig.',
   'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
   'system_notice.release_notes.cta_kofi': 'Steun op Ko-fi',
-  'system_notice.release_notes.feature_docsync_title': 'Documentsynchronisatie',
-  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud en Synology Drive. De documenten van een reis stromen in beide richtingen met de opslag die je al draait.',
 };
 export default system_notice;

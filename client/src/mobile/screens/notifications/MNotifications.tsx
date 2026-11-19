@@ -1,12 +1,17 @@
+import { useRef } from 'react'
 import { useNavigate } from 'react-router'
-import { ArrowLeft, CheckCheck, Trash2 } from 'lucide-react'
+import { CheckCheck, ChevronLeft, Trash2 } from 'lucide-react'
 import MDancingTrek from '../../components/MDancingTrek'
+import ConfirmDialog from '../../../components/shared/ConfirmDialog'
 import { useTranslation } from '../../../i18n'
 import { useInAppNotifications } from '../../../pages/inAppNotifications/useInAppNotifications'
 import MGlassBar from '../../components/MGlassBar'
 import MIconBtn from '../../components/MIconBtn'
 import MSegmented from '../../components/MSegmented'
 import MNotificationRow from './MNotificationRow'
+import { usePullToRefresh } from '../../usePullToRefresh'
+import MPullIndicator from '../../components/MPullIndicator'
+import MSkeleton from '../../components/MSkeleton'
 
 function Spinner({ size = 20 }: { size?: number }) {
   return (
@@ -28,18 +33,24 @@ export default function MNotifications() {
   const navigate = useNavigate()
   const {
     notifications, unreadCount, isLoading, hasMore,
-    unreadOnly, setUnreadOnly, loaderRef, displayed,
-    markAllRead, deleteAll,
+    unreadOnly, setUnreadOnly, loaderRef, displayed, refresh,
+    markAllRead, confirmingDeleteAll, requestDeleteAll, cancelDeleteAll, confirmDeleteAll,
   } = useInAppNotifications()
+  const contentRef = useRef<HTMLDivElement>(null)
+  const pull = usePullToRefresh(contentRef, refresh)
 
   return (
     <>
-      <MGlassBar>
+      {/* On a wide window the bar keeps to the column of the list below it. The
+          way back is the round chevron every other screen has. */}
+      <MGlassBar column="wide:max-w-[808px]">
         <MIconBtn ariaLabel={t('common.back')} onClick={() => navigate(-1)}>
-          <ArrowLeft size={18} strokeWidth={2} />
+          <ChevronLeft size={18} strokeWidth={2.2} className="rtl:-scale-x-100" />
         </MIconBtn>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h1 className="truncate text-[0.9375rem] font-bold text-m-ink">{t('notifications.title')}</h1>
+          {/* Two lines, hyphenated, before an ellipsis: "Benachrichtigungen" was
+              cut to "Benachrichtigu…" beside the badge and two buttons. */}
+          <h1 className="line-clamp-2 min-w-0 break-words text-[0.9375rem] font-bold leading-tight text-m-ink [hyphens:auto]">{t('notifications.title')}</h1>
           {unreadCount > 0 && (
             <span className="flex-none rounded-full bg-m-act px-[7px] py-[2px] font-geist text-[0.625rem] font-bold text-m-actfg">
               {unreadCount}
@@ -52,13 +63,14 @@ export default function MNotifications() {
           </MIconBtn>
         )}
         {notifications.length > 0 && (
-          <MIconBtn ariaLabel={t('notifications.deleteAll')} onClick={deleteAll}>
+          <MIconBtn ariaLabel={t('notifications.deleteAll')} onClick={requestDeleteAll}>
             <Trash2 size={16} strokeWidth={2} className="text-[color:var(--m-st-danger)]" />
           </MIconBtn>
         )}
       </MGlassBar>
 
-      <div className="px-4 pb-[calc(var(--bottom-nav-h)+24px)] pt-[calc(var(--m-safe-top,12px)+66px)]">
+      <MPullIndicator state={pull} label={t('common.loading')} />
+      <div ref={contentRef} className="px-4 pb-[calc(var(--bottom-nav-h)+24px)] pt-[calc(var(--m-safe-top,12px)+66px)] wide:mx-auto wide:max-w-[808px] wide:px-6">
         <MSegmented
           options={[
             { value: 'all', label: t('notifications.all') },
@@ -70,9 +82,7 @@ export default function MNotifications() {
 
         <div className="mt-3 overflow-hidden rounded-[20px] border border-[color:var(--m-cbr)] bg-[color:var(--m-card)] px-[14px]">
           {isLoading && displayed.length === 0 ? (
-            <div className="flex justify-center py-14">
-              <Spinner size={24} />
-            </div>
+            <MSkeleton variant="rows" count={6} framed={false} />
           ) : displayed.length === 0 ? (
             <div className="flex min-h-[60vh] flex-col items-center justify-center px-4 py-10 text-center">
               <MDancingTrek scene="notifications" className="mb-2" />
@@ -89,6 +99,14 @@ export default function MNotifications() {
           )}
         </div>
       </div>
+      <ConfirmDialog
+        isOpen={confirmingDeleteAll}
+        onClose={cancelDeleteAll}
+        onConfirm={confirmDeleteAll}
+        title={t('notifications.deleteAllConfirmTitle')}
+        message={t('notifications.deleteAllConfirmText')}
+        confirmLabel={t('notifications.deleteAll')}
+      />
     </>
   )
 }

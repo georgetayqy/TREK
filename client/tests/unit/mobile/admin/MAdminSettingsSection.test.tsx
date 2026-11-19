@@ -1,4 +1,4 @@
-// FE-MOB-ASET-001 to FE-MOB-ASET-023
+// FE-MOB-ASET-001 to FE-MOB-ASET-024
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
@@ -234,6 +234,21 @@ describe('MAdminSettingsSection', () => {
     expect(admin.handleValidateKey).toHaveBeenCalledWith('maps');
   });
 
+  it('FE-MOB-ASET-024: a key the environment sets is read-only and names its variable (#1881)', async () => {
+    const user = userEvent.setup();
+    const admin = renderSettings({
+      keyInputProps: (field: string) =>
+        field === 'maps' ? { disabled: true, placeholder: 'Set via PLACES_API_KEY' } : { disabled: false, placeholder: 'Enter key...' },
+      mapsKeyTestable: true,
+    });
+
+    expect(screen.getByLabelText('Google Maps API Key')).toBeDisabled();
+    expect(screen.getByLabelText('Google Maps API Key')).toHaveAttribute('placeholder', 'Set via PLACES_API_KEY');
+    expect(screen.getByLabelText('Unsplash API Key')).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Test' }));
+    expect(admin.handleValidateKey).toHaveBeenCalledWith('maps');
+  });
+
   it('FE-MOB-ASET-015: the validation result renders as a valid or invalid line', () => {
     const { unmount } = render(
       <Harness admin={buildAdminHook({ mapsKey: 'k', validation: { maps: true } })} />,
@@ -266,16 +281,16 @@ describe('MAdminSettingsSection', () => {
     expect(admin.handleSaveApiKeys).toHaveBeenCalled();
   });
 
-  it('FE-MOB-ASET-016b: a managed install hides the keys but keeps the provider choice', () => {
-    // The operator owns the credentials; which of them answers place search is
-    // still the admin's call, the same split the desktop tab makes.
+  it('FE-MOB-ASET-016b: a managed install hides the keys, place search, OIDC and the relying party', () => {
+    // All of it is the operator's there, the same split the desktop tab makes.
     renderSettings({ managed: true });
 
     expect(screen.queryByLabelText('Google Maps API Key')).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Amap/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Unsplash API Key')).not.toBeInTheDocument();
-    // The native select became TREK's own picker: a button carrying the choice.
-    expect(screen.getByRole('button', { name: 'Automatic' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Automatic' })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('trek.example.org')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Authentik/)).not.toBeInTheDocument();
   });
 
   it('FE-MOB-ASET-016c: the missing-key notice follows app-config, not the fields', () => {
@@ -286,7 +301,7 @@ describe('MAdminSettingsSection', () => {
     expect(screen.getByText(/TREK index and OpenStreetMap alone/i)).toBeInTheDocument();
     unmount();
 
-    renderSettings({ managed: true, placesProvider: 'google', mapsKey: '', hasMapsKey: true });
+    renderSettings({ placesProvider: 'google', mapsKey: '', hasMapsKey: true });
     expect(screen.queryByText(/TREK index and OpenStreetMap alone/i)).not.toBeInTheDocument();
   });
 
@@ -453,7 +468,7 @@ describe('MAdminSettingsSection', () => {
     const user = userEvent.setup();
     render(<OidcHarness />);
 
-    await user.type(screen.getByPlaceholderText('z.B. Google, Authentik, Keycloak'), 'Authentik');
+    await user.type(screen.getByPlaceholderText('e.g. Google, Authentik, Keycloak'), 'Authentik');
     await user.type(screen.getByPlaceholderText('https://accounts.google.com'), 'https://idp');
     await user.type(
       screen.getByPlaceholderText(
@@ -464,7 +479,7 @@ describe('MAdminSettingsSection', () => {
     await user.type(unlabelledInput('text'), 'trek');
     await user.type(unlabelledInput('password'), 's3cr3t');
 
-    expect(screen.getByPlaceholderText('z.B. Google, Authentik, Keycloak')).toHaveValue('Authentik');
+    expect(screen.getByPlaceholderText('e.g. Google, Authentik, Keycloak')).toHaveValue('Authentik');
     expect(screen.getByPlaceholderText('https://accounts.google.com')).toHaveValue('https://idp');
     expect(
       screen.getByPlaceholderText(

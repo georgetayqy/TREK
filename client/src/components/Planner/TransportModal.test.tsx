@@ -1,4 +1,4 @@
-// FE-PLANNER-TRANSMODAL-001 to FE-PLANNER-TRANSMODAL-070
+// FE-PLANNER-TRANSMODAL-001 to FE-PLANNER-TRANSMODAL-085
 import { render, screen, waitFor, fireEvent, within, act } from '../../../tests/helpers/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -9,6 +9,7 @@ import { useAddonStore } from '../../store/addonStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { isBlurred } from '../../../tests/helpers/bookingCodeBlur';
 import { resetAllStores, seedStore } from '../../../tests/helpers/store';
+import { plannerSave } from '../../../tests/helpers/bookingSave';
 import {
   buildUser,
   buildTrip,
@@ -17,6 +18,7 @@ import {
   buildAssignment,
   buildReservation,
   buildTripFile,
+  buildBudgetItem,
 } from '../../../tests/helpers/factories';
 import { TransportModal } from './TransportModal';
 import type { Day, Reservation } from '../../types';
@@ -69,6 +71,23 @@ beforeEach(() => {
   seedStore(useTripStore, { trip: buildTrip({ id: 1 }), budgetItems: [] });
   vi.clearAllMocks();
 });
+
+// The booking type is a pill in the dialog's head band (PillSelect), named
+// "Booking Type: <type>": open it, then pick the option from its menu.
+function typeField(): HTMLButtonElement {
+  return screen.getByRole('button', { name: /^Booking Type:/ }) as HTMLButtonElement;
+}
+async function pickType(name: RegExp) {
+  await userEvent.click(typeField());
+  // The menu is portaled after the dialog, so its option is the last match.
+  const options = screen.getAllByRole('button', { name });
+  await userEvent.click(options[options.length - 1]);
+}
+// The travelers sit in a dropdown field too; the member rows exist once it is open.
+async function openTravelers() {
+  await userEvent.click(screen.getByRole('button', { name: /Assign travelers|alice|bob/i, expanded: false }));
+  return screen.getByRole('listbox');
+}
 
 describe('TransportModal', () => {
   // ── Rendering ──────────────────────────────────────────────────────────────
@@ -132,12 +151,19 @@ describe('TransportModal', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it('FE-PLANNER-TRANSMODAL-005: all 4 transport type buttons are visible', () => {
+  it('FE-PLANNER-TRANSMODAL-005: the type dropdown offers every transport type', async () => {
     render(<TransportModal {...defaultProps} />);
-    expect(screen.getByRole('button', { name: /^Flight$/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Train$/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Car$/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Cruise$/i })).toBeInTheDocument();
+    // A new transport starts as a flight; the options only exist once the menu is open.
+    expect(typeField()).toHaveTextContent('Flight');
+    expect(screen.queryByRole('button', { name: /^Train$/i })).not.toBeInTheDocument();
+    await userEvent.click(typeField());
+    for (const name of [/^Train$/i, /^Bus$/i, /^Car$/i, /^Taxi$/i, /^Bicycle$/i, /^Cruise$/i, /^Ferry$/i, /^Other$/i]) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
+    // The field itself and its option both read "Flight".
+    expect(screen.getAllByRole('button', { name: /^(Booking Type: ?)?Flight$/i })).toHaveLength(2);
+    // Booking types stay in the booking dialog.
+    expect(screen.queryByRole('button', { name: /^Accommodation$/i })).not.toBeInTheDocument();
   });
 
   it('FE-PLANNER-TRANSMODAL-006: editing pre-fills title', () => {
@@ -165,17 +191,17 @@ describe('TransportModal', () => {
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'LH456');
     await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ title: 'LH456', type: 'flight' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ title: 'LH456', type: 'flight' }), expect.anything());
   });
 
   it('FE-PLANNER-TRANSMODAL-010: switching to train type calls onSave with train type', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} onSave={onSave} />);
-    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await pickType(/^Train$/i);
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'Eurostar');
     await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
     await waitFor(() => expect(onSave).toHaveBeenCalled());
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ type: 'train' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ type: 'train' }), expect.anything());
   });
 
   // ── Budget addon ─────────────────────────────────────────────────────────────
@@ -206,7 +232,7 @@ describe('TransportModal', () => {
     await userEvent.click(screen.getByRole('button', { name: /Create expense/i }));
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     // The legacy auto-budget mechanism is gone; the expense is created via the editor instead.
-    expect(onSave).not.toHaveBeenCalledWith(expect.objectContaining({ create_budget_entry: expect.anything() }));
+    expect(onSave.mock.calls[0][0].create_budget_entry).toBeUndefined();
     await waitFor(() =>
       expect(onOpenExpense).toHaveBeenCalledWith(
         expect.objectContaining({ prefill: expect.objectContaining({ reservationId: 42 }) })
@@ -245,16 +271,20 @@ describe('TransportModal', () => {
     await waitFor(() => expect(screen.getByText('itinerary.pdf')).toBeInTheDocument());
   });
 
-  it('FE-PLANNER-TRANSMODAL-018: file upload to existing transport calls onFileUpload with correct FormData', async () => {
+  it('FE-PLANNER-TRANSMODAL-018: a file picked on an existing transport waits and goes up on Update with correct FormData', async () => {
     const onFileUpload = vi.fn().mockResolvedValue(undefined);
     const res = buildReservation({ id: 10, type: 'train', title: 'Eurostar' });
+    const { save: onSave } = plannerSave(res);
 
-    render(<TransportModal {...defaultProps} reservation={res} onFileUpload={onFileUpload} />);
+    render(<TransportModal {...defaultProps} reservation={res} onSave={onSave} onFileUpload={onFileUpload} />);
 
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     const testFile = new File(['content'], 'ticket.pdf', { type: 'application/pdf' });
     fireEvent.change(fileInput, { target: { files: [testFile] } });
+    expect(screen.getByText('ticket.pdf')).toBeInTheDocument();
+    expect(onFileUpload).not.toHaveBeenCalled();
 
+    await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
     await waitFor(() => expect(onFileUpload).toHaveBeenCalled());
     const [fd] = onFileUpload.mock.calls[0] as [FormData];
     expect(fd.get('file')).toBeTruthy();
@@ -383,8 +413,7 @@ describe('TransportModal', () => {
   });
 
   it('FE-PLANNER-TRANSMODAL-025: pending files flushed after saving new transport', async () => {
-    const savedReservation = buildReservation({ id: 99, type: 'flight' });
-    const onSave = vi.fn().mockResolvedValue(savedReservation);
+    const { save: onSave } = plannerSave(buildReservation({ id: 99, type: 'flight' }));
     const onFileUpload = vi.fn().mockResolvedValue(undefined);
 
     render(<TransportModal {...defaultProps} onSave={onSave} onFileUpload={onFileUpload} reservation={null} />);
@@ -495,6 +524,15 @@ describe('TransportModal', () => {
     expect(screen.getAllByPlaceholderText('Search stop or station…')).toHaveLength(2);
   });
 
+  it('FE-PLANNER-TRANSMODAL-023b: a leg between two city walks opens the search with what it says of them (CW-08)', () => {
+    const days = [{ id: 10, trip_id: 1, day_number: 1, date: '2025-06-01', title: 'Day 1' }] as Day[];
+    const walk = { dayId: 10, fromWalk: 'Old town', toWalk: 'Harbour', ends: '12:15', endsNextDay: false, endsAtLeast: false, nextStarts: '13:00' };
+    const transitPrefill = { from: { name: 'Old bridge', lat: 52.51, lng: 13.42 }, to: { name: 'Fish market', lat: 52.5, lng: 13.45 }, time: '12:15', walk };
+    render(<TransportModal {...defaultProps} days={days} selectedDayId={10} initialAutomated transitPrefill={transitPrefill} places={[]} accommodations={[]} />);
+    expect(screen.getByTestId('transit-walk-end')).toHaveTextContent('Old town ends at about 12:15.');
+    expect(screen.getByTestId('transit-walk-next')).toHaveTextContent('Harbour starts at 13:00.');
+  });
+
   it('FE-PLANNER-TRANSMODAL-028: automated quick picks only offer the chosen day\'s places (#1460)', async () => {
     const days = [
       buildDay({ id: 10, date: '2025-06-01' }),
@@ -525,7 +563,7 @@ describe('TransportModal', () => {
   it('FE-PLANNER-TRANSMODAL-025: a train with an added stop saves from/stop/to endpoints + metadata.legs', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} onSave={onSave} />);
-    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await pickType(/^Train$/i);
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'Berlin → München');
     // Insert an intermediate station (2 → 3 stations = 2 legs).
     await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
@@ -548,11 +586,35 @@ describe('TransportModal', () => {
     expect(payload.metadata.train_number).toBe('ICE 100'); // flat mirror of leg 0
   });
 
+  it('FE-PLANNER-TRANSMODAL-1807: a cruise lists its ports with times, without train fields, and saves them as legs', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TransportModal {...defaultProps} onSave={onSave} />);
+    await pickType(/^Cruise$/i);
+    await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'Baltic cruise');
+    expect(screen.getByText('Embarkation')).toBeInTheDocument();
+    expect(screen.getByText('Disembarkation')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('ICE 123')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Add port/i }));
+    expect(screen.getByText('Port of call')).toBeInTheDocument();
+    const ports = screen.getAllByTestId('location-select');
+    fireEvent.change(ports[0], { target: { value: 'Kiel' } });
+    fireEvent.change(ports[1], { target: { value: 'Tallinn' } });
+    fireEvent.change(ports[2], { target: { value: 'Kiel' } });
+    await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const payload = onSave.mock.calls[0][0];
+    expect(payload.type).toBe('cruise');
+    expect(payload.endpoints.map((e: { role: string; name: string }) => `${e.role}:${e.name}`)).toEqual(['from:Kiel', 'stop:Tallinn', 'to:Kiel']);
+    expect(payload.metadata.legs).toHaveLength(2);
+    expect(payload.metadata.legs[1]).toMatchObject({ from: 'Tallinn', to: 'Kiel' });
+    expect(payload.metadata.legs[0].train_number).toBeUndefined();
+  });
+
   it('FE-PLANNER-TRANSMODAL-027: a train with a day + train number but no geocoded station still saves them (#1150 regression)', async () => {
     const days = [{ id: 10, trip_id: 1, day_number: 1, date: '2026-08-01', title: 'Day 1' }] as any;
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} days={days} selectedDayId={10} onSave={onSave} />);
-    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await pickType(/^Train$/i);
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'ICE 599');
     // Fill the train number + a departure time, but never pick a geocoded station.
     fireEvent.change(screen.getAllByPlaceholderText('ICE 123')[0], { target: { value: 'ICE 599' } });
@@ -570,7 +632,7 @@ describe('TransportModal', () => {
   it('FE-PLANNER-TRANSMODAL-026: a two-station train saves flat (no metadata.legs)', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} onSave={onSave} />);
-    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await pickType(/^Train$/i);
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'Köln → Aachen');
     const stations = screen.getAllByTestId('location-select');
     fireEvent.change(stations[0], { target: { value: 'Köln Hbf' } });
@@ -715,7 +777,7 @@ describe('TransportModal', () => {
     expect(screen.getAllByTestId('airport-select')).toHaveLength(3);
 
     // Only the intermediate stop carries a delete button.
-    await userEvent.click(screen.getByRole('button', { name: /^Delete$/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove stop' }));
     expect(screen.getAllByTestId('airport-select')).toHaveLength(2);
 
     const airports = screen.getAllByTestId('airport-select');
@@ -818,7 +880,7 @@ describe('TransportModal', () => {
     // Removing the only stop collapses the route to a direct flight, so there are
     // no legs left to hold a per-segment code. Documented behaviour, not a bug:
     // the field disappears with them and the booking keeps its own reference.
-    await userEvent.click(screen.getByRole('button', { name: /^Delete$/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove stop' }));
     expect(screen.getAllByPlaceholderText('e.g. ABC12345')).toHaveLength(1);
 
     await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
@@ -901,7 +963,7 @@ describe('TransportModal', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} days={routeDays} selectedDayId={10} onSave={onSave} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await pickType(/^Train$/i);
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'RE 9');
     const stations = screen.getAllByTestId('location-select');
     fireEvent.change(stations[0], { target: { value: 'Köln Hbf' } });
@@ -943,7 +1005,7 @@ describe('TransportModal', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} days={routeDays} onSave={onSave} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /^Car$/i }));
+    await pickType(/^Car$/i);
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'Sixt compact');
     // The labels switch to rental wording for cars.
     expect(screen.getByText('Pickup')).toBeInTheDocument();
@@ -975,8 +1037,9 @@ describe('TransportModal', () => {
     render(<TransportModal {...defaultProps} onSave={onSave} />);
 
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'LH 400');
-    await userEvent.click(screen.getByText('Pending'));
-    await userEvent.click(screen.getByRole('button', { name: 'Confirmed' }));
+    // The status is a pill in the head band that flips between the two.
+    expect(screen.getByText('Pending')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Set to Confirmed' }));
     await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalled());
@@ -1020,7 +1083,7 @@ describe('TransportModal', () => {
   ];
 
   it('FE-PLANNER-TRANSMODAL-044: assigned travelers are written back after the save resolves', async () => {
-    const onSave = vi.fn().mockResolvedValue({ id: 60 });
+    const { save: onSave } = plannerSave({ id: 60 });
     let body: { user_ids: number[] } | null = null;
     server.use(
       http.put('/api/trips/1/reservations/60/travelers', async ({ request }) => {
@@ -1031,28 +1094,55 @@ describe('TransportModal', () => {
 
     render(<TransportModal {...defaultProps} onSave={onSave} tripMembers={tripMembers} />);
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'LH 400');
-    await userEvent.click(screen.getByText('bob'));
+    await userEvent.click(within(await openTravelers()).getByText('bob'));
     await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
 
     await waitFor(() => expect(body).not.toBeNull());
     expect(body!.user_ids).toEqual([2]);
   });
 
-  it('FE-PLANNER-TRANSMODAL-045: a failing traveler write surfaces an error toast', async () => {
-    const addToast = vi.fn();
-    window.__addToast = addToast;
-    const onSave = vi.fn().mockResolvedValue({ id: 61 });
+  it('FE-PLANNER-TRANSMODAL-045: a failing traveler write fails the save, so the planner keeps the dialog open', async () => {
+    const { save: onSave, failures } = plannerSave({ id: 61 });
     server.use(
       http.put('/api/trips/1/reservations/61/travelers', () => HttpResponse.json({ error: 'nope' }, { status: 500 })),
     );
 
     render(<TransportModal {...defaultProps} onSave={onSave} tripMembers={tripMembers} />);
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'LH 400');
-    await userEvent.click(screen.getByText('alice'));
+    await userEvent.click(within(await openTravelers()).getByText('alice'));
     await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
 
-    await waitFor(() => expect(addToast).toHaveBeenCalledWith(expect.any(String), 'error', undefined));
-    delete window.__addToast;
+    await waitFor(() => expect(failures).toHaveLength(1));
+    expect(screen.getByRole('button', { name: /^Add$/i })).toBeEnabled();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-083: a new transport whose upload fails retries as an update with only that file (#2883)', async () => {
+    const onFileUpload = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('413'))
+      .mockResolvedValue(undefined);
+    const { save: onSave, failures } = plannerSave({ id: 64 });
+
+    render(<TransportModal {...defaultProps} onSave={onSave} onFileUpload={onFileUpload} />);
+    await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'LH 400');
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [new File(['a'], 'ok.pdf', { type: 'application/pdf' })] } });
+    fireEvent.change(fileInput, { target: { files: [new File(['b'], 'fail.pdf', { type: 'application/pdf' })] } });
+
+    await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
+    await waitFor(() => expect(failures).toHaveLength(1));
+    expect(screen.queryByText('ok.pdf')).not.toBeInTheDocument();
+    expect(screen.getByText('fail.pdf')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
+    await waitFor(() => expect(onFileUpload).toHaveBeenCalledTimes(3));
+    expect(onSave.mock.calls[0][1]?.saved).toBeUndefined();
+    expect(onSave.mock.calls[1][1]?.saved).toEqual({ id: 64 });
+    const [fd] = onFileUpload.mock.calls[2] as [FormData];
+    expect((fd.get('file') as File).name).toBe('fail.pdf');
+    expect(fd.get('reservation_id')).toBe('64');
+    expect(failures).toHaveLength(1);
   });
 
   // ── Linked cost actions ─────────────────────────────────────────────────────
@@ -1134,18 +1224,19 @@ describe('TransportModal', () => {
     expect(screen.getByRole('button', { name: /Attach file/i })).toBeInTheDocument();
   });
 
-  it('FE-PLANNER-TRANSMODAL-050: a failing upload to an existing booking shows the upload error', async () => {
-    const addToast = vi.fn();
-    window.__addToast = addToast;
+  it('FE-PLANNER-TRANSMODAL-050: a failing upload on Update keeps the file listed and says the booking is saved', async () => {
     const onFileUpload = vi.fn().mockRejectedValue(new Error('disk full'));
     const res = buildReservation({ id: 20, type: 'train', title: 'Eurostar' });
+    const { save: onSave, failures } = plannerSave(res);
 
-    render(<TransportModal {...defaultProps} reservation={res} onFileUpload={onFileUpload} />);
+    render(<TransportModal {...defaultProps} reservation={res} onSave={onSave} onFileUpload={onFileUpload} />);
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(fileInput, { target: { files: [new File(['x'], 'fail.pdf', { type: 'application/pdf' })] } });
+    await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
 
-    await waitFor(() => expect(addToast).toHaveBeenCalledWith('Failed to upload', 'error', undefined));
-    delete window.__addToast;
+    await waitFor(() => expect(failures).toHaveLength(1));
+    expect(failures[0].message).toBe('The booking is saved, but some files did not upload. Save again to send them.');
+    expect(screen.getByText('fail.pdf')).toBeInTheDocument();
   });
 
   it('FE-PLANNER-TRANSMODAL-051: a failing unlink reports the update error', async () => {
@@ -1213,7 +1304,7 @@ describe('TransportModal', () => {
   });
 
   it('FE-PLANNER-TRANSMODAL-055: an existing traveler list is toggled off and written back empty', async () => {
-    const onSave = vi.fn().mockResolvedValue({ id: 63 });
+    const { save: onSave } = plannerSave({ id: 63 });
     let body: { user_ids: number[] } | null = null;
     server.use(
       http.put('/api/trips/1/reservations/63/travelers', async ({ request }) => {
@@ -1227,9 +1318,11 @@ describe('TransportModal', () => {
     ];
 
     render(<TransportModal {...defaultProps} reservation={res} onSave={onSave} tripMembers={tripMembers} />);
-    // Seeded from the reservation, so alice starts selected.
-    expect(screen.getByText('alice').closest('button')).toHaveAttribute('aria-pressed', 'true');
-    await userEvent.click(screen.getByText('alice'));
+    // Seeded from the reservation, so alice starts selected and the closed field names her.
+    expect(screen.getByRole('button', { name: /alice/, expanded: false })).toBeInTheDocument();
+    const travelers = await openTravelers();
+    expect(within(travelers).getByText('alice').closest('button')).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(within(travelers).getByText('alice'));
     await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
 
     await waitFor(() => expect(body).not.toBeNull());
@@ -1240,11 +1333,11 @@ describe('TransportModal', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} days={routeDays} selectedDayId={10} onSave={onSave} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await pickType(/^Train$/i);
     await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'Köln → Aachen');
     await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
     expect(screen.getAllByTestId('location-select')).toHaveLength(3);
-    await userEvent.click(screen.getByRole('button', { name: /^Delete$/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove stop' }));
     expect(screen.getAllByTestId('location-select')).toHaveLength(2);
 
     // Move the departure to another day through its own picker.
@@ -1264,7 +1357,7 @@ describe('TransportModal', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} days={routeDays} selectedDayId={10} onSave={onSave} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /^Car$/i }));
+    await pickType(/^Car$/i);
     await userEvent.type(screen.getByPlaceholderText(/e.g. Lufthansa/i), 'Mietwagen Berlin → Prag');
     // Pick-up and return are the rental frame; the stops sit between them.
     expect(screen.getAllByTestId('location-select')).toHaveLength(2);
@@ -1291,7 +1384,7 @@ describe('TransportModal', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} days={routeDays} selectedDayId={10} onSave={onSave} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /^Car$/i }));
+    await pickType(/^Car$/i);
     await userEvent.type(screen.getByPlaceholderText(/e.g. Lufthansa/i), 'Mietwagen');
     await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
     await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
@@ -1316,7 +1409,7 @@ describe('TransportModal', () => {
   it('FE-PLANNER-TRANSMODAL-061: the ends of the stop list cannot be pushed past themselves', async () => {
     render(<TransportModal {...defaultProps} days={routeDays} selectedDayId={10} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /^Car$/i }));
+    await pickType(/^Car$/i);
     // A single stop has nothing to swap with, so the buttons stay away entirely.
     await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
     expect(screen.queryByRole('button', { name: /Move up/i })).not.toBeInTheDocument();
@@ -1332,7 +1425,7 @@ describe('TransportModal', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<TransportModal {...defaultProps} days={routeDays} selectedDayId={10} onSave={onSave} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /^Car$/i }));
+    await pickType(/^Car$/i);
     await userEvent.type(screen.getByPlaceholderText(/e.g. Lufthansa/i), 'Mietwagen');
     await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
     expect(screen.getAllByTestId('location-select')).toHaveLength(3);
@@ -1483,7 +1576,7 @@ describe('TransportModal', () => {
       buildPlace({ id: 3, name: 'Louvre', lat: 48.86, lng: 2.33 }),
     ];
     render(<TransportModal {...defaultProps} places={places} />);
-    await userEvent.click(screen.getByRole('button', { name: /^Bus$/i }));
+    await pickType(/^Bus$/i);
 
     const fields = screen.getAllByTestId('location-select');
     expect(fields).toHaveLength(2);
@@ -1493,11 +1586,162 @@ describe('TransportModal', () => {
   it('FE-PLANNER-TRANSMODAL-072: every train station field offers the trip places too', async () => {
     const places = [buildPlace({ id: 1, name: 'Berlin Hbf', lat: 52.52, lng: 13.37 })];
     render(<TransportModal {...defaultProps} places={places} />);
-    await userEvent.click(screen.getByRole('button', { name: /^Train$/i }));
+    await pickType(/^Train$/i);
     await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
 
     const stations = screen.getAllByTestId('location-select');
     expect(stations).toHaveLength(3);
     for (const station of stations) expect(station).toHaveAttribute('data-picks', 'Berlin Hbf');
+  });
+
+  // ── Link field (#2084): transports keep a booking URL like bookings do ─────
+
+  it('FE-PLANNER-TRANSMODAL-073: a URL typed into the Link field is saved with the transport', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TransportModal {...defaultProps} onSave={onSave} />);
+    await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'LH 400');
+    await userEvent.type(screen.getByPlaceholderText('https://...'), 'https://lufthansa.example/booking');
+    await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ url: 'https://lufthansa.example/booking' });
+  });
+
+  it('FE-PLANNER-TRANSMODAL-074: without a URL the transport saves url null', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TransportModal {...defaultProps} onSave={onSave} />);
+    await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'LH 400');
+    await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toHaveProperty('url', null);
+  });
+
+  it('FE-PLANNER-TRANSMODAL-075: editing pre-fills the stored URL, and clearing it saves null', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const res = buildReservation({ id: 64, title: 'ICE 599', type: 'train', url: 'https://bahn.example/ticket' });
+    render(<TransportModal {...defaultProps} reservation={res} onSave={onSave} />);
+    const field = screen.getByPlaceholderText('https://...');
+    expect(field).toHaveValue('https://bahn.example/ticket');
+
+    await userEvent.clear(field);
+    await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toHaveProperty('url', null);
+  });
+
+  it('FE-PLANNER-TRANSMODAL-076: an edited transport keeps its URL when saved untouched', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const res = buildReservation({ id: 65, title: 'Ferry', type: 'ferry', url: 'https://ferry.example' });
+    render(<TransportModal {...defaultProps} reservation={res} onSave={onSave} />);
+    await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ url: 'https://ferry.example' });
+  });
+
+  // ── Dialog frame ─────────────────────────────────────────────────────────
+
+  it('FE-PLANNER-TRANSMODAL-077: Escape while the delete question is open takes back only the question', async () => {
+    const onClose = vi.fn();
+    const res = buildReservation({ title: 'Paris Flight', type: 'flight' });
+    render(<TransportModal {...defaultProps} reservation={res} onDelete={vi.fn()} onClose={onClose} />);
+    await userEvent.click(screen.getByRole('button', { name: /delete/i }));
+    expect(screen.getByText('Delete booking?')).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByText('Delete booking?')).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('FE-PLANNER-TRANSMODAL-078: a transit journey edited by hand reads "Transit" on the type pill and saves as transit', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const res = buildReservation({ title: 'Tram 12', type: 'transit' });
+    render(<TransportModal {...defaultProps} reservation={res} onSave={onSave} />);
+    // The list does not offer transit, so the pill falls back to the type's own name.
+    expect(typeField()).toHaveAccessibleName(/^Booking Type: ?Transit$/);
+
+    await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ type: 'transit' });
+  });
+
+  it('FE-PLANNER-TRANSMODAL-079: a blank title says it is required under the field', async () => {
+    render(<TransportModal {...defaultProps} />);
+    expect(screen.getByText('Title *')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Add$/i })).toBeDisabled();
+
+    await userEvent.type(screen.getByPlaceholderText(/e\.g\. Lufthansa/i), 'LH 400');
+    expect(screen.queryByText('Title *')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Add$/i })).toBeEnabled();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-080: Automated shows the whole search hint in the head band, free to wrap', async () => {
+    render(<TransportModal {...defaultProps} places={[]} accommodations={[]} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Automated' }));
+    const hint = screen.getByText(/Search real connections and add them straight to the day/);
+    expect(hint).not.toHaveClass('truncate');
+    expect(screen.queryByText('Title *')).not.toBeInTheDocument();
+  });
+
+  it('FE-PLANNER-TRANSMODAL-081: a car stop moves up and keeps the time given to it', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TransportModal {...defaultProps} days={routeDays} selectedDayId={10} onSave={onSave} />);
+
+    await pickType(/^Car$/i);
+    await userEvent.type(screen.getByPlaceholderText(/e.g. Lufthansa/i), 'Mietwagen');
+    await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
+    await userEvent.click(screen.getByRole('button', { name: /Add stop/i }));
+
+    const fields = screen.getAllByTestId('location-select');
+    fireEvent.change(fields[0], { target: { value: 'Berlin' } });
+    fireEvent.change(fields[1], { target: { value: 'Prag' } });
+    fireEvent.change(fields[2], { target: { value: 'Dresden' } });
+    fireEvent.change(fields[3], { target: { value: 'Bastei' } });
+    // The stops' own time fields come first, before the pick-up and return times.
+    fireEvent.change(screen.getAllByTestId('time-picker')[1], { target: { value: '14:30' } });
+
+    await userEvent.click(screen.getAllByRole('button', { name: /Move up/i })[1]);
+
+    await userEvent.click(screen.getByRole('button', { name: /^Add$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const payload = onSave.mock.calls[0][0];
+    expect(payload.endpoints.map((e: { name: string }) => e.name)).toEqual(['Berlin', 'Bastei', 'Dresden', 'Prag']);
+    expect(payload.endpoints.find((e: { name: string }) => e.name === 'Bastei').local_time).toBe('14:30');
+  });
+
+  it('FE-PLANNER-TRANSMODAL-082: a multi-leg train saves the code typed for one of its segments', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<TransportModal {...defaultProps} days={routeDays} reservation={multiLegTrain()} onSave={onSave} />);
+
+    const codes = screen.getAllByPlaceholderText('e.g. ABC12345') as HTMLInputElement[];
+    // One code per segment, then the booking's own.
+    expect(codes).toHaveLength(3);
+    fireEvent.change(codes[1], { target: { value: 'SEG-TWO' } });
+
+    await userEvent.click(screen.getByRole('button', { name: /^Update$/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const legs = onSave.mock.calls[0][0].metadata.legs as { confirmation_number?: string }[];
+    expect(legs.map(l => l.confirmation_number ?? null)).toEqual([null, 'SEG-TWO']);
+  });
+
+  it('FE-PLANNER-TRANSMODAL-084: a store refresh while the dialog is open keeps what the user typed (#3069)', async () => {
+    render(<TransportModal {...defaultProps} />);
+    const title = screen.getByPlaceholderText(/e\.g\. Lufthansa/i) as HTMLInputElement;
+    await userEvent.type(title, 'LH 400');
+    // A socket reconnect re-reads the trip: the costs arrive as a new array.
+    act(() => { useTripStore.setState({ budgetItems: [buildBudgetItem()] }); });
+    expect(title).toHaveValue('LH 400');
+  });
+
+  it('FE-PLANNER-TRANSMODAL-085: opening a different transport still fills the form with it', () => {
+    const first = buildReservation({ title: 'First flight', type: 'flight' });
+    const second = buildReservation({ title: 'Second flight', type: 'flight' });
+    const { rerender } = render(<TransportModal {...defaultProps} reservation={first} />);
+    expect(screen.getByDisplayValue('First flight')).toBeInTheDocument();
+    rerender(<TransportModal {...defaultProps} reservation={second} />);
+    expect(screen.getByDisplayValue('Second flight')).toBeInTheDocument();
   });
 });

@@ -1,9 +1,14 @@
-import { ChevronRight, FileDown, Settings, Share2 } from 'lucide-react'
+import { ChevronRight, FileDown, Settings, Settings2, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { useState } from 'react'
 import MSheet from '../../../components/MSheet'
+import { edgeFadeClass, useEdgeFade } from '../../../components/useEdgeFade'
 import type { MTripSheetsProps } from '../MTripShell'
 import { dockTabIds } from '../dockTabs'
+import { useIsWide } from '../../../../hooks/sizeClass'
 import { useTranslation } from '../../../../i18n'
+import { useAssistantAsk } from '../../../../components/Assistant/useAssistantAsk'
+import { useAssistantHints } from '../../../../components/Assistant/useAssistantHints'
 
 /** Demo tile tints per legacy tab id; plugins share the files neutral. */
 const TILE_COLORS: Record<string, string> = {
@@ -14,6 +19,7 @@ const TILE_COLORS: Record<string, string> = {
   finanzplan: '#E8A33D',
   dateien: '#68686F',
   collab: '#EC4899',
+  journal: '#C2410C',
 }
 
 /**
@@ -25,11 +31,20 @@ export default function MMehrSheet({ planner, shell }: MTripSheetsProps) {
   const { t } = useTranslation()
   const open = shell.sheet?.id === 'mehr'
   const canEditTrip = planner.can('trip_edit', planner.trip)
+  const assistant = useAssistantAsk(planner.tripId)
+  // Warnings not shown yet turn the tile's line into a count; the dock gets no dot.
+  const hints = useAssistantHints(planner.tripId, { withStays: false })
+  const [list, setList] = useState<HTMLDivElement | null>(null)
+  const fade = useEdgeFade(list, 'y')
 
   // Derived from the same priority list the dock seats itself from, so a section
   // can never show up in both places at once.
-  const seated = dockTabIds(new Set(planner.TRIP_TABS.map(tab => tab.id)))
-  const gridTabs = planner.TRIP_TABS.filter(tab => !seated.has(tab.id))
+  const mobileTabs = planner.TRIP_TABS.filter(tab => !tab.desktopOnly)
+  // On a wide window every section has its place in the rail (MTripRail), so
+  // the sheet keeps only the trip's actions.
+  const wide = useIsWide()
+  const seated = wide ? new Set(mobileTabs.map(tab => tab.id)) : dockTabIds(new Set(mobileTabs.map(tab => tab.id)))
+  const gridTabs = mobileTabs.filter(tab => !seated.has(tab.id))
 
   const tileStat = (id: string): string | null => {
     if (id === 'dateien') {
@@ -47,7 +62,7 @@ export default function MMehrSheet({ planner, shell }: MTripSheetsProps) {
   }
 
   const actions: { id: string; icon: LucideIcon; label: string; go: () => void }[] = [
-    { id: 'members', icon: Share2, label: t('members.shareTrip'), go: () => shell.openSheet('members') },
+    { id: 'members', icon: Settings2, label: t('trip.settings.title'), go: () => shell.openSheet('members') },
     { id: 'export', icon: FileDown, label: t('mobileTrip.export'), go: () => shell.openSheet('export') },
     ...(canEditTrip
       ? [{ id: 'tripedit', icon: Settings, label: t('dashboard.editTrip'), go: () => shell.openSheet('tripedit') }]
@@ -55,8 +70,35 @@ export default function MMehrSheet({ planner, shell }: MTripSheetsProps) {
   ]
 
   return (
-    <MSheet open={open} onClose={shell.closeSheet} variant="bottom" dimTransparent ariaLabel={t('mobileTrip.more')}>
-      <div className="overflow-y-auto p-[10px]">
+    <MSheet open={open} onClose={shell.closeSheet} variant="bottom" dimTransparent wideWidth="compact" wideAnchor="rail-foot" ariaLabel={t('mobileTrip.more')}>
+      {/* min-h-0: without it the list keeps its full height inside the panel
+          and the panel cuts its last row instead of letting it scroll. */}
+      <div ref={setList} className={`min-h-0 overflow-y-auto overscroll-contain p-[10px] ${edgeFadeClass(fade, 'y')}`}>
+        {/* The assistant leads the sheet: the one way into it on the phone besides "Ask" on a place. */}
+        {assistant.available && (
+          <button
+            type="button"
+            onClick={() => {
+              shell.closeSheet()
+              hints.markWarnsSeen()
+              assistant.open()
+            }}
+            className="mb-2 flex w-full items-center gap-[13px] rounded-[18px] bg-[color:var(--m-ic)] px-4 py-[14px] text-start"
+          >
+            <div className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[11px] bg-m-act text-m-actfg">
+              <Sparkles size={19} strokeWidth={1.9} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-body font-bold">{t('assistant.mobile.tile')}</div>
+              <div className="truncate text-caption text-m-muted">
+                {hints.unseenWarn > 0
+                  ? t('assistant.mobile.tileHints', { count: hints.unseenWarn })
+                  : t('assistant.mobile.tileHint')}
+              </div>
+            </div>
+            <ChevronRight size={16} strokeWidth={2} className="flex-none text-m-faint" />
+          </button>
+        )}
         {gridTabs.length > 0 && (
           <div className="grid grid-cols-2 gap-2">
             {gridTabs.map(tab => {
@@ -68,7 +110,7 @@ export default function MMehrSheet({ planner, shell }: MTripSheetsProps) {
                   key={tab.id}
                   type="button"
                   onClick={() => openSection(tab.id)}
-                  className="rounded-[18px] bg-[color:var(--m-ic)] px-4 pb-[15px] pt-[14px] text-left"
+                  className="rounded-[18px] bg-[color:var(--m-ic)] px-4 pb-[15px] pt-[14px] text-start"
                 >
                   <div
                     className="flex h-[38px] w-[38px] items-center justify-center rounded-[11px]"
@@ -76,7 +118,9 @@ export default function MMehrSheet({ planner, shell }: MTripSheetsProps) {
                   >
                     {Icon && <Icon size={19} strokeWidth={1.9} />}
                   </div>
-                  <div className="mt-3 truncate text-[0.90625rem] font-bold">{tab.label}</div>
+                  {/* Two lines before an ellipsis: "Совместная работа" was cut to
+                      "Совместная раб…" in half a phone's width. */}
+                  <div className="mt-3 line-clamp-2 break-words text-[0.90625rem] font-bold leading-tight [hyphens:auto]">{tab.label}</div>
                   {stat && <div className="truncate font-geist text-[0.65625rem] text-m-muted">{stat}</div>}
                 </button>
               )
@@ -90,7 +134,7 @@ export default function MMehrSheet({ planner, shell }: MTripSheetsProps) {
               key={action.id}
               type="button"
               onClick={action.go}
-              className="flex w-full items-center gap-[13px] rounded-[18px] bg-[color:var(--m-ic)] px-4 py-[14px] text-left"
+              className="flex w-full items-center gap-[13px] rounded-[18px] bg-[color:var(--m-ic)] px-4 py-[14px] text-start"
             >
               <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[10px] bg-[color:var(--m-ic)]">
                 <action.icon size={17} strokeWidth={1.9} />

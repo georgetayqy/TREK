@@ -1,7 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { pipeline } from 'node:stream/promises';
+import { contentTypeFor } from './content-type';
+import { MirrorDriver } from './drivers/mirror.driver';
+import { StorageRegistryService } from './storage-registry.service';
+import type { StorageDriver } from './storage.types';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   STORAGE_CATEGORIES,
@@ -9,11 +9,11 @@ import {
   type StorageCategory,
   type StorageMigrationStatus,
 } from '@trek/shared';
-import { contentTypeFor } from './content-type';
-import { MirrorDriver } from './drivers/mirror.driver';
-import { GLOBAL_TEMP_DIR } from './storage-paths';
-import { StorageRegistryService } from './storage-registry.service';
-import type { StorageDriver } from './storage.types';
+
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 
 export class BackfillTargetError extends Error {}
 export class BackfillBusyError extends Error {}
@@ -41,13 +41,98 @@ export class StorageJobsService {
   private readonly jobs = new Map<string, ActiveJob>();
   private readonly migrations = new Map<string, ActiveMigration>();
   private ttlMs = 10 * 60_000;
+  /** A pass that holds the one-job slot without a status of its own (the reclaim pass), by name. */
+  private exclusive: string | null = null;
+  /** Restores in progress: no exclusive pass starts while one runs, and one in flight stops. */
+  private restores = 0;
+  /** Backups in progress: the reclaim pass deletes nothing while one reads the uploads. */
+  private backups = 0;
+  /** Settles once the exclusive pass holding the slot releases it; settled while none does. */
+  private exclusiveReleased: Promise<void> = Promise.resolve();
+  private onExclusiveReleased: (() => void) | null = null;
 
-  /** One storage job at a time, across both backfills and category migrations. */
+  /** One storage job at a time, across backfills, category migrations and the reclaim pass. */
   private anyJobRunning(): boolean {
     return (
+      this.exclusive !== null ||
       [...this.jobs.values()].some((j) => j.status.status === 'running') ||
       [...this.migrations.values()].some((m) => m.status.status === 'running')
     );
+  }
+
+  /** The refusal a start meets while the slot is taken, naming what holds it. */
+  private busyError(fallback: string): BackfillBusyError {
+    return new BackfillBusyError(this.exclusive ? `${this.exclusive} is running, one storage job at a time` : fallback);
+  }
+
+  /**
+   * Takes the one-job slot for a pass that runs in the caller (the reclaim
+   * pass): false while a backfill, a migration, another such pass or a
+   * restore runs.
+   * The caller releases it in a finally.
+   */
+  claimExclusive(name: string): boolean {
+    if (this.restores > 0 || this.anyJobRunning()) return false;
+    this.exclusive = name;
+    this.exclusiveReleased = new Promise((resolve) => {
+      this.onExclusiveReleased = resolve;
+    });
+    return true;
+  }
+
+  releaseExclusive(name: string): void {
+    if (this.exclusive !== name) return;
+    this.exclusive = null;
+    this.onExclusiveReleased?.();
+    this.onExclusiveReleased = null;
+  }
+
+  /** True while a backup restore swaps the database and the uploads. */
+  get restoreRunning(): boolean {
+    return this.restores > 0;
+  }
+
+  /** True while a backup reads the uploads: the reclaim pass deletes nothing then, the archive may still want them. */
+  get backupRunning(): boolean {
+    return this.backups > 0;
+  }
+
+  /** The exclusive pass holding the one-job slot now, by name; null while none does. */
+  get exclusiveHolder(): string | null {
+    return this.exclusive;
+  }
+
+  /**
+   * Settles once no exclusive pass holds the slot (at once when none does): the
+   * nightly usage scan waits here, so its figures follow what a reclaim pass freed.
+   */
+  async exclusiveIdle(): Promise<void> {
+    await this.exclusiveReleased;
+  }
+
+  /** A backup started reading the uploads; the caller calls `endBackup` in a finally. */
+  beginBackup(): void {
+    this.backups += 1;
+  }
+
+  endBackup(): void {
+    if (this.backups > 0) this.backups -= 1;
+  }
+
+  /**
+   * Marks a restore as running and waits until an exclusive pass in flight
+   * (the reclaim pass, which stops at its next check of `restoreRunning`) has
+   * let go, so none of its deletes can land on the uploads the restore puts
+   * back. Backfills and migrations are not waited for, as before. The caller
+   * calls `endRestore` in a finally.
+   */
+  async beginRestore(): Promise<void> {
+    this.restores += 1;
+    await this.exclusiveReleased;
+  }
+
+  endRestore(): void {
+    if (this.restores > 0) this.restores -= 1;
   }
 
   constructor(private readonly registry: StorageRegistryService) {}
@@ -64,9 +149,7 @@ export class StorageJobsService {
     // even while a sync is running — the busy check only applies once we
     // know there's a real mirror to be busy about.
     const snapshot = this.registry.snapshot();
-    const categories = STORAGE_CATEGORIES.filter(
-      (category) => snapshot.categories[category]?.backend === mirrorName,
-    );
+    const categories = STORAGE_CATEGORIES.filter((category) => snapshot.categories[category]?.backend === mirrorName);
     if (categories.length === 0) {
       throw new BackfillTargetError(`'${mirrorName}' is not a mirror routed by any category`);
     }
@@ -76,7 +159,7 @@ export class StorageJobsService {
       throw new BackfillTargetError(`'${mirrorName}' is not a mirror backend`);
     }
     if (this.anyJobRunning()) {
-      throw new BackfillBusyError('a sync is already running — one backfill at a time');
+      throw this.busyError('a sync is already running — one backfill at a time');
     }
     const prefixes = resolved.map((r) => r.keyPrefix);
 
@@ -147,7 +230,7 @@ export class StorageJobsService {
    * Throws MigrationRequestError (400) / MigrationTargetError (404) /
    * BackfillBusyError (409, shared with backfills — one storage job at a time).
    */
-  startMigration(category: StorageCategory, to: string): void {
+  async startMigration(category: StorageCategory, to: string): Promise<void> {
     if (!STORAGE_CATEGORIES.includes(category)) {
       throw new MigrationRequestError(`'${category}' is not a configurable category`);
     }
@@ -158,7 +241,7 @@ export class StorageJobsService {
     const target = this.registry.driverByName(to);
     if (!target) throw new MigrationTargetError(`no backend named '${to}'`);
     if (this.anyJobRunning()) {
-      throw new BackfillBusyError('a sync is already running — one storage job at a time');
+      throw this.busyError('a sync is already running — one storage job at a time');
     }
     // The DESTINATION prefix, computed for `to` before the flip — may differ
     // from `current.keyPrefix` (audit #8: a mode-A '' source migrating onto a
@@ -252,7 +335,7 @@ export class StorageJobsService {
     sourceKey: string,
     destKey: string,
   ): Promise<boolean> {
-    const file = path.join(GLOBAL_TEMP_DIR, randomUUID());
+    const file = path.join(this.registry.tempDir(), randomUUID());
     try {
       const { stream } = await source.getStream(sourceKey);
       await pipeline(stream, fs.createWriteStream(file)); // source errors RETHROW (abort → failed)
@@ -318,13 +401,16 @@ export class StorageJobsService {
     // last object's await (or an empty category, which never enters the loop
     // at all) would otherwise reach the flip unchecked. Everything from here
     // to assignCategory() below is one synchronous stretch, so this is the
-    // last point a cancel can still be honored before the flip.
+    // last point a cancel can still be honored before the flip. (The flip
+    // itself now awaits — assignCategory writes through UnitOfWork — but
+    // nothing between this check and that call yields, so the window is the
+    // same one it always was.)
     if (job.cancelled) {
       job.status = { ...s(), status: 'cancelled', finishedAt: Date.now() };
       return;
     }
     // Phase 2: flip — the job, not the save, owns this.
-    this.registry.assignCategory(s().category, s().to);
+    await this.registry.assignCategory(s().category, s().to);
     // Phase 3: delta sweep + reclaimable tally. Cancellation is ignored here
     // (bounded). Reclaimable stays SOURCE-keyed — it counts what's left to
     // reclaim on the old backend, not where it landed on the new one.

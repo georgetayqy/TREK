@@ -2,6 +2,7 @@ import {
   markRegionRequestSchema,
   createBucketItemRequestSchema,
   regionGeoSchema,
+  regionGeoParamsSchema,
   visitStatusSchema,
   todayUtc,
   tripVisitStatus,
@@ -33,6 +34,22 @@ describe('markRegionRequestSchema', () => {
 });
 
 describe('createBucketItemRequestSchema', () => {
+  it('accepts a region of the item country and refuses any other (#1901)', () => {
+    expect(
+      createBucketItemRequestSchema.safeParse({ name: 'Bayern', country_code: 'DE', region_code: 'DE-BY' }).success,
+    ).toBe(true);
+    expect(
+      createBucketItemRequestSchema.safeParse({ name: 'Bayern', country_code: 'de', region_code: 'de-by' }).success,
+    ).toBe(true);
+    expect(
+      createBucketItemRequestSchema.safeParse({ name: 'Berlin', country_code: 'FR', region_code: 'DE-BE' }).success,
+    ).toBe(false);
+    expect(createBucketItemRequestSchema.safeParse({ name: 'Berlin', region_code: 'DE-BE' }).success).toBe(false);
+    expect(
+      createBucketItemRequestSchema.safeParse({ name: 'X', country_code: 'DE', region_code: 'not a code' }).success,
+    ).toBe(false);
+  });
+
   it('requires a name; coordinates and metadata optional/nullable', () => {
     expect(createBucketItemRequestSchema.safeParse({ name: 'Tokyo' }).success).toBe(true);
     expect(
@@ -57,6 +74,19 @@ describe('regionGeoSchema', () => {
       }).success,
     ).toBe(true);
     expect(regionGeoSchema.safeParse({ type: 'Other', features: [] }).success).toBe(false);
+  });
+});
+
+describe('regionGeoParamsSchema', () => {
+  it('takes a two-letter code from the path and uppercases it', () => {
+    expect(regionGeoParamsSchema.parse({ code: 'no' })).toEqual({ code: 'NO' });
+    expect(regionGeoParamsSchema.parse({ code: 'GB' })).toEqual({ code: 'GB' });
+  });
+
+  it('refuses anything that is not two letters', () => {
+    for (const code of ['NOR', 'N', '', '..', '../admin0', 'N/', '12']) {
+      expect(regionGeoParamsSchema.safeParse({ code }).success, code).toBe(false);
+    }
   });
 });
 

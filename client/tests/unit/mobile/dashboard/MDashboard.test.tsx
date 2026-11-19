@@ -8,6 +8,7 @@ import { useInAppNotificationStore } from '../../../../src/store/inAppNotificati
 import { usePluginStore } from '../../../../src/store/pluginStore';
 import type { TripCardBadge } from '../../../../src/api/client';
 import type { DashboardTrip } from '../../../../src/pages/dashboard/dashboardModel';
+import { setSizeClass } from '../../../helpers/sizeClass';
 
 // FE-MOB-DASH-001 onwards
 
@@ -24,6 +25,10 @@ vi.mock('../../../../src/pages/dashboard/useDashboard', () => ({
 vi.mock('../../../../src/components/Plugins/TripCardBadges', () => ({
   useTripCardBadges: () => (tripId: number) => mocks.badges[tripId] ?? [],
 }));
+
+// This screen only ever renders on a phone. Shared dialogs it opens (the calendar
+// subscription) draw their phone look there and their desktop look above 768px.
+vi.mock('../../../../src/mobile/useIsPhone', () => ({ useIsPhone: () => true }));
 
 // Local-calendar date string — NOT toISOString(), which is the UTC date and
 // disagrees with the badge logic's wall-clock classification between local
@@ -100,9 +105,21 @@ describe('MDashboard', () => {
     expect(screen.getByText('dashboard.status.ongoing')).toBeInTheDocument();
     expect(screen.getByText('dashboard.mobile.spotlightDayOf')).toBeInTheDocument();
     // Stat pills reuse the desktop hero keys (no mobile-only duplicates).
-    expect(screen.getByText('dashboard.hero.destinationMany')).toBeInTheDocument();
-    expect(screen.getByText('dashboard.hero.travelerMany')).toBeInTheDocument();
+    expect(screen.getByText('dashboard.hero.destinations')).toBeInTheDocument();
+    expect(screen.getByText('dashboard.hero.travelers')).toBeInTheDocument();
     expect(screen.getByText('Lisbon')).toBeInTheDocument();
+  });
+
+  it('FE-MOB-DASH-040: the spotlight title keeps its own direction and its progress fills from the start edge', () => {
+    mocks.dash = buildDash({ spotlight: buildTrip() });
+    render(<MDashboard />);
+    // dir="auto": a Latin title in the Arabic UI is cut at its end, not its beginning.
+    expect(screen.getAllByText('Japan 2026')[0]).toHaveAttribute('dir', 'auto');
+    const fill = document.querySelector('span[style*="width"].rounded-full.bg-white') as HTMLElement;
+    expect(fill).not.toBeNull();
+    // start-0, not left-0: in Arabic the bar fills from the right like every other bar.
+    expect(fill).toHaveClass('start-0');
+    expect(fill.className).not.toMatch(/\bleft-0\b/);
   });
 
   it('FE-MOB-DASH-002: archived filter swaps card actions to restore + permanent delete', () => {
@@ -169,11 +186,11 @@ describe('MDashboard', () => {
     expect(screen.queryByText('dashboard.emptyTitle')).not.toBeInTheDocument();
   });
 
-  it('FE-MOB-DASH-008: demo mode adds the banner', () => {
+  it('FE-MOB-DASH-008: demo mode opens the demo welcome', () => {
     mocks.dash = buildDash({ demoMode: true });
     render(<MDashboard />);
 
-    expect(screen.getByText(/demo/i)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toHaveTextContent('Welcome to TREK');
   });
 
   it('FE-MOB-DASH-009: unread notifications mark the bell and it opens the list', () => {
@@ -259,7 +276,7 @@ describe('MDashboard', () => {
 
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getByText('30')).toBeInTheDocument();
-    expect(screen.getByText('dashboard.card.buddyOne')).toBeInTheDocument();
+    expect(screen.getByText('dashboard.card.buddies')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'dashboard.archive' }));
     expect(handleArchive).toHaveBeenCalledWith(4);
@@ -364,7 +381,7 @@ describe('MDashboard', () => {
     render(<MDashboard />);
 
     expect(screen.getByText('dashboard.hero.badgeRecent')).toBeInTheDocument();
-    expect(screen.getByText('dashboard.mobile.spotlightDayOne')).toBeInTheDocument();
+    expect(screen.getByText('dashboard.mobile.spotlightDays')).toBeInTheDocument();
   });
 
   it('FE-MOB-DASH-024: the spotlight opens on Enter as well as on click', () => {
@@ -398,6 +415,31 @@ describe('MDashboard', () => {
     expect(screen.getByText('Currency')).toBeInTheDocument();
     expect(screen.getByText('Timezones')).toBeInTheDocument();
     expect(screen.getByText('Upcoming reservations')).toBeInTheDocument();
+  });
+
+  it('FE-MOB-DASH-041: crossing the split size keeps the widgets mounted, so the converter keeps its amount', () => {
+    mocks.dash = buildDash();
+    render(<MDashboard />);
+    const amount = screen.getAllByRole('textbox', { name: 'From' })[0] as HTMLInputElement;
+    fireEvent.change(amount, { target: { value: '250' } });
+
+    setSizeClass('split');
+    expect(screen.getAllByRole('textbox', { name: 'From' })[0]).toBe(amount);
+    expect(amount.value).toBe('250');
+
+    setSizeClass('compact');
+    expect(screen.getAllByRole('textbox', { name: 'From' })[0]).toBe(amount);
+    expect(amount.value).toBe('250');
+  });
+
+  it('FE-MOB-DASH-042: on a landscape tablet the widget column scrolls on its own, within the window', () => {
+    mocks.dash = buildDash();
+    render(<MDashboard />);
+    const column = screen.getAllByRole('textbox', { name: 'From' })[0].closest('[class*="split:sticky"]') as HTMLElement;
+    expect(column).not.toBeNull();
+    expect(column.className).toContain('split:overflow-y-auto');
+    expect(column.className).toContain('split:max-h-[calc(100dvh-var(--m-safe-top,12px)-70px)]');
+    expect(column.className).toContain('split:overscroll-contain');
   });
 
   it('FE-MOB-DASH-027: a malformed date renders a dash instead of crashing', () => {
@@ -558,11 +600,11 @@ describe('MDashboard', () => {
     render(<MDashboard />);
 
     // flex-1 on the scroll box stretched the grey pill track all the way to the
-    // calendar icon on phones from ~400px up; the icons ride on ml-auto instead.
+    // calendar icon on phones from ~400px up; the icons ride on ms-auto instead.
     const chip = await screen.findByText('dashboard.filter.planned');
     const wrapper = chip.closest('button')!.parentElement!.parentElement as HTMLElement;
     expect(wrapper.className).not.toContain('flex-1');
     expect(screen.getByRole('button', { name: 'dashboard.subscribeAllTrips' }).className)
-      .toContain('ml-auto');
+      .toContain('ms-auto');
   });
 });

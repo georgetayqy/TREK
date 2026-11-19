@@ -6,7 +6,7 @@ const storage: TranslationStrings = {
   'storage.field.endpoint': 'URL do endpoint',
   'storage.help.endpoint':
     'URL base do serviço compatível com S3, ex.: https://s3.example.com ou http://127.0.0.1:9000.',
-  'storage.field.bucket': 'Bucket',
+  'storage.field.bucket': 'Bucket', // same-as-en
   'storage.field.accessKeyId': 'ID da chave de acesso',
   'storage.field.secretAccessKey': 'Chave de acesso secreta',
   'storage.field.region': 'Região',
@@ -28,15 +28,15 @@ const storage: TranslationStrings = {
   'storage.discardAndReload': 'Descartar minhas alterações e recarregar',
   'storage.configError.banner':
     'Falha ao carregar as configurações de armazenamento salvas — salvar irá substituí-las: {error}',
-  'storage.backends.title': 'Backends',
+  'storage.backends.title': 'Backends', // same-as-en
   'storage.backends.add': 'Adicionar backend',
   'storage.backends.usedBy': 'Usado por: {categories}',
   'storage.backends.unused': 'Não atribuído a nenhuma categoria',
-  'storage.backends.envReadOnly': 'Definido por uma variável de ambiente — somente leitura',
+  'storage.backends.envReadOnly': 'Definido por uma variável de ambiente (somente leitura)',
   'storage.source.built-in': 'Integrado',
   'storage.source.env': 'Ambiente',
   'storage.source.settings': 'Configurações',
-  'storage.type.local': 'Local',
+  'storage.type.local': 'Local', // same-as-en
   'storage.type.s3': 'S3',
   'storage.type.mirror': 'Espelho',
   'storage.actions.test': 'Testar',
@@ -66,7 +66,7 @@ const storage: TranslationStrings = {
   'storage.category.places': 'Imagens de locais',
   'storage.category.photos-google': 'Cache de fotos do Google',
   'storage.category.photos-trek': 'Cache de fotos do TREK',
-  'storage.category.backups': 'Backups',
+  'storage.category.backups': 'Backups', // same-as-en
 
   // What each category stores — rendered under the label in the category map.
   'storage.categoryDesc.files':
@@ -111,7 +111,8 @@ const storage: TranslationStrings = {
   'storage.sync.error': 'Falha na sincronização: {error}',
   'storage.sync.prompt': 'Os objetos existentes ainda não foram replicados — sincronizar agora?',
   'storage.sync.dismiss': 'Dispensar',
-  'storage.usage.line': '{objects} objetos · {size}',
+  'storage.usage.line': '{count} objetos · {size}',
+  'storage.usage.line.one': '{count} objeto · {size}',
   'storage.usage.computed': 'Uso calculado {age}',
   'storage.usage.never': 'Uso ainda não calculado',
   'storage.usage.refresh': 'Atualizar',
@@ -120,7 +121,8 @@ const storage: TranslationStrings = {
 
   // Category migration (copy → flip → delta sweep)
   'storage.migrate.promptTitle': 'Mover objetos existentes para o novo backend?',
-  'storage.migrate.promptLine': '{category}: {objects} objetos ({size}) de {from} para {to}',
+  'storage.migrate.promptLine': '{category}: {count} objetos ({size}) de {from} para {to}',
+  'storage.migrate.promptLine.one': '{category}: {count} objeto ({size}) de {from} para {to}',
   'storage.migrate.promptLineUnknown': '{category}: tamanho desconhecido (uso ainda não calculado) de {from} para {to}',
   'storage.migrate.move': 'Mover objetos existentes',
   'storage.migrate.routeOnly': 'Apenas rotear novas gravações',
@@ -129,10 +131,49 @@ const storage: TranslationStrings = {
   'storage.migrate.doneFailures': '{failed} falharam — esses objetos não foram copiados para o novo backend',
   'storage.migrate.failed': 'Falha ao mover: {error} — a categoria não foi alterada',
   'storage.migrate.cancelled': 'Movimentação cancelada — nada foi alterado',
-  'storage.migrate.reclaimable': '{objects} objetos ({size}) permanecem em {from} — recupere manualmente',
+  'storage.migrate.reclaimable': '{count} objetos ({size}) permanecem em {from}, recupere manualmente',
+  'storage.migrate.reclaimable.one': '{count} objeto ({size}) permanece em {from}, recupere manualmente',
   'storage.migrate.cancel': 'Cancelar movimentação',
   'storage.migrate.promptCancel': 'Cancelar',
   'storage.migrate.queued': 'Na fila: {categories}',
-  'storage.migrate.queueDropped': 'Não foi possível iniciar a próxima migração — a fila restante foi limpa: {categories}',
+  'storage.migrate.queueDropped':
+    'Não foi possível iniciar a próxima migração — a fila restante foi limpa: {categories}',
+  'storage.reclaim.title': 'Arquivos sem referência',
+  'storage.reclaim.hint':
+    'Toda noite o TREK procura arquivos enviados que nenhuma viagem, lugar, diário, coleção ou usuário usa mais, por exemplo depois que uma viagem foi excluída.',
+  'storage.reclaim.check': 'Verificar agora',
+  'storage.reclaim.checked': 'Última verificação: {age}',
+  'storage.reclaim.never': 'Ainda não verificado',
+  'storage.reclaim.delete': 'Excluir arquivos sem referência',
+  'storage.reclaim.deleteHint':
+    'Desativado, a verificação noturna apenas informa. Ativado, um arquivo que ninguém usa há uma semana é excluído. Arquivos que você exclui no TREK são removidos um dia depois, de qualquer forma, quando nenhum desfazer pode mais recuperá-los.',
+  'storage.reclaim.freeable': 'Pode ser liberado',
+  'storage.reclaim.waiting': 'Sem uso há menos de uma semana',
+  'storage.reclaim.deleted': 'Liberado pela última limpeza noturna',
+  'storage.reclaim.nothing': 'Nenhum arquivo sem referência encontrado.',
+  'storage.reclaim.stopped':
+    'A última verificação parou antes do fim porque o banco de dados foi restaurado durante a execução.',
+  'storage.reclaim.skip.sources_missing': 'Ignorado: nem todas as partes do TREK puderam ser consultadas',
+  'storage.reclaim.skip.shared_location': 'Ignorado: compartilha o local com outra categoria',
+  'storage.reclaim.skip.list_failed': 'Ignorado: não foi possível listar os arquivos',
+  'storage.reclaim.skip.source_failed': 'Ignorado: uma consulta falhou',
+  'storage.reclaim.running': 'Verificando…',
+  'storage.reclaim.stoppedFailed': 'A última verificação parou após um erro. Ela roda de novo esta noite.',
+  'storage.reclaim.skip.foreign_install': 'Ignorado: outra instalação do TREK usa este armazenamento',
+  'storage.reclaim.skip.owner_unknown': 'Ignorado: o TREK não conseguiu marcar este armazenamento como seu',
+  'storage.reclaim.skip.delete_failed': 'Interrompido: o armazenamento recusou uma exclusão',
+  'storage.reclaim.skip.interrupted': 'Interrompido antes de terminar, os números são parciais',
+  'storage.reclaim.confirmNeeded':
+    'Mais de um quinto destes arquivos parece sem uso. Nada aqui será excluído até você confirmar que isso é esperado.',
+  'storage.reclaim.confirm': 'Confirmar',
+  'storage.reclaim.confirmed': 'Confirmado pelos próximos 14 dias.',
+  'storage.reclaim.error.reclaim_busy': 'Outra tarefa de armazenamento está em execução. Tente novamente em instantes.',
+  'storage.reclaim.error.reclaim_demo': 'Indisponível em uma instância de demonstração.',
+  'storage.reclaim.error.reclaim_nothing_to_confirm': 'Não há mais nada a confirmar. Execute uma verificação primeiro.',
+  'storage.reclaim.skip.backup_running': 'Ignorado: um backup estava em execução',
+  'storage.reclaim.error.reclaim_confirm_stale':
+    'A contagem mudou desde que foi exibida. Verifique o novo valor e confirme novamente.',
+  'storage.reclaim.error.reclaim_install_unknown':
+    'O TREK não conseguiu ler o id da sua instalação, então não exclui nada. Verifique a pasta de dados.',
 };
 export default storage;

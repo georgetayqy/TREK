@@ -1,9 +1,13 @@
-import { Controller, Get, Res } from '@nestjs/common';
-import type { Response } from 'express';
-import { KitineraryExtractorService } from '../booking-import/kitinerary-extractor.service';
-import { AddonsService } from '../addons/addons.service';
 import { ADDON_IDS } from '../../addons';
-import { Public } from '../auth/public.decorator';
+import { readEnv } from '../../app-config';
+import { MaintenanceRepository } from '../../db/repositories/MaintenanceRepository';
+import { AddonsService } from '../addons/addons.service';
+import { Public } from '../auth-core/public.decorator';
+import { KitineraryExtractorService } from '../booking-import/kitinerary-extractor.service';
+import { ReadinessService } from './readiness.service';
+import { Controller, Get, Res } from '@nestjs/common';
+
+import type { Response } from 'express';
 
 /** Exposes the container probe and the server feature flags consumed by the
  *  frontend to show/hide optional UI. */
@@ -13,6 +17,8 @@ export class FeaturesController {
   constructor(
     private readonly extractor: KitineraryExtractorService,
     private readonly addons: AddonsService,
+    private readonly maintenance: MaintenanceRepository,
+    private readonly readiness: ReadinessService,
   ) {}
 
   /** The container/uptime probe. The forced-HTTPS redirect and HSTS exempt this
@@ -24,13 +30,55 @@ export class FeaturesController {
     res.json({ status: 'ok' });
   }
 
+  /**
+   * The readiness probe: 503 while the database does not answer (a restore
+   * swapping it, a boot still migrating) and once a shutdown has started, so
+   * an orchestrator stops sending traffic without killing the process.
+   * Liveness stays on the plain probe above, which a long restore must not
+   * fail.
+   */
+  @Get('ready')
+  async ready(@Res() res: Response): Promise<void> {
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    if (this.readiness.isDraining()) {
+      res.status(503).json({ status: 'unavailable' });
+      return;
+    }
+    try {
+      await this.maintenance.ping();
+      res.json({ status: 'ready' });
+    } catch {
+      res.status(503).json({ status: 'unavailable' });
+    }
+  }
+
   @Get('features')
-  features() {
+  async features() {
     return {
       bookingImport: this.extractor.isAvailable(),
       // Addon-level flag (per-user config availability is reported per-file in
       // the preview response). Drives whether the client shows AI affordances.
-      aiParsing: this.addons.isAddonEnabled(ADDON_IDS.LLM_PARSING),
+      aiParsing: await this.addons.isAddonEnabled(ADDON_IDS.LLM_PARSING),
+      // Whether the assistant exists on this install at all; whether it can
+      // run for a user is /api/ai/status. A managed install has none.
+      aiAssistant: !readEnv().managed.enabled && (await this.addons.isAddonEnabled(ADDON_IDS.AI_ASSISTANT)),
+      // The native apps refuse to connect to a server without this: an older
+      // one serves a UI that knows neither the sign-in hand-off nor the way
+      // back to the server picker, and the user would be stuck in it.
+      nativeApp: true,
+      // The version of what the apps rely on from the server (the hand-off
+      // routes, the shell bridge in the served UI). Raised only for a change an
+      // older app cannot follow; the app refuses a server below its minimum.
+      // 2 (5.1.3): the browser sign-in starts under /api, past an older TREK's
+      // service worker, and the hand-off page signs in by itself. Apps from then
+      // on refuse a server below it, so its users stop landing in the browser.
+      // 3 (5.1.4): a widget or Live Activity tap that starts the app opens what
+      // it points at, and the apps from then on ask for this release.
+      nativeApi: 3,
+      // The other way round: the oldest app binary this server's UI works with,
+      // as the shell API the app reports (TrekShell.getCapabilities). An app
+      // below it is asked to update instead of running native calls it lacks.
+      minNativeShellApi: 1,
     };
   }
 }

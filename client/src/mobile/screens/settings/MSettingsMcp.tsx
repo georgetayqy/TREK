@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Copy, KeyRound, Plus, RefreshCw, Terminal, Trash2 } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { Check, ChevronDown, ChevronRight, Copy, KeyRound, Plus, RefreshCw, Terminal, Trash2, Key, CircleCheck, RotateCcw } from 'lucide-react'
 import { useTranslation } from '../../../i18n'
-import { useToast } from '../../../components/shared/Toast'
-import { authApi, oauthApi } from '../../../api/client'
-import { PRESET_SCOPES_DEFAULT, PRESET_SCOPES_READONLY } from '../../../api/oauthScopes'
+import { useFormatDate } from '../../../hooks/useDateFormat'
+import { OAUTH_PRESETS, useMcpIntegration } from '../../../components/Settings/useMcpIntegration'
 import MScopeGroupPicker from './MScopeGroupPicker'
 import MSheet from '../../components/MSheet'
 import MToggle from '../../components/MToggle'
@@ -11,53 +10,8 @@ import MChip from '../../components/MChip'
 import { MSetCard, MSetEyebrow, MSetInput, MSetTextarea, MSetButton, MSetHint, MSetRow } from './MSettingsUi'
 import MConfirmSheet from './MConfirmSheet'
 import MSegmented from '../../components/MSegmented'
-import { getApiErrorMessage } from '../../../utils/apiError'
-
-interface OAuthPreset {
-  id: string
-  label: string
-  name: string
-  uris: string
-  scopes: string[]
-}
-
-const OAUTH_PRESETS: OAuthPreset[] = [
-  { id: 'claude-web', label: 'Claude.ai', name: 'Claude.ai', uris: 'https://claude.ai/api/mcp/auth_callback', scopes: PRESET_SCOPES_DEFAULT },
-  { id: 'claude-desktop', label: 'Claude Desktop', name: 'Claude Desktop', uris: 'http://localhost', scopes: PRESET_SCOPES_DEFAULT },
-  { id: 'cursor', label: 'Cursor', name: 'Cursor', uris: 'http://localhost', scopes: PRESET_SCOPES_DEFAULT },
-  { id: 'vscode', label: 'VS Code', name: 'VS Code / Copilot', uris: 'http://localhost', scopes: PRESET_SCOPES_READONLY },
-  { id: 'windsurf', label: 'Windsurf', name: 'Windsurf', uris: 'http://localhost', scopes: PRESET_SCOPES_DEFAULT },
-  { id: 'zed', label: 'Zed', name: 'Zed', uris: 'http://localhost', scopes: PRESET_SCOPES_DEFAULT },
-]
-
-interface OAuthClient {
-  id: string
-  name: string
-  client_id: string
-  redirect_uris: string[]
-  allowed_scopes: string[]
-  allows_client_credentials: boolean
-  created_at: string
-  client_secret?: string // only present on create
-}
-
-interface OAuthSession {
-  id: number
-  client_id: string
-  client_name: string
-  scopes: string[]
-  access_token_expires_at: string
-  refresh_token_expires_at: string
-  created_at: string
-}
-
-interface McpToken {
-  id: number
-  name: string
-  token_prefix: string
-  created_at: string
-  last_used_at: string | null
-}
+import DemoLock from '../../../components/Demo/DemoLock'
+import { useDemoAccountLock } from '../../../components/Demo/useDemoLock'
 
 function CopyButton({ text, copied, onCopy }: { text: string; copied: boolean; onCopy: (text: string) => void }) {
   return (
@@ -86,183 +40,64 @@ function CodeBlock({ children }: { children: string }) {
  * tokens, with the desktop modals as floating sheets.
  */
 export default function MSettingsMcp() {
-  const { t, locale } = useTranslation()
-  const toast = useToast()
-
-  const [activeTab, setActiveTab] = useState<'oauth' | 'apitokens'>('oauth')
-  const [configOpenOAuth, setConfigOpenOAuth] = useState(false)
-  const [configOpenToken, setConfigOpenToken] = useState(false)
-  const [copiedKey, setCopiedKey] = useState<string | null>(null)
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // OAuth clients
-  const [clients, setClients] = useState<OAuthClient[]>([])
-  const [sessions, setSessions] = useState<OAuthSession[]>([])
-  const [createOpen, setCreateOpen] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [newUris, setNewUris] = useState('')
-  const [newScopes, setNewScopes] = useState<string[]>([])
-  const [isMachine, setIsMachine] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [createdClient, setCreatedClient] = useState<OAuthClient | null>(null)
-  const [deleteId, setDeleteId] = useState<string | null>(null)
-  const [revokeId, setRevokeId] = useState<number | null>(null)
-  const [rotateId, setRotateId] = useState<string | null>(null)
-  const [rotatedSecret, setRotatedSecret] = useState<string | null>(null)
-  const [rotating, setRotating] = useState(false)
-  const [scopesExpanded, setScopesExpanded] = useState<Record<string, boolean>>({})
-
-  // API tokens (deprecated)
-  const [tokens, setTokens] = useState<McpToken[]>([])
-  const [tokenModalOpen, setTokenModalOpen] = useState(false)
-  const [tokenNewName, setTokenNewName] = useState('')
-  const [createdToken, setCreatedToken] = useState<string | null>(null)
-  const [tokenCreating, setTokenCreating] = useState(false)
-  const [tokenDeleteId, setTokenDeleteId] = useState<number | null>(null)
-
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-    }
-  }, [])
-
-  // Re-read after create/rotate so the rows show what the server actually stored.
-  const reloadClients = () => oauthApi.clients.list().then((d) => setClients(d.clients || [])).catch(() => {})
-
-  useEffect(() => {
-    authApi.mcpTokens.list().then((d) => setTokens(d.tokens || [])).catch(() => {})
-    reloadClients()
-    oauthApi.sessions.list().then((d) => setSessions(d.sessions || [])).catch(() => {})
-  }, [])
-
-  const mcpEndpoint = `${window.location.origin}/mcp`
-  const jsonConfigOAuth = `{
-  "mcpServers": {
-    "trek": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "${mcpEndpoint}",
-        "--static-oauth-client-info",
-        "{\\"client_id\\": \\"<your_client_id>\\", \\"client_secret\\": \\"<your_client_secret>\\"}"
-      ]
-    }
-  }
-}`
-  const jsonConfigToken = `{
-  "mcpServers": {
-    "trek": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "${mcpEndpoint}",
-        "--header",
-        "Authorization: Bearer <your_token>"
-      ]
-    }
-  }
-}`
-
-  const handleCopy = (text: string, key: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedKey(key)
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-      copyTimerRef.current = setTimeout(() => setCopiedKey(null), 2000)
-    })
-  }
-
-  const createClient = async () => {
-    if (!newName.trim()) return
-    if (!isMachine && !newUris.trim()) return
-    setCreating(true)
-    try {
-      const uris = isMachine ? [] : newUris.split('\n').map((u) => u.trim()).filter(Boolean)
-      const d = await oauthApi.clients.create({
-        name: newName.trim(),
-        redirect_uris: uris,
-        allowed_scopes: newScopes,
-        ...(isMachine ? { allows_client_credentials: true } : {}),
-      })
-      setCreatedClient(d.client)
-      await reloadClients()
-      setNewName('')
-      setNewUris('')
-      setNewScopes([])
-      setIsMachine(false)
-    } catch (err) {
-      // The server names the rule that refused the client (a scope, the
-      // ten-client cap, a redirect URI it will not take); swallowing it left
-      // "Failed to register OAuth client" and nothing to act on.
-      toast.error(getApiErrorMessage(err, t('settings.oauth.toast.createError')))
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  const deleteClient = async (id: string) => {
-    try {
-      await oauthApi.clients.delete(id)
-      setClients((prev) => prev.filter((c) => c.id !== id))
-      setDeleteId(null)
-      toast.success(t('settings.oauth.toast.deleted'))
-    } catch {
-      toast.error(t('settings.oauth.toast.deleteError'))
-    }
-  }
-
-  const rotateSecret = async (id: string) => {
-    setRotating(true)
-    try {
-      const d = await oauthApi.clients.rotate(id)
-      setRotatedSecret(d.client_secret)
-      setRotateId(null)
-      await reloadClients()
-    } catch {
-      toast.error(t('settings.oauth.toast.rotateError'))
-    } finally {
-      setRotating(false)
-    }
-  }
-
-  const revokeSession = async (id: number) => {
-    try {
-      await oauthApi.sessions.revoke(id)
-      setSessions((prev) => prev.filter((s) => s.id !== id))
-      setRevokeId(null)
-      toast.success(t('settings.oauth.toast.revoked'))
-    } catch {
-      toast.error(t('settings.oauth.toast.revokeError'))
-    }
-  }
-
-  const createToken = async () => {
-    if (!tokenNewName.trim()) return
-    setTokenCreating(true)
-    try {
-      const d = await authApi.mcpTokens.create(tokenNewName.trim())
-      setCreatedToken(d.token.raw_token)
-      setTokenNewName('')
-      setTokens((prev) => [
-        { id: d.token.id, name: d.token.name, token_prefix: d.token.token_prefix, created_at: d.token.created_at, last_used_at: null },
-        ...prev,
-      ])
-    } catch {
-      toast.error(t('settings.mcp.toast.createError'))
-    } finally {
-      setTokenCreating(false)
-    }
-  }
-
-  const deleteToken = async (id: number) => {
-    try {
-      await authApi.mcpTokens.delete(id)
-      setTokens((prev) => prev.filter((tk) => tk.id !== id))
-      setTokenDeleteId(null)
-      toast.success(t('settings.mcp.toast.deleted'))
-    } catch {
-      toast.error(t('settings.mcp.toast.deleteError'))
-    }
-  }
+  const { t } = useTranslation()
+  const { formatDate } = useFormatDate()
+  const demoLocked = useDemoAccountLock()
+  const {
+    activeMcpTab: activeTab,
+    setActiveMcpTab: setActiveTab,
+    configOpenOAuth,
+    setConfigOpenOAuth,
+    configOpenToken,
+    setConfigOpenToken,
+    copiedKey,
+    oauthClients: clients,
+    oauthSessions: sessions,
+    oauthCreateOpen: createOpen,
+    setOauthCreateOpen: setCreateOpen,
+    oauthNewName: newName,
+    setOauthNewName: setNewName,
+    oauthNewUris: newUris,
+    setOauthNewUris: setNewUris,
+    oauthNewScopes: newScopes,
+    setOauthNewScopes: setNewScopes,
+    oauthIsMachine: isMachine,
+    setOauthIsMachine: setIsMachine,
+    oauthCreating: creating,
+    oauthCreatedClient: createdClient,
+    setOauthCreatedClient: setCreatedClient,
+    oauthDeleteId: deleteId,
+    setOauthDeleteId: setDeleteId,
+    oauthRevokeId: revokeId,
+    setOauthRevokeId: setRevokeId,
+    oauthRotateId: rotateId,
+    setOauthRotateId: setRotateId,
+    oauthRotatedSecret: rotatedSecret,
+    setOauthRotatedSecret: setRotatedSecret,
+    oauthRotating: rotating,
+    oauthScopesExpanded: scopesExpanded,
+    setOauthScopesExpanded: setScopesExpanded,
+    mcpTokens: tokens,
+    mcpModalOpen: tokenModalOpen,
+    setMcpModalOpen: setTokenModalOpen,
+    mcpNewName: tokenNewName,
+    setMcpNewName: setTokenNewName,
+    mcpCreatedToken: createdToken,
+    setMcpCreatedToken: setCreatedToken,
+    mcpCreating: tokenCreating,
+    mcpDeleteId: tokenDeleteId,
+    setMcpDeleteId: setTokenDeleteId,
+    mcpEndpoint,
+    mcpJsonConfigOAuth: jsonConfigOAuth,
+    mcpJsonConfig: jsonConfigToken,
+    handleCopy,
+    handleCreateOAuthClient: createClient,
+    handleDeleteOAuthClient: deleteClient,
+    handleRotateSecret: rotateSecret,
+    handleRevokeSession: revokeSession,
+    handleCreateMcpToken: createToken,
+    handleDeleteMcpToken: deleteToken,
+  } = useMcpIntegration({ enabled: true, reloadClientsAfterWrite: true })
 
   const configToggle = (open: boolean, setOpen: (v: boolean) => void, json: string, copyKey: string, hint: string) => (
     <div className="overflow-hidden rounded-xl border border-[color:var(--m-rowbr)]">
@@ -290,6 +125,7 @@ export default function MSettingsMcp() {
   )
 
   return (
+    <DemoLock locked={demoLocked} reason={t('demo.lock.mcp')}>
     <MSetCard title={t('settings.mcp.title')} icon={Terminal} className="mt-3">
       <MSetEyebrow className="mb-[5px]">{t('settings.mcp.endpoint')}</MSetEyebrow>
       <div className="flex items-center gap-2">
@@ -357,7 +193,7 @@ export default function MSettingsMcp() {
                       {t('settings.oauth.clientId')}: {client.client_id}
                     </p>
                     <p className="mt-[2px] font-geist text-[0.625rem] text-m-faint">
-                      {t('settings.mcp.tokenCreatedAt')} {new Date(client.created_at).toLocaleDateString(locale)}
+                      {t('settings.mcp.tokenCreatedAt')} {formatDate(new Date(client.created_at))}
                     </p>
                     <div className="mt-[6px] flex flex-wrap gap-1">
                       {(scopesExpanded[client.id] ? client.allowed_scopes : client.allowed_scopes.slice(0, 5)).map((s) => (
@@ -393,7 +229,7 @@ export default function MSettingsMcp() {
                         {t('settings.oauth.sessionScopes')}: {session.scopes.join(', ')}
                       </p>
                       <p className="font-geist text-[0.625rem] text-m-faint">
-                        {t('settings.oauth.sessionExpires')} {new Date(session.access_token_expires_at).toLocaleDateString(locale)}
+                        {t('settings.oauth.sessionExpires')} {formatDate(new Date(session.access_token_expires_at))}
                       </p>
                     </div>
                     <MSetButton variant="danger" onClick={() => setRevokeId(session.id)}>
@@ -438,12 +274,12 @@ export default function MSettingsMcp() {
                     <p className="truncate text-[0.8125rem] font-bold text-m-ink">{token.name}</p>
                     <p className="mt-[2px] font-mono text-[0.625rem] text-m-faint">
                       {token.token_prefix}...
-                      <span className="ml-2 font-geist">
-                        {t('settings.mcp.tokenCreatedAt')} {new Date(token.created_at).toLocaleDateString(locale)}
+                      <span className="ms-2 font-geist">
+                        {t('settings.mcp.tokenCreatedAt')} {formatDate(new Date(token.created_at))}
                       </span>
                       {token.last_used_at && (
-                        <span className="ml-1 font-geist">
-                          · {t('settings.mcp.tokenUsedAt')} {new Date(token.last_used_at).toLocaleDateString(locale)}
+                        <span className="font-geist">
+                          , {t('settings.mcp.tokenUsedAt')} {formatDate(new Date(token.last_used_at))}
                         </span>
                       )}
                     </p>
@@ -465,13 +301,13 @@ export default function MSettingsMcp() {
           if (!createdClient) setCreateOpen(false)
         }}
         variant="card"
-        material="opaque"
+        material="glass"
         ariaLabel={t('settings.oauth.modal.createTitle')}
       >
         <div className="min-h-0 overflow-y-auto p-[18px]">
           {!createdClient ? (
             <>
-              <div className="text-[0.9375rem] font-extrabold text-m-ink">{t('settings.oauth.modal.createTitle')}</div>
+              <SheetTitle icon={<KeyRound size={19} strokeWidth={1.8} />}>{t('settings.oauth.modal.createTitle')}</SheetTitle>
 
               <MSetEyebrow className="mb-[6px] mt-3">{t('settings.oauth.modal.presets')}</MSetEyebrow>
               <div className="flex flex-wrap gap-[6px]">
@@ -526,7 +362,7 @@ export default function MSettingsMcp() {
             </>
           ) : (
             <>
-              <div className="text-[0.9375rem] font-extrabold text-m-ink">{t('settings.oauth.modal.createdTitle')}</div>
+              <SheetTitle icon={<CircleCheck size={19} strokeWidth={1.8} />}>{t('settings.oauth.modal.createdTitle')}</SheetTitle>
               <p className="mt-2 rounded-xl border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] p-3 font-geist text-[0.625rem] leading-relaxed text-[color:var(--m-st-pending)]">
                 {t('settings.oauth.modal.createdWarning')}
               </p>
@@ -574,13 +410,13 @@ export default function MSettingsMcp() {
           if (!createdToken) setTokenModalOpen(false)
         }}
         variant="card"
-        material="opaque"
+        material="glass"
         ariaLabel={t('settings.mcp.modal.createTitle')}
       >
         <div className="p-[18px]">
           {!createdToken ? (
             <>
-              <div className="text-[0.9375rem] font-extrabold text-m-ink">{t('settings.mcp.modal.createTitle')}</div>
+              <SheetTitle icon={<Key size={19} strokeWidth={1.8} />}>{t('settings.mcp.modal.createTitle')}</SheetTitle>
               <MSetEyebrow className="mb-[5px] mt-3">{t('settings.mcp.modal.tokenName')}</MSetEyebrow>
               <MSetInput
                 autoFocus
@@ -600,7 +436,7 @@ export default function MSettingsMcp() {
             </>
           ) : (
             <>
-              <div className="text-[0.9375rem] font-extrabold text-m-ink">{t('settings.mcp.modal.createdTitle')}</div>
+              <SheetTitle icon={<CircleCheck size={19} strokeWidth={1.8} />}>{t('settings.mcp.modal.createdTitle')}</SheetTitle>
               <p className="mt-2 rounded-xl border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] p-3 font-geist text-[0.625rem] leading-relaxed text-[color:var(--m-st-pending)]">
                 {t('settings.mcp.modal.createdWarning')}
               </p>
@@ -626,9 +462,9 @@ export default function MSettingsMcp() {
       </MSheet>
 
       {/* Rotated secret display */}
-      <MSheet open={rotatedSecret !== null} onClose={() => setRotatedSecret(null)} variant="card" material="opaque" ariaLabel={t('settings.oauth.rotateSecretDoneTitle')}>
+      <MSheet open={rotatedSecret !== null} onClose={() => setRotatedSecret(null)} variant="card" material="glass" ariaLabel={t('settings.oauth.rotateSecretDoneTitle')}>
         <div className="p-[18px]">
-          <div className="text-[0.9375rem] font-extrabold text-m-ink">{t('settings.oauth.rotateSecretDoneTitle')}</div>
+          <SheetTitle icon={<RotateCcw size={19} strokeWidth={1.8} />}>{t('settings.oauth.rotateSecretDoneTitle')}</SheetTitle>
           <p className="mt-2 rounded-xl border border-[color:var(--m-rowbr)] bg-[color:var(--m-ic)] p-3 font-geist text-[0.625rem] leading-relaxed text-[color:var(--m-st-pending)]">
             {t('settings.oauth.rotateSecretDoneWarning')}
           </p>
@@ -689,5 +525,16 @@ export default function MSettingsMcp() {
         onConfirm={() => tokenDeleteId !== null && deleteToken(tokenDeleteId)}
       />
     </MSetCard>
+    </DemoLock>
+  )
+}
+
+/** The sheets' title row: the icon tile and the title, as TileHeader without the close (these close by their buttons). */
+function SheetTitle({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className="mb-1 flex items-center gap-3">
+      <span className="flex h-10 w-10 flex-none items-center justify-center rounded-[13px] bg-[color:var(--m-ic)] text-m-ink">{icon}</span>
+      <div className="min-w-0 flex-1 text-[1.0625rem] font-bold leading-tight text-m-ink">{children}</div>
+    </div>
   )
 }

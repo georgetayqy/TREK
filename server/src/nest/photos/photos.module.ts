@@ -1,8 +1,10 @@
-import { Module } from '@nestjs/common';
+import { MemoriesModule } from '../memories/memories.module';
+import { StorageModule } from '../storage/storage.module';
+import { PhotosStorageRefsService } from './photos-storage-refs.service';
 import { PhotosController } from './photos.controller';
 import { PhotosService } from './photos.service';
 import { TrekPhotosModule } from './trek-photos.module';
-import { MemoriesModule } from '../memories/memories.module';
+import { Module } from '@nestjs/common';
 
 /**
  * /api/photos — the trek_photo read surface. Access control and the byte
@@ -11,9 +13,9 @@ import { MemoriesModule } from '../memories/memories.module';
  * shared leaf is what keeps this a straight line instead of a forwardRef.
  */
 @Module({
-  imports: [TrekPhotosModule, MemoriesModule],
+  imports: [TrekPhotosModule, MemoriesModule, StorageModule],
   controllers: [PhotosController],
-  providers: [PhotosService],
+  providers: [PhotosService, PhotosStorageRefsService],
   exports: [TrekPhotosModule],
 })
 export class PhotosModule {}

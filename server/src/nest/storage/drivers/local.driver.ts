@@ -1,8 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { pipeline } from 'node:stream/promises';
-import type { Readable } from 'node:stream';
 import { assertValidKey, assertValidPrefix } from '../storage-keys';
 import {
   isLocalTempFile,
@@ -10,10 +5,17 @@ import {
   StorageInvalidKeyError,
   StorageNotFoundError,
   type ByteRange,
+  type ListOptions,
   type LocalTempFile,
   type ObjectStat,
   type StorageDriver,
 } from '../storage.types';
+
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 const SPOOL_DIR_NAME = '.tmp';
 /** Boot spool-reap age gate: entries younger than this survive the sweep. */
@@ -148,10 +150,7 @@ export class LocalDriver implements StorageDriver {
     const resolved = this.resolvePath(key);
     const stat = await this.stat(key);
     if (!stat) throw new StorageNotFoundError(key);
-    const stream = fs.createReadStream(
-      resolved,
-      range ? { start: range.start, end: range.end } : undefined,
-    );
+    const stream = fs.createReadStream(resolved, range ? { start: range.start, end: range.end } : undefined);
     return { stream, stat };
   }
 
@@ -177,13 +176,13 @@ export class LocalDriver implements StorageDriver {
     }
   }
 
-  async *list(prefix: string): AsyncIterable<ObjectStat> {
+  async *list(prefix: string, opts: ListOptions = {}): AsyncIterable<ObjectStat> {
     assertValidPrefix(prefix);
     const root = this.root();
-    yield* this.walk(prefix ? path.resolve(root, prefix) : root, root);
+    yield* this.walk(prefix ? path.resolve(root, prefix) : root, root, opts.shallow === true);
   }
 
-  private async *walk(dir: string, root: string): AsyncIterable<ObjectStat> {
+  private async *walk(dir: string, root: string, shallow: boolean): AsyncIterable<ObjectStat> {
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -197,7 +196,7 @@ export class LocalDriver implements StorageDriver {
       if (entry.name.startsWith('.')) continue;
       const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        yield* this.walk(entryPath, root);
+        if (!shallow) yield* this.walk(entryPath, root, false);
       } else if (entry.isFile()) {
         const st = await fs.promises.stat(entryPath);
         yield {

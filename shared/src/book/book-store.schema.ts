@@ -1,5 +1,7 @@
-import { z } from 'zod';
+import { BOOK_SCHEMA_REV } from './book-schema-rev';
 import { bookDocumentSchema } from './book.schema';
+
+import { z } from 'zod';
 
 /**
  * Storing a book.
@@ -18,10 +20,10 @@ import { bookDocumentSchema } from './book.schema';
  *
  * ── Why the whole document ───────────────────────────────────────────────
  *
- * Not a patch. A book is a few hundred kilobytes of JSON at most — the schema
- * caps it at 150 spreads of 60 elements — and a patch protocol would need an
- * ordering guarantee, a merge rule per field, and a way to recover when a
- * client misses one. Sending the document costs bandwidth that autosave already
+ * Not a patch. A book is a few kilobytes of JSON a page, a few megabytes for
+ * the longest journey's, and a patch protocol would need an ordering
+ * guarantee, a merge rule per field, and a way to recover when a client
+ * misses one. Sending the document costs bandwidth that autosave already
  * amortises and removes an entire class of bug.
  */
 
@@ -41,9 +43,23 @@ export const bookRecordSchema = bookSummarySchema.extend({
 });
 export type BookRecord = z.infer<typeof bookRecordSchema>;
 
+/**
+ * A document a newer TREK wrote, as far as a save request carries it: only the
+ * revision. Its new element kinds or values would fail `bookDocumentSchema` at
+ * the pipe and end in a 400, so it is taken first and handed to the service
+ * this bare, where the save is refused with 409 `book_schema_newer` before
+ * anything is written. Nothing of the rest is needed for that refusal.
+ */
+const newerBookDocumentSchema = z.object({
+  schemaRev: z
+    .number()
+    .int()
+    .min(BOOK_SCHEMA_REV + 1),
+});
+
 export const bookSaveRequestSchema = z.object({
   title: z.string().max(200).default(''),
-  document: bookDocumentSchema,
+  document: z.union([newerBookDocumentSchema, bookDocumentSchema]),
   /**
    * The version this edit was made against.
    *

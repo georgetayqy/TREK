@@ -1,4 +1,5 @@
 import { chronoOrder } from '../day/chrono-order';
+import { CARRIER_RESERVATION_TYPES } from '../reservation/reservation-types';
 import { haversineKm, type LatLng } from './corridor';
 import type { CarrierTerminal, RoadtripStop, RoutedLeg } from './planning-types';
 import { formatClock, formatDurationShort, parseClock } from './roadtripModel';
@@ -12,8 +13,10 @@ import { formatClock, formatDurationShort, parseClock } from './roadtripModel';
  * On the road trip such a booking is a seam: the road ends at the terminal it leaves
  * from and starts again at the one it lands at. Routing straight across it drew a
  * two-thousand-kilometre drive where a flight was booked (#2428).
+ *
+ * The set is the reservation catalog's `isCarrier` types (`reservation-types.ts`).
  */
-export const CARRIER_TYPES = ['flight', 'train', 'ferry', 'cruise', 'bus'] as const;
+export const CARRIER_TYPES = CARRIER_RESERVATION_TYPES;
 
 export function isCarrierType(type: string | null | undefined): boolean {
   return !!type && (CARRIER_TYPES as readonly string[]).includes(type);
@@ -108,8 +111,8 @@ export interface CarrierSeam {
   departure: CarrierEnd;
   /**
    * A ride always has both ends. A hire car has a return only when the booking says
-   * when and where: without a return day or a located return desk, nothing is guessed
-   * and only the pick-up stands on the road.
+   * where: without a located return desk, nothing is guessed and only the pick-up stands
+   * on the road.
    */
   arrival: CarrierEnd | null;
 }
@@ -217,9 +220,12 @@ export function carrierSeam(booking: CarrierBooking): CarrierSeam | null {
   const last = legs[legs.length - 1];
   const depDayId = departureDayOf(booking, legs);
   if (depDayId == null) return null;
-  // A ride lands on the day it left unless the booking says otherwise. A hire car is
-  // handed back on the day the booking names, and on no day when it names none.
-  const arrDayId = last?.arr_day_id ?? booking.end_day_id ?? (kind === 'ride' ? depDayId : null);
+  // A booking without an end day ends on the day it starts, as the day plan reads it
+  // (`getSpanPhase`): a ride lands there and a hire car is handed back there. Read as
+  // a car never handed back, a one-way drive between two cities kept only its pick-up,
+  // and the road ran from that desk to the next car's instead of to its own return
+  // desk (#2894).
+  const arrDayId = last?.arr_day_id ?? booking.end_day_id ?? depDayId;
   const depClock = carrierClock(first?.dep_time ?? booking.reservation_time);
   const arrClock = carrierClock(last?.arr_time ?? booking.reservation_end_time);
   const bookingPosition = (dayId: number): number | null =>
@@ -594,11 +600,30 @@ export function seatCarrierStops(
     minutes: item.minutes,
     point: item.kind === 'stop' ? { lat: stops[item.index]!.lat, lng: stops[item.index]!.lng } : null,
   });
+  // Just ahead of the next car's pick-up behind this car's own, or null when no car
+  // follows and the return closes the day. Closing the day, the first of two one-way
+  // cars was handed back after the second was collected.
+  const handOverKey = (seam: CarrierSeam): number | null => {
+    const pickups = items.filter(
+      (item): item is Extract<Item, { kind: 'end' }> => item.kind === 'end' && item.role === 'pickup',
+    );
+    const own = pickups.find((item) => item.seam === seam);
+    if (!own) return null;
+    const next = pickups.filter((item) => item.seam !== seam && item.key > own.key).map((item) => item.key);
+    return next.length ? Math.min(...next) - 0.0001 : null;
+  };
+  // A car handed back on the day it was picked up, at no stated hour, is seated once every
+  // other desk of the day is: it goes back before the next car is collected (`handOverKey`).
+  const untimedSameDayReturn = (e: { seam: CarrierSeam; role: CarrierTerminal['role']; minutes: number | null }) =>
+    e.role === 'return' && e.minutes === null && e.seam.departure.dayId === dayId;
   ends
     .map((e) => ({ ...e, minutes: parseClock(e.end.clock) }))
-    .sort((a, b) => (a.minutes ?? 0) - (b.minutes ?? 0))
+    .sort(
+      (a, b) =>
+        Number(untimedSameDayReturn(a)) - Number(untimedSameDayReturn(b)) || (a.minutes ?? 0) - (b.minutes ?? 0),
+    )
     .forEach((e, ti) => {
-      let key = e.end.position;
+      let key = e.end.position ?? (untimedSameDayReturn(e) ? handOverKey(e.seam) : null);
       if (key === null) {
         const minutes = e.minutes ?? 0;
         let after = -Infinity;

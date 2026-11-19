@@ -6,7 +6,9 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.prevMonth': 'Mese precedente',
   'mobileVacay.nextMonth': 'Mese successivo',
   'mobileVacay.usedCount': '{count} usati',
+  'mobileVacay.usedCount.one': '{count} usato',
   'mobileVacay.leftCount': '{count} rimanenti',
+  'mobileVacay.leftCount.one': '{count} rimanente',
   'mobileVacay.left': 'rimanenti',
   'mobileVacay.modeCompany': 'Azienda',
   'mobileVacay.decreaseAllowance': 'Riduci giorni disponibili',
@@ -14,6 +16,8 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.companyLegend': 'Ferie aziendali',
   'mobileVacay.editCalendar': 'Modifica calendario',
   'mobileVacay.viewYear': 'Visualizza anno',
+  'mobileVacay.people': 'Persone',
+  'mobileVacay.legend': 'Legenda',
 };
 
 export default mobileVacay;

@@ -23,9 +23,14 @@ describe('editingCurrencyOf', () => {
 
 describe('expenseFxPreview', () => {
   it('previews an edit that keeps the currency at the rate frozen on entry', () => {
-    const fx = expenseFxPreview({ ...base, total: 801.76, currency: 'USD' })!
+    const fx = expenseFxPreview({ ...base, total: 801.76, currency: 'USD', base: 'GBP' })!
     expect(fx.inTrip).toBeCloseTo(685.26, 2)
-    expect(fx.shown).toBeCloseTo(791.55, 2)
+    expect(fx.shown).toBeCloseTo(convert(801.76 / 1.17, 'EUR'), 2)
+  })
+
+  it('has nothing to preview for a bill in the display currency, which counts as typed (#2965)', () => {
+    // Frozen at 1.17 while a euro buys 1.1551 today: still the dollars typed.
+    expect(expenseFxPreview({ ...base, total: 801.76, currency: 'USD', base: 'USD' })).toBeNull()
   })
 
   it('has nothing to preview for a bill in the display currency that reads back as typed', () => {
@@ -46,18 +51,21 @@ describe('expenseFxPreview', () => {
 })
 
 describe('splitShareLabel', () => {
-  const sym = (c: string) => (c === 'USD' ? '$' : c + ' ')
-
   it('prints the entered share, then the share the row lends or borrows', () => {
-    const fx = expenseFxPreview({ ...base, total: 801.76, currency: 'USD' })
-    expect(splitShareLabel(400.88, 'USD', fx, 2, 'USD', sym, 'en-US')).toBe('$400.88 → $395.77')
+    const fx = expenseFxPreview({ ...base, total: 1700, currency: 'JPY', editing: null })
+    expect(splitShareLabel(850, 'JPY', fx, 2, 'USD', 'en-US')).toBe(`${formatMoney(850, 'JPY', 'en-US')} → ${formatMoney(convert(1700, 'JPY') / 2, 'USD', 'en-US')}`)
     // Read in the trip currency, the share is the booked euros.
     const inEur = expenseFxPreview({ ...base, base: 'EUR', total: 801.76, currency: 'USD' })
-    expect(splitShareLabel(400.88, 'USD', inEur, 2, 'EUR', sym, 'en-US')).toBe(`$400.88 → ${formatMoney(342.63, 'EUR', 'en-US')}`)
+    expect(splitShareLabel(400.88, 'USD', inEur, 2, 'EUR', 'en-US')).toBe(`$400.88 → ${formatMoney(342.63, 'EUR', 'en-US')}`)
   })
 
   it('prints the entered share alone when nothing is converted', () => {
-    expect(splitShareLabel(125, 'USD', null, 2, 'USD', sym, 'en-US')).toBe('$125.00')
-    expect(splitShareLabel(0, 'USD', { inTrip: null, shown: 10 }, 0, 'USD', sym, 'en-US')).toBe('$0.00')
+    expect(splitShareLabel(125, 'USD', null, 2, 'USD', 'en-US')).toBe('$125.00')
+    expect(splitShareLabel(0, 'USD', { inTrip: null, shown: 10 }, 0, 'USD', 'en-US')).toBe('$0.00')
+  })
+
+  it('prints a share the way the list prints its currency, grouped and with its own decimals (#2604)', () => {
+    expect(splitShareLabel(15000, 'KRW', null, 4, 'KRW', 'en-US')).toBe('₩15,000')
+    expect(splitShareLabel(1.5, 'KWD', null, 2, 'KWD', 'en-US')).toBe(formatMoney(1.5, 'KWD', 'en-US'))
   })
 })

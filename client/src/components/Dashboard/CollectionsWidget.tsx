@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react'
 import { Bookmark, ArrowRight, MapPin } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { useTranslation } from '../../i18n'
-import { collectionsApi } from '../../api/collections'
 import { entityGradient } from '../../utils/gradients'
-import type { Collection } from '@trek/shared'
+import { useCollectionLists } from './useCollectionLists'
+import { readShownCollections, rememberShownCollections } from './collectionsWidgetMemory'
 
 /**
  * Dashboard sidebar widget — a glassy `.tool` card that surfaces the user's
@@ -16,23 +16,11 @@ import type { Collection } from '@trek/shared'
 export default function CollectionsWidget({ onOpen }: { onOpen: () => void }): React.ReactElement {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [lists, setLists] = useState<Collection[]>([])
-  const [loading, setLoading] = useState(true)
-
+  const { lists, loading } = useCollectionLists()
+  const [expected] = useState(readShownCollections)
   useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const data = await collectionsApi.list()
-        if (!cancelled) setLists(data.collections)
-      } catch {
-        if (!cancelled) setLists([])
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [])
+    if (!loading) rememberShownCollections(Math.min(lists.length, 6))
+  }, [loading, lists.length])
 
   return (
     <div className="tool">
@@ -42,7 +30,15 @@ export default function CollectionsWidget({ onOpen }: { onOpen: () => void }): R
           <ArrowRight size={14} />
         </button>
       </div>
-      {loading ? null : lists.length === 0 ? (
+      {loading ? (
+        expected ? (
+          <div className="col-badges" aria-hidden>
+            {Array.from({ length: expected }, (_, i) => <div key={i} className="col-badge col-badge-pending trek-skeleton" />)}
+          </div>
+        ) : (
+          <div className="col-empty trek-skeleton" aria-hidden>{t('collections.widget.empty')}</div>
+        )
+      ) : lists.length === 0 ? (
         <div className="col-empty">{t('collections.widget.empty')}</div>
       ) : (
         <div className="col-badges">

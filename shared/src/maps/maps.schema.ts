@@ -38,6 +38,21 @@ export const mapsSearchRequestSchema = z.object({
 });
 export type MapsSearchRequest = z.infer<typeof mapsSearchRequestSchema>;
 
+/**
+ * Places of any kind around a point, nearest first (#976). No category and no
+ * box: the circle is the question. Both are capped, because the Google path
+ * bills per call and a city centre has more named places than anyone reads.
+ */
+export const mapsNearbyRequestSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  /** Metres, 500 when left out. */
+  radius: z.number().int().min(50).max(5000).optional(),
+  /** How many places, 20 when left out. */
+  limit: z.number().int().min(1).max(20).optional(),
+});
+export type MapsNearbyRequest = z.infer<typeof mapsNearbyRequestSchema>;
+
 export const mapsAutocompleteRequestSchema = z.object({
   input: z.string().min(1).max(200),
   lang: z.string().optional(),
@@ -144,7 +159,7 @@ export type MapsResolveUrlResult = z.infer<typeof mapsResolveUrlResultSchema>;
  * Everything nullable is genuinely optional per source — Commons gives us a
  * licence and an author, Google gives us neither in a form we may reproduce.
  */
-export const placePhotoSourceSchema = z.enum(['google', 'wikimedia', 'wikipedia', 'cached']);
+export const placePhotoSourceSchema = z.enum(['google', 'wikimedia', 'wikipedia', 'cached', 'community']);
 export type PlacePhotoSource = z.infer<typeof placePhotoSourceSchema>;
 
 export const placePhotoCandidateSchema = z.object({
@@ -170,6 +185,8 @@ export const placeDescriptionSourceSchema = z.enum([
   'wikipedia',
   /** Quoted from the place's own site, via the TREK Places API. */
   'website',
+  /** Written by a TREK user, shared by an installation and checked before it was published. */
+  'community',
 ]);
 export type PlaceDescriptionSource = z.infer<typeof placeDescriptionSourceSchema>;
 

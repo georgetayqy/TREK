@@ -1,14 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router'
-import { ChevronLeft, MapPin, Grid3x3, MoreHorizontal, Play, Image, Camera, EyeOff, Settings2 } from 'lucide-react'
-import JourneyMap from '../../../components/Journey/JourneyMapAuto'
-import type { JourneyMapAutoHandle } from '../../../components/Journey/JourneyMapAuto'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { Outlet, useSearchParams } from 'react-router'
+import { BookOpen, ChevronLeft, MapPin, Grid3x3, MoreHorizontal, Play, Image, Camera, EyeOff, Settings2, X, Route, ListChecks } from 'lucide-react'
+import JourneyLayeredMap from '../../../components/Journey/JourneyLayeredMap'
 import PhotoLightbox from '../../../components/Journey/PhotoLightbox'
 import ContributorInviteDialog from '../../../components/Journey/ContributorInviteDialog'
 import ConfirmDialog from '../../../components/shared/ConfirmDialog'
 import { ProviderPicker } from '../../../components/Journey/JourneyDetailPageProviderPicker'
 import { photoUrl, posterlessVideo } from '../../../pages/journeyDetail/JourneyDetailPage.helpers'
-import { useJourneyDetail } from '../../../pages/journeyDetail/useJourneyDetail'
+import { useJourneyDetail, type JourneyDetailOptions } from '../../../pages/journeyDetail/useJourneyDetail'
 import { useJourneyStore } from '../../../store/journeyStore'
 import { useAddonStore } from '../../../store/addonStore'
 import DawarichIcon from '../../../components/shared/DawarichIcon'
@@ -17,27 +16,66 @@ import { FormSheetHeader } from '../trip/sheets/PlSheetChrome'
 import type { JourneyEntry, GalleryPhoto } from '../../../store/journeyStore'
 import { useAuthStore } from '../../../store/authStore'
 import { journeyApi, addonsApi, memoriesApi } from '../../../api/client'
-import { normalizeImageFiles } from '../../../utils/convertHeic'
-import { isVideoFile } from '../../../utils/videoPoster'
-import { getApiErrorMessage } from '../../../types'
 import MSheet from '../../components/MSheet'
 import MDancingTrek from '../../components/MDancingTrek'
 import MListRow from '../../components/MListRow'
 import MToggle from '../../components/MToggle'
 import JourneyEntryCover from '../../../components/Journey/JourneyEntryCover'
 import JourneyDayScrubber from '../../../components/Journey/JourneyDayScrubber'
-import { dayColorOf, journeyDays } from '../../../components/Journey/journeyCard'
+import { dayColorOf } from '../../../components/Journey/journeyCard'
+import { useJourneyCarouselSync } from '../../../components/Journey/useJourneyCarouselSync'
+import { useGalleryUpload } from '../../../components/Journey/useGalleryUpload'
+import { dayPrepText, dayPrepUnsettled } from '../../../components/Journey/journeyRecordingPrepModel'
 import MJourneyEntrySheet from './MJourneyEntrySheet'
+import { useIsSplit, useIsWide } from '../../../hooks/sizeClass'
+import MJourneyFeed from './MJourneyFeed'
 import MJourneySettingsSheet from './MJourneySettingsSheet'
+import MJourneyDayImportSheet from './MJourneyDayImportSheet'
+import MJourneyRecordingSheet from './MJourneyRecordingSheet'
+import { createPortal } from 'react-dom'
+import { useTabHeadSlot } from '../trip/tabHeadSlot'
+import MSkeleton from '../../components/MSkeleton'
 
 /**
  * Journey detail — integrated map with the horizontal 280px card timeline
  * (Journey tab) and the 2-column photo gallery (Gallery tab). Cards and map
  * markers stay in sync; tapping the centered card opens the entry sheet.
+ *
+ * A trip that links the journal shows this same screen in its own tab
+ * (`embedded`): the trip's back button and controls sit on top, so the screen
+ * drops its own back button and leaves the trip's URL alone.
  */
-export default function MJourneyDetail() {
+/**
+ * A phone on its side, or a folded Duo on its side (about 540px high): too short
+ * for the regular strip of cards and the map above it. Higher than the shell's
+ * 500px for that Duo, whose regular cards left the map a band under the header.
+ */
+const SHORT_WINDOW = '(max-height: 600px)'
+function subscribeShort(onChange: () => void) {
+  const mq = window.matchMedia(SHORT_WINDOW)
+  mq.addEventListener('change', onChange)
+  return () => mq.removeEventListener('change', onChange)
+}
+const readShort = () => window.matchMedia(SHORT_WINDOW).matches
+
+export default function MJourneyDetail({ journeyId, embedded = false }: JourneyDetailOptions = {}) {
+  // Larger cards on a wide window, where the strip has the room for the whole name.
+  const wide = useIsWide()
+  // With room for two panes the entries stand as a feed beside the map (MJourneyFeed)
+  // instead of the strip of cards over it.
+  const split = useIsSplit()
+  // On a short window the cards are smaller and the map is framed above them.
+  const short = useSyncExternalStore(subscribeShort, readShort, () => false)
+  // The map runs under the rail (m-bleed); framing keeps the journey clear of it.
+  // The rail's share is the root's own negative margin, as the browser resolves it.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [railInset, setRailInset] = useState(0)
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (root) setRailInset(Math.max(0, -parseFloat(getComputedStyle(root).marginInlineStart) || 0))
+  }, [wide])
   const {
-    id, navigate, toast, t,
+    id, navigate, toast, t, locale,
     current, loading,
     canEditEntries, canEditJourney,
     view, setView,
@@ -46,10 +84,14 @@ export default function MJourneyDetail() {
     showInvite, setShowInvite,
     showSettings, setShowSettings,
     hideSkeletons, setHideSkeletons,
-    sidebarMapItems, tracks,
+    sidebarMapItems, tracks, mapLayers, entryTitleOf, mapPhotos, openMapPhotos, recordings, canTakeOverRecording, dayImport, dayImportDates, dawarichByDate, recordingPrep,
     dismissSuggestion, restoreSuggestions, openAtEntryId,
     loadJourney, updateEntry, deleteEntry, reorderEntries, uploadPhotos,
-  } = useJourneyDetail()
+    addPickedProviderPhotos, addEntryProviderPhotos, writeAboutPlace,
+  } = useJourneyDetail({ journeyId, embedded })
+  // A trip tab: the header goes into the trip shell's top row (tabHeadSlot.ts).
+  const shellSlot = useTabHeadSlot()
+  const headSlot = embedded ? shellSlot : null
 
   // The dock's FAB is a sibling of this screen: on the Gallery it becomes the
   // upload button, so it has to know which tab is open — and it stops knowing
@@ -60,60 +102,54 @@ export default function MJourneyDetail() {
     return () => setMobileGalleryOpen(false)
   }, [view, setMobileGalleryOpen])
 
-  const mapRef = useRef<JourneyMapAutoHandle>(null)
-  const carouselRef = useRef<HTMLDivElement>(null)
-  const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map())
-  const [activeIndex, setActiveIndex] = useState(0)
+  const dayImportRow = (date: string, closeMenu: () => void) => {
+    const waiting = dawarichByDate.get(date)?.length ?? 0
+    const prep = recordingPrep.dayPrep(date)
+    const unsettled = dayPrepUnsettled(prep)
+    return (
+      <MListRow
+        key={date}
+        icon={ListChecks}
+        label={t('journey.dayImport.openOn', {
+          date: new Date(date + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'long' }),
+        })}
+        trailing={waiting > 0 || unsettled ? (
+          <span className="inline-flex items-center gap-1.5">
+            {unsettled && prep && (
+              <span className="h-1.5 w-1.5 rounded-full bg-warning" role="img" aria-label={dayPrepText(prep, t, locale)} />
+            )}
+            {waiting > 0 && (
+              <span className="rounded-full bg-m-ic px-2 py-0.5 font-geist text-caption font-bold tabular-nums text-m-muted">
+                {waiting}
+              </span>
+            )}
+          </span>
+        ) : undefined}
+        onClick={() => { closeMenu(); dayImport.open(date) }}
+      />
+    )
+  }
 
-  // Stable identity: the scroll effect below re-attaches on every change and
-  // would otherwise drop the pending settle timer on any unrelated render.
+  // Stable identity: the scroll effect in useJourneyCarouselSync re-attaches on every
+  // change and would otherwise drop the pending settle timer on any unrelated render.
   const entries = useMemo(
     () => (current?.entries || []).filter(e => !hideSkeletons || e.type !== 'skeleton'),
     [current?.entries, hideSkeletons],
   )
 
-  const syncMapToCard = useCallback((index: number) => {
-    const entry = entries[index]
-    if (!entry) return
-    const mapEntry = sidebarMapItems.find(m => String(m.id) === String(entry.id))
-    try {
-      if (mapEntry) mapRef.current?.focusMarker(String(mapEntry.id))
-      else mapRef.current?.highlightMarker(null)
-    } catch { /* map not initialised yet */ }
-  }, [entries, sidebarMapItems])
+  const {
+    mapRef, carouselRef, cardRefs, activeIndex, focusIndex, setActiveIndex, scrubberDays,
+    syncMapToCard, handleMarkerClick, handleCardTap, openEntryById, jumpToDay,
+  } = useJourneyCarouselSync<JourneyEntry>({
+    entries, mapEntries: sidebarMapItems, onOpenEntry: setEditingEntry, syncMapOnTap: true, layoutKey: split,
+  })
+  const feed = split && view === 'timeline' && entries.length > 0
 
-  // Pick the card closest to the horizontal center once scrolling settles.
-  const pickNearestCard = useCallback(() => {
-    const el = carouselRef.current
-    if (!el) return
-    const center = el.getBoundingClientRect().left + el.clientWidth / 2
-    let bestIdx = 0
-    let bestDist = Infinity
-    cardRefs.current.forEach((node, idx) => {
-      const r = node.getBoundingClientRect()
-      const d = Math.abs(r.left + r.width / 2 - center)
-      if (d < bestDist) { bestDist = d; bestIdx = idx }
-    })
-    setActiveIndex(prev => {
-      if (prev !== bestIdx) syncMapToCard(bestIdx)
-      return bestIdx
-    })
-  }, [syncMapToCard])
-
+  // The map's box changes when the feed comes or goes (a rotation, Split View).
   useEffect(() => {
-    const el = carouselRef.current
-    if (!el || entries.length === 0) return
-    let settleTimer: number | null = null
-    const onScroll = () => {
-      if (settleTimer != null) window.clearTimeout(settleTimer)
-      settleTimer = window.setTimeout(pickNearestCard, 150)
-    }
-    el.addEventListener('scroll', onScroll, { passive: true })
-    return () => {
-      el.removeEventListener('scroll', onScroll)
-      if (settleTimer != null) window.clearTimeout(settleTimer)
-    }
-  }, [entries.length, pickNearestCard])
+    const timer = window.setTimeout(() => mapRef.current?.invalidateSize(), 320)
+    return () => window.clearTimeout(timer)
+  }, [feed, mapRef])
 
   // Initial focus — give Leaflet time to initialise and fit bounds first. Opens on
   // today when today is part of the journey (see openAtEntryId), rather than always
@@ -130,12 +166,6 @@ export default function MJourneyDetail() {
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries.length, openAtEntryId])
-
-  const scrollCardIntoCenter = useCallback((idx: number) => {
-    cardRefs.current.get(idx)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
-  }, [])
-
-  const scrubberDays = useMemo(() => journeyDays(entries), [entries])
 
   /**
    * Move an entry within its day, from the entry sheet's header.
@@ -169,31 +199,6 @@ export default function MJourneyDetail() {
     return { canMoveUp: index > 0, canMoveDown: index >= 0 && index < sameDay.length - 1 }
   }, [entries])
 
-  /** The day bar lands on the first entry of that day. */
-  const jumpToDay = useCallback((date: string) => {
-    const idx = entries.findIndex(e => e.entry_date === date)
-    if (idx === -1) return
-    setActiveIndex(idx)
-    syncMapToCard(idx)
-    scrollCardIntoCenter(idx)
-  }, [entries, scrollCardIntoCenter, syncMapToCard])
-
-  const handleMarkerClick = useCallback((markerId: string) => {
-    const idx = entries.findIndex(e => String(e.id) === markerId)
-    if (idx === -1) return
-    setActiveIndex(idx)
-    scrollCardIntoCenter(idx)
-  }, [entries, scrollCardIntoCenter])
-
-  const handleCardTap = (entry: JourneyEntry, idx: number) => {
-    if (idx === activeIndex) setEditingEntry(entry)
-    else {
-      setActiveIndex(idx)
-      scrollCardIntoCenter(idx)
-      syncMapToCard(idx)
-    }
-  }
-
   // Gallery upload — device files plus the connected photo providers (Immich/Synology).
   const galleryFileRef = useRef<HTMLInputElement>(null)
   const [availableProviders, setAvailableProviders] = useState<{ id: string; name: string }[]>([])
@@ -202,6 +207,9 @@ export default function MJourneyDetail() {
   const [showUploadMenu, setShowUploadMenu] = useState(false)
   const [showActionMenu, setShowActionMenu] = useState(false)
   const [pickerProvider, setPickerProvider] = useState<string | null>(null)
+  // The gallery photo waiting on its delete confirm; entries have their own deleteTarget.
+  const [photoDeleteTarget, setPhotoDeleteTarget] = useState<GalleryPhoto | null>(null)
+  const deleteGalleryPhoto = useJourneyStore(state => state.deleteGalleryPhoto)
   const dawarichEnabled = useAddonStore(state => state.isEnabled)('dawarich')
   const [dawarichOpen, setDawarichOpen] = useState(false)
   /**
@@ -215,7 +223,12 @@ export default function MJourneyDetail() {
    */
   const [railHeight, setRailHeight] = useState(0)
   const railRef = useRef<HTMLDivElement>(null)
-  const [uploading, setUploading] = useState(false)
+  const { uploading, handleGalleryUpload } = useGalleryUpload({
+    journeyId: current?.id ?? null,
+    onUploaded: () => loadJourney(Number(id)),
+    toast,
+    t,
+  })
 
   useEffect(() => {
     const node = railRef.current
@@ -227,7 +240,7 @@ export default function MJourneyDetail() {
     observer.observe(node)
     setRailHeight(node.offsetHeight)
     return () => observer.disconnect()
-  }, [view, entries.length])
+  }, [view, entries.length, split])
 
   const openUpload = useCallback(() => {
     if (availableProviders.length > 0) setShowUploadMenu(true)
@@ -242,7 +255,7 @@ export default function MJourneyDetail() {
   const [params, setParams] = useSearchParams()
   const [pendingUpload, setPendingUpload] = useState(false)
   useEffect(() => {
-    if (params.get('create') !== 'photo') return
+    if (embedded || params.get('create') !== 'photo') return
     setParams(prev => {
       const next = new URLSearchParams(prev)
       next.delete('create')
@@ -251,7 +264,7 @@ export default function MJourneyDetail() {
     if (!canEditEntries) return
     setView('gallery')
     setPendingUpload(true)
-  }, [params, setParams, canEditEntries, setView])
+  }, [params, setParams, canEditEntries, setView, embedded])
 
   useEffect(() => {
     if (!pendingUpload || !providersReady) return
@@ -261,7 +274,7 @@ export default function MJourneyDetail() {
 
   useEffect(() => {
     let active = true
-    ;(async () => {
+    ;void (async () => {
       try {
         const addonsData = await addonsApi.enabled()
         const enabled = (addonsData.addons || []).filter(
@@ -285,35 +298,12 @@ export default function MJourneyDetail() {
     return () => { active = false }
   }, [])
 
-  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files?.length || !current) return
-    setUploading(true)
-    try {
-      const all = Array.from(files)
-      const videos = all.filter(isVideoFile)
-      const images = all.filter(f => !isVideoFile(f))
-      const normalized = [...(images.length ? await normalizeImageFiles(images) : []), ...videos]
-      const { failed } = await useJourneyStore.getState().uploadGalleryPhotos(current.id, normalized)
-      if (failed.length > 0) {
-        toast.error(t('journey.editor.uploadPartialFailed', { failed: String(failed.length), total: String(normalized.length) }))
-      } else {
-        toast.success(t('journey.photosUploaded', { count: String(files.length) }))
-      }
-      loadJourney(Number(id))
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, t('journey.photosUploadFailed')))
-    } finally {
-      setUploading(false)
-    }
-    e.target.value = ''
-  }
-
   const openLightbox = (photos: GalleryPhoto[], index: number) => {
     setLightbox({
       photos: photos.map(p => ({
         id: p.id,
         src: photoUrl(p, 'original'),
+        thumbSrc: photoUrl(p, 'thumbnail'),
         caption: p.caption ?? null,
         provider: p.provider,
         asset_id: p.asset_id,
@@ -326,9 +316,7 @@ export default function MJourneyDetail() {
 
   if (loading || !current) {
     return (
-      <div className="flex h-dvh items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[color:var(--m-rowbr)] border-t-m-ink" />
-      </div>
+      <MSkeleton variant="detail" className="h-dvh overflow-hidden" />
     )
   }
 
@@ -340,8 +328,9 @@ export default function MJourneyDetail() {
   // keeps a single "more" affordance.
   //
   // There is no book export here any more: the book is a Studio document now,
-  // and Studio is a desktop editor. A phone-sized PDF of a book laid out for
-  // print was the old export's answer to a question nobody was asking.
+  // and Studio needs the room of a desktop, an iPad on its side or an unfolded
+  // Duo (split), where the header offers it. A phone-sized PDF of a book laid
+  // out for print was the old export's answer to a question nobody was asking.
   const toggleSkeletons = async (next: boolean) => {
     setHideSkeletons(next)
     try {
@@ -354,70 +343,132 @@ export default function MJourneyDetail() {
   return (
     // h-dvh, not h-full: the shell stopped providing a definite height (#1809)
     // and a map on a percentage of an auto-height parent collapses to zero.
-    <div className="relative h-dvh overflow-hidden">
-      {/* Integrated map — always mounted, the gallery overlays it */}
-      <div className="absolute inset-0 z-0">
-        <JourneyMap
+    <div ref={rootRef} className="m-bleed relative h-dvh overflow-hidden" style={headSlot ? IN_SHELL_ROW : undefined}>
+      {/* Integrated map — always mounted, the gallery overlays it. Beside the feed
+          it begins where the feed ends, so its controls and its framing stay in
+          the part that can be seen. */}
+      <div
+        className="absolute inset-y-0 end-0 start-0 z-0"
+        style={feed ? { insetInlineStart: 'calc(var(--m-rail-w, 0px) + var(--m-pane-aside-w))' } : undefined}
+      >
+        <JourneyLayeredMap
           ref={mapRef}
+          layers={mapLayers}
+          hideLayerControl
+          controlsTop="calc(var(--m-safe-top, 12px) + 50px)"
+          onOpenEntry={handleMarkerClick}
+          onWriteAboutPlace={writeAboutPlace}
+          entryTitleOf={entryTitleOf}
           checkins={[]}
           entries={sidebarMapItems}
           tracks={tracks}
+          photos={mapPhotos}
+          onPhotoClick={openMapPhotos}
           height={9999}
           dark={dark}
           activeMarkerId={entries[activeIndex] ? String(entries[activeIndex].id) : null}
           onMarkerClick={handleMarkerClick}
+          onMarkerCardClick={openEntryById}
           fullScreen
-          paddingBottom={250}
+          paddingBottom={short ? 280 : 250}
+          paddingStart={feed ? 0 : railInset}
         />
       </div>
 
       {/* Gallery tab overlay */}
       {view === 'gallery' && (
-        <div className="absolute inset-0 z-[5] overflow-y-auto bg-[color:var(--m-bg)] bg-[image:var(--m-scr)] px-4 pt-[calc(var(--m-safe-top,12px)+56px)] pb-[calc(var(--bottom-nav-h,84px)+16px)]">
+        <div className="m-span-x absolute inset-y-0 z-[5] overflow-y-auto bg-[color:var(--m-bg)] bg-[image:var(--m-scr)] px-4 pt-[calc(var(--m-safe-top,12px)+56px)] pb-[calc(var(--bottom-nav-h,84px)+16px)] wide:px-6">
           {gallery.length === 0 ? (
             <div className="flex min-h-full flex-col items-center justify-center px-8 py-10 text-center">
               <MDancingTrek scene="journey" className="mb-2" />
               <p className="font-geist text-[0.8125rem] font-medium text-m-muted">{t('journey.detail.noPhotos')}</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 wide:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] wide:gap-3">
               {gallery.map((photo, i) => (
-                <button
-                  key={photo.id}
-                  type="button"
-                  onClick={() => openLightbox(gallery, i)}
-                  className="relative aspect-square overflow-hidden rounded-[14px]"
-                >
-                  {posterlessVideo(photo) ? (
-                    <span className="block h-full w-full bg-[color:var(--m-ic)]" />
-                  ) : (
-                    <img src={photoUrl(photo, 'thumbnail')} alt={photo.caption || ''} loading="lazy" className="h-full w-full object-cover" />
-                  )}
-                  {photo.media_type === 'video' && (
-                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur">
-                        <Play size={16} className="ml-[2px]" fill="currentColor" />
+                // A wrapper, not one button: the delete sits beside the tile's own
+                // button instead of inside it (#2593).
+                <div key={photo.id} className="relative aspect-square overflow-hidden rounded-[14px]">
+                  <button
+                    type="button"
+                    onClick={() => openLightbox(gallery, i)}
+                    className="relative block h-full w-full"
+                  >
+                    {posterlessVideo(photo) ? (
+                      <span className="block h-full w-full bg-[color:var(--m-ic)]" />
+                    ) : (
+                      <img src={photoUrl(photo, 'thumbnail')} alt={photo.caption || ''} loading="lazy" className="h-full w-full object-cover" />
+                    )}
+                    {photo.media_type === 'video' && (
+                      <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur">
+                          <Play size={16} className="ml-[2px]" fill="currentColor" />
+                        </span>
                       </span>
-                    </span>
+                    )}
+                  </button>
+                  {canEditEntries && (
+                    <button
+                      type="button"
+                      onClick={() => setPhotoDeleteTarget(photo)}
+                      aria-label={t('common.delete')}
+                      className="absolute end-[6px] top-[6px] flex h-7 w-7 items-center justify-center rounded-full bg-[color:var(--overlay)] text-[color:var(--m-knob)] backdrop-blur"
+                    >
+                      <X size={13} />
+                    </button>
                   )}
-                </button>
+                </div>
               ))}
             </div>
           )}
         </div>
       )}
 
-      {/* Header: back — segment — upload / overflow menu */}
-      <div className="absolute left-4 right-4 top-[var(--m-safe-top,12px)] z-10 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => navigate('/journey')}
-          aria-label={t('journey.detail.backToJourney')}
-          className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-full bg-[color:var(--m-sheet)] text-m-ink shadow-[0_5px_14px_-6px_rgba(0,0,0,.3)]"
+      {/* The entries as a feed beside the map, on a window with room for two panes. */}
+      {feed && (
+        <div
+          className="absolute inset-y-0 z-[6] overflow-y-auto overflow-x-hidden border-e border-[color:var(--m-rowbr)] bg-[color:var(--m-bg)] bg-[image:var(--m-scr)] px-4 pb-[calc(var(--bottom-nav-h,84px)+16px)] pt-[calc(var(--m-safe-top,12px)+60px)]"
+          // Entries scrolled up fade out under the header's pills instead of showing through between them:
+          // gone down to the pills' lower edge (38px tall), whole again before the first day's head.
+          style={{
+            insetInlineStart: 'var(--m-rail-w, 0px)',
+            width: 'var(--m-pane-aside-w)',
+            maskImage: 'linear-gradient(180deg, transparent calc(var(--m-safe-top, 12px) + 40px), #000 calc(var(--m-safe-top, 12px) + 60px))',
+          }}
         >
-          <ChevronLeft size={18} strokeWidth={2.2} />
-        </button>
-        <div className="absolute left-1/2 top-0 flex -translate-x-1/2 rounded-full bg-[color:var(--m-sheet)] p-[3px] shadow-[0_5px_14px_-6px_rgba(0,0,0,.3)]">
+          <MJourneyFeed
+            entries={entries}
+            days={scrubberDays}
+            activeIndex={activeIndex}
+            cardRefs={cardRefs}
+            onCardTap={handleCardTap}
+            showMood={current.show_mood !== 0}
+            showWeather={current.show_weather !== 0}
+            t={t}
+            locale={locale}
+          />
+        </div>
+      )}
+
+      {/* Header: back — segment — upload / overflow menu. Beside the feed it keeps
+          to the feed, as the trip's controls keep to its pane. */}
+      <HeaderFrame slot={headSlot} feed={!!feed}>
+        {embedded ? (
+          <span className="w-[38px] flex-none" aria-hidden />
+        ) : (
+          <button
+            type="button"
+            onClick={() => navigate('/journey')}
+            aria-label={t('journey.detail.backToJourney')}
+            className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-full bg-[color:var(--m-sheet)] text-m-ink shadow-[0_5px_14px_-6px_rgba(0,0,0,.3)]"
+          >
+            <ChevronLeft size={18} strokeWidth={2.2} className="rtl:-scale-x-100" />
+          </button>
+        )}
+        <div
+          data-view-switch
+          className="absolute left-1/2 top-0 flex -translate-x-1/2 rounded-full wide:static wide:translate-x-0 bg-[color:var(--m-sheet)] p-[3px] shadow-[0_5px_14px_-6px_rgba(0,0,0,.3)]"
+        >
           <button
             type="button"
             onClick={() => setView('timeline')}
@@ -439,7 +490,7 @@ export default function MJourneyDetail() {
             {t('journey.share.gallery')}
           </button>
         </div>
-        <span className="ml-auto flex flex-none items-center gap-2">
+        <span className="ms-auto flex flex-none items-center gap-2">
           {/* Uploading lives on the dock's FAB while the Gallery is open — the
               one big action on the screen. A second button up here would be the
               same thing twice, so it only appears while an upload is running,
@@ -453,6 +504,16 @@ export default function MJourneyDetail() {
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
             </span>
           )}
+          {split && (
+            <button
+              type="button"
+              onClick={() => void navigate(`/journey/${current.id}/studio`)}
+              aria-label={t('journey.studio.openAria')}
+              className="flex h-[38px] w-[38px] items-center justify-center rounded-full bg-[color:var(--m-sheet)] text-m-ink shadow-[0_5px_14px_-6px_rgba(0,0,0,.3)]"
+            >
+              <BookOpen size={17} strokeWidth={2} />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowActionMenu(true)}
@@ -462,7 +523,7 @@ export default function MJourneyDetail() {
             <MoreHorizontal size={17} strokeWidth={2} />
           </button>
         </span>
-      </div>
+      </HeaderFrame>
 
       {/* The stays Dawarich recorded for these dates, as candidate entries. Over
           the map rather than in the header: it belongs to what is on the map,
@@ -496,6 +557,13 @@ export default function MJourneyDetail() {
               closeLabel={t('common.close')}
             />
             <div className="min-h-0 flex-1 overflow-y-auto px-[14px] pb-4">
+              {/* Whole days first: a day with stays and nothing written yet is reached
+                  from here, since it has no card to open the overflow menu on. */}
+              {dayImportDates.length > 0 && (
+                <div className="mb-2 flex flex-col border-b border-[color:var(--m-gbr)] pb-2">
+                  {dayImportDates.map(date => dayImportRow(date, () => setDawarichOpen(false)))}
+                </div>
+              )}
               {/* Journal entries and nothing else: a journey is for writing, and
                   the trip planner already offers the same stay as a place. */}
               <DawarichSuggestionsPanel
@@ -512,16 +580,20 @@ export default function MJourneyDetail() {
           inside the 84px the variable reserves, so +16 left a band of map doing
           nothing between the cards and it; two pixels keeps a hair of daylight and
           gives the strip the rest. */}
-      {view === 'timeline' && entries.length > 0 && (
-        <div ref={railRef} className="absolute left-0 right-0 z-[8] bottom-[calc(var(--bottom-nav-h,84px)+2px)]">
-        <JourneyDayScrubber
-          days={scrubberDays}
-          activeDate={entries[activeIndex]?.entry_date ?? null}
-          onPick={jumpToDay}
-        />
+      {view === 'timeline' && entries.length > 0 && !feed && (
+        <div ref={railRef} className="m-span-x absolute z-[8] bottom-[calc(var(--bottom-nav-h,84px)+2px)]">
+        {/* The days and the date on a plate of their own, so the map's names do
+            not run through them. */}
+        <div className="mx-3 rounded-[18px] border border-[color:var(--m-gbr)] bg-[color:var(--m-glass)] pt-[6px] backdrop-blur-[18px] backdrop-saturate-[1.4] empty:hidden">
+          <JourneyDayScrubber
+            days={scrubberDays}
+            activeDate={entries[activeIndex]?.entry_date ?? null}
+            onPick={jumpToDay}
+          />
+        </div>
         <div
           ref={carouselRef}
-          className="flex items-end gap-[10px] overflow-x-auto px-4 pb-1 [-webkit-overflow-scrolling:touch] [scrollbar-width:none]"
+          className={`flex items-end gap-[22px] overflow-x-auto px-6 pb-1 ${short ? 'pt-[22px]' : 'pt-[30px]'} [-webkit-overflow-scrolling:touch] [scrollbar-width:none]`}
           style={{ scrollSnapType: 'x mandatory' }}
         >
           {entries.map((entry, i) => (
@@ -533,11 +605,13 @@ export default function MJourneyDetail() {
               <JourneyEntryCover
                 entry={entry}
                 dayColor={dayColorOf(scrubberDays, entry.entry_date)}
-                isActive={i === activeIndex}
+                isActive={i === focusIndex}
                 onClick={() => handleCardTap(entry, i)}
                 showMood={current.show_mood !== 0}
                 showWeather={current.show_weather !== 0}
                 tone="mobile"
+                // Short before wide: a folded Duo on its side is wide (over 500px high) and short.
+                size={short ? 'compact' : wide ? 'large' : 'regular'}
               />
             </div>
           ))}
@@ -551,7 +625,7 @@ export default function MJourneyDetail() {
       {/* Opaque, not the glass default: these two sit over a full-screen map whose
           card carousel is bright and busy, and the frosted material let the titles
           behind read straight through the menu. */}
-      <MSheet open={showUploadMenu} onClose={() => setShowUploadMenu(false)} variant="bottom" material="opaque" ariaLabel={t('common.upload')}>
+      <MSheet open={showUploadMenu} onClose={() => setShowUploadMenu(false)} variant="bottom" material="glass" ariaLabel={t('common.upload')}>
         <div className="flex flex-col gap-2 p-[10px]">
           <MListRow
             icon={Camera}
@@ -570,13 +644,28 @@ export default function MJourneyDetail() {
       </MSheet>
 
       {/* Journey actions: book export, suggestions switch, settings */}
-      <MSheet open={showActionMenu} onClose={() => setShowActionMenu(false)} variant="bottom" material="opaque" ariaLabel={t('files.menu')}>
+      <MSheet open={showActionMenu} onClose={() => setShowActionMenu(false)} variant="bottom" material="glass" ariaLabel={t('files.menu')}>
         <div className="flex flex-col gap-1 p-[10px]">
           <div className="flex items-center gap-[11px] px-[10px] py-[11px]">
             <EyeOff size={16} strokeWidth={2} className="flex-none text-m-muted" />
             <span className="min-w-0 flex-1 truncate text-[0.84375rem] font-semibold">{t('journey.skeletons.hide')}</span>
             <MToggle checked={hideSkeletons} onChange={toggleSkeletons} ariaLabel={t('journey.skeletons.hide')} />
           </div>
+          {/* The recorded route of the day the card rail is on (JRN-01): taking it
+              over, or checking, replacing or dropping the one kept. */}
+          {canEditEntries && view === 'timeline' && entries[activeIndex] &&
+            (canTakeOverRecording || recordings.byDate.has(entries[activeIndex].entry_date)) && (
+            <MListRow
+              icon={Route}
+              label={t('journey.recording.takeOverDay', {
+                date: new Date(entries[activeIndex].entry_date + 'T00:00:00').toLocaleDateString(locale, { day: 'numeric', month: 'long' }),
+              })}
+              onClick={() => { setShowActionMenu(false); recordings.open(entries[activeIndex].entry_date) }}
+            />
+          )}
+          {/* The same day with its stays (JRN-02), counting the ones still waiting. */}
+          {canEditEntries && canTakeOverRecording && view === 'timeline' && entries[activeIndex] &&
+            dayImportRow(entries[activeIndex].entry_date, () => setShowActionMenu(false))}
           {canEditJourney && (
             <MListRow
               icon={Settings2}
@@ -599,6 +688,7 @@ export default function MJourneyDetail() {
           showWeather={current.show_weather !== 0}
           userId={useAuthStore.getState().user?.id || 0}
           trips={current.trips}
+          photoProviders={availableProviders}
           onMoveEarlier={
             canEditEntries && editingEntry.id !== 0 && editingEntry.type !== 'skeleton' && dayNeighbours(editingEntry).canMoveUp
               ? () => { void moveWithinDay(editingEntry, -1) }
@@ -629,9 +719,7 @@ export default function MJourneyDetail() {
             return entryId
           }}
           onUploadPhotos={uploadPhotos}
-          onAddProviderPhotos={async (entryId, group) => {
-            await journeyApi.addProviderPhotos(entryId, group.provider, group.assetIds, undefined, group.passphrase, group.mediaTypes)
-          }}
+          onAddProviderPhotos={addEntryProviderPhotos}
           onDelete={editingEntry.id > 0 && canEditEntries
             ? () => { const target = editingEntry; setEditingEntry(null); setDeleteTarget(target) }
             : undefined}
@@ -642,6 +730,9 @@ export default function MJourneyDetail() {
         />
       )}
 
+      {recordings.dialog && <MJourneyRecordingSheet {...recordings.dialog} />}
+      {dayImport.dialog && <MJourneyDayImportSheet {...dayImport.dialog} prep={recordingPrep.prep ? recordingPrep : undefined} />}
+
       {/* Journey settings */}
       {showSettings && (
         <MJourneySettingsSheet
@@ -651,6 +742,7 @@ export default function MJourneyDetail() {
           onOpenInvite={() => setShowInvite(true)}
           onRefresh={() => loadJourney(Number(id))}
           onRestoreSuggestions={canEditEntries ? restoreSuggestions : undefined}
+          recordingPrep={recordingPrep.prep ? recordingPrep : undefined}
         />
       )}
 
@@ -674,24 +766,7 @@ export default function MJourneyDetail() {
           existingAssetIds={new Set(gallery.filter(p => p.asset_id).map(p => p.asset_id!))}
           onClose={() => setPickerProvider(null)}
           onAdd={async (groups, entryId) => {
-            let added = 0
-            let anyFailed = false
-            for (const group of groups) {
-              try {
-                const result = entryId
-                  ? await journeyApi.addProviderPhotos(entryId, pickerProvider, group.assetIds, undefined, group.passphrase, group.mediaTypes)
-                  : await journeyApi.addProviderPhotosToGallery(current.id, pickerProvider, group.assetIds, group.passphrase, group.mediaTypes)
-                added += result.added || 0
-              } catch {
-                anyFailed = true
-              }
-            }
-            if (added > 0) {
-              toast.success(t('journey.photosAdded', { count: added }))
-              loadJourney(Number(id))
-            } else if (anyFailed) {
-              toast.error(t('common.error'))
-            }
+            await addPickedProviderPhotos(current.id, pickerProvider, groups, entryId)
             setPickerProvider(null)
           }}
         />
@@ -713,6 +788,23 @@ export default function MJourneyDetail() {
         danger
       />
 
+      {/* Delete gallery photo confirm: final, and it leaves every entry that used the photo */}
+      <ConfirmDialog
+        isOpen={!!photoDeleteTarget}
+        onClose={() => setPhotoDeleteTarget(null)}
+        onConfirm={() => {
+          if (!photoDeleteTarget) return
+          deleteGalleryPhoto(current.id, photoDeleteTarget.id).catch(() => {
+            toast.error(t('common.error'))
+            void loadJourney(Number(id))
+          })
+        }}
+        title={t('journey.gallery.deleteTitle')}
+        message={t('journey.gallery.deleteMessage')}
+        confirmLabel={t('common.delete')}
+        danger
+      />
+
       {/* Lightbox */}
       {lightbox && (
         <PhotoLightbox
@@ -729,6 +821,37 @@ export default function MJourneyDetail() {
           onClose={() => setLightbox(null)}
         />
       )}
+      {/* TREK Studio, the book designer, opens over the journey on a screen with room for
+          two panes, as on the desktop (its route is a child of this one). The phone keeps
+          the journey alone, whatever the address says. */}
+      {split && !embedded && <Outlet />}
     </div>
   )
 }
+
+/**
+ * With the header in the shell's row, what the screen measures from its top
+ * starts right under that row instead of under a row of its own.
+ */
+const IN_SHELL_ROW = { '--m-safe-top': 'calc(env(safe-area-inset-top, 0px) + 6px)' } as CSSProperties
+
+/** The header row: on the screen, or in the trip shell's top row when the journal is a trip tab. */
+function HeaderFrame({ slot, feed, children }: { slot: HTMLElement | null; feed: boolean; children: ReactNode }) {
+  if (slot) {
+    return createPortal(
+      <div className="flex min-w-0 flex-1 items-center gap-2 [&>span:first-child]:hidden [&>span:last-child]:ms-0 [&_[data-view-switch]]:static [&_[data-view-switch]]:translate-x-0">
+        {children}
+      </div>,
+      slot
+    )
+  }
+  return (
+    <div
+      className="m-bar-x absolute top-[var(--m-safe-top,12px)] z-10 flex items-center justify-between gap-2"
+      style={feed ? { insetInlineEnd: 'calc(100% - var(--m-rail-w, 0px) - var(--m-pane-aside-w) + 16px)' } : undefined}
+    >
+      {children}
+    </div>
+  )
+}
+

@@ -118,7 +118,9 @@ export const tripUpdateRequestSchema = z.object({
   reminder_days: z.number().optional(),
   day_count: z.number().optional(),
   is_archived: z.union([z.boolean(), z.number()]).optional(),
-  cover_image: z.string().nullable().optional(),
+  // Bounded like a place's image url: a replaced cover is queued for release,
+  // and every upload path the old value spells out is one queued object.
+  cover_image: z.string().max(2048).nullable().optional(),
 });
 export type TripUpdateRequest = z.infer<typeof tripUpdateRequestSchema>;
 
@@ -162,3 +164,18 @@ export const activeTripResponseSchema = z.object({
   trip: activeTripSchema.nullable(),
 });
 export type ActiveTripResponse = z.infer<typeof activeTripResponseSchema>;
+
+/**
+ * Trips whose places match a dashboard search (#2190), so "that diner in
+ * Philly" finds the trip it was on. A few matching place names per trip ride
+ * along for the card; title and date matching stays on the client.
+ */
+export const tripSearchResponseSchema = z.object({
+  matches: z.array(
+    z.object({
+      trip_id: z.number(),
+      places: z.array(z.string()),
+    }),
+  ),
+});
+export type TripSearchResponse = z.infer<typeof tripSearchResponseSchema>;

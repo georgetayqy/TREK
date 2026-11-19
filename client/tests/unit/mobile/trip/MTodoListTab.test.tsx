@@ -7,7 +7,8 @@ import type { TodoItem, TripMember } from '../../../../src/types'
 import { buildUser } from '../../../helpers/factories'
 import { buildPlanner, buildTripActions } from '../../../helpers/mobileTrip'
 import { resetAllStores, seedStore } from '../../../helpers/store'
-import { fireEvent, render, screen } from '../../../helpers/render'
+import { fireEvent, render, screen, within } from '../../../helpers/render'
+import { setSizeClass } from '../../../helpers/sizeClass'
 
 // FE-MOB-TODO-001 to FE-MOB-TODO-019
 
@@ -85,7 +86,7 @@ describe('MTodoListTab', () => {
 
     expect(screen.getByText('todo.empty')).toBeInTheDocument()
     expect(screen.getByText('0/0')).toBeInTheDocument()
-    expect(screen.getByText('0% · todo.completed')).toBeInTheDocument()
+    expect(screen.getByText('0% todo.completed')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /todo.filter.all/ })).not.toBeInTheDocument()
   })
 
@@ -93,7 +94,7 @@ describe('MTodoListTab', () => {
     setup([todo({ id: 1 }), todo({ id: 2, checked: 1 }), todo({ id: 3, checked: 1 }), todo({ id: 4 })])
 
     expect(screen.getByText('2/4')).toBeInTheDocument()
-    expect(screen.getByText('50% · todo.completed')).toBeInTheDocument()
+    expect(screen.getByText('50% todo.completed')).toBeInTheDocument()
   })
 
   it('FE-MOB-TODO-003: hides "new task" without packing_edit', () => {
@@ -336,5 +337,26 @@ describe('MTodoListTab', () => {
     setup([todo({ id: 3, name: 'Book flights', due_date: 'sometime' })])
 
     expect(screen.getByText('sometime')).toBeInTheDocument()
+  })
+
+  it('FE-MOB-TODO-021: with room for two panes the filters stand beside the tasks, which take their name as a head', () => {
+    setSizeClass('split')
+    setup([
+      todo({ id: 1, name: 'Visa', category: 'Before' }),
+      todo({ id: 2, name: 'Insurance', checked: 1 }),
+    ])
+    const filters = screen.getByRole('complementary', { name: 'todo.sidebar.tasks' })
+    expect(within(filters).getByText('todo.sidebar.categories')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'todo.filter.all' })).toBeInTheDocument()
+    expect(screen.getByText('Visa')).toBeInTheDocument()
+    expect(screen.queryByText('Insurance')).not.toBeInTheDocument()
+
+    fireEvent.click(within(filters).getByRole('button', { name: /todo.filter.done/ }))
+    expect(screen.getByRole('heading', { name: 'todo.filter.done' })).toBeInTheDocument()
+    expect(screen.getByText('Insurance')).toBeInTheDocument()
+
+    fireEvent.click(within(filters).getByRole('button', { name: /Before/ }))
+    expect(screen.getByRole('heading', { name: 'Before' })).toBeInTheDocument()
+    expect(screen.getByText('Visa')).toBeInTheDocument()
   })
 })

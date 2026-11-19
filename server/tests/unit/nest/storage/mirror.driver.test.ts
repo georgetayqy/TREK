@@ -1,8 +1,3 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { Readable } from 'node:stream';
 import { LocalDriver } from '../../../../src/nest/storage/drivers/local.driver';
 import {
   MirrorDriver,
@@ -15,6 +10,12 @@ import {
   type StorageDriver,
 } from '../../../../src/nest/storage/storage.types';
 import { describeStorageDriver, type DriverHarness } from './storage-driver.contract';
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'trek-mirror-'));
@@ -171,6 +172,20 @@ describe('MirrorDriver specifics', () => {
     const keys: string[] = [];
     for await (const stat of fx.mirror.list('')) keys.push(stat.key);
     expect(keys).toEqual(['backup-5.zip']);
+  });
+
+  it('hands a shallow list on to the primary, and to the replica it falls back to', async () => {
+    const fx = track(makeMirror());
+    await fx.mirror.put('top.zip', Readable.from('1'));
+    const primaryList = vi.spyOn(fx.primary, 'list');
+    for await (const stat of fx.mirror.list('', { shallow: true })) void stat;
+    expect(primaryList).toHaveBeenCalledWith('', { shallow: true });
+    primaryList.mockImplementationOnce(() => {
+      throw new StorageBackendError('io');
+    });
+    const replicaList = vi.spyOn(fx.replica, 'list');
+    for await (const stat of fx.mirror.list('', { shallow: true })) void stat;
+    expect(replicaList).toHaveBeenCalledWith('', { shallow: true });
   });
 
   it('fans delete out to all targets, tolerating a miss on either side', async () => {

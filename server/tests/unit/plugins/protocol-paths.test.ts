@@ -2,10 +2,28 @@
  * Small pure helpers of the plugin module (#plugins): permission recognition and
  * the code/data path resolution (both the env-override and default branches).
  */
-import { describe, it, expect, afterEach } from 'vitest';
-import { isKnownPermission, METHOD_PERMISSION, KNOWN_METHODS, HOOK_PERMISSION } from '../../../src/nest/plugins/protocol/envelope';
+import {
+  pluginsCodeRoot,
+  pluginsDataRoot,
+  pluginCodeDir,
+  pluginDataDir,
+  pluginDbFile,
+  resolveChildEntry,
+  serverCodeRoot,
+  pluginPermissionArgs,
+  pluginNetPermissionArgs,
+  pluginRealCodeDir,
+  ensurePluginModuleType,
+} from '../../../src/nest/plugins/paths';
+import {
+  isKnownPermission,
+  METHOD_PERMISSION,
+  KNOWN_METHODS,
+  HOOK_PERMISSION,
+} from '../../../src/nest/plugins/protocol/envelope';
+
 import path from 'node:path';
-import { pluginsCodeRoot, pluginsDataRoot, pluginCodeDir, pluginDataDir, pluginDbFile, resolveChildEntry, serverCodeRoot, pluginPermissionArgs, pluginRealCodeDir, ensurePluginModuleType } from '../../../src/nest/plugins/paths';
+import { describe, it, expect, afterEach } from 'vitest';
 
 afterEach(() => {
   delete process.env.TREK_PLUGINS_DIR;
@@ -73,6 +91,19 @@ describe('paths', () => {
     expect(serverCodeRoot()).not.toContain(`${require('node:path').sep}data`);
   });
 
+  // From Node 25 the permission model covers the network, and a child without the
+  // grant cannot reach any host (#3045). Node 24 refuses the flag as a bad option.
+  it('grants the network only on a Node that knows --allow-net', () => {
+    expect(pluginNetPermissionArgs(new Set(['--permission', '--allow-net']))).toEqual(['--allow-net']);
+    expect(pluginNetPermissionArgs(new Set(['--permission']))).toEqual([]);
+  });
+
+  it('passes the network grant to a plugin child exactly when this Node needs it', () => {
+    delete process.env.TREK_PLUGIN_PERMISSIONS;
+    const args = pluginPermissionArgs('flight-tracker');
+    expect(args.includes('--allow-net')).toBe(process.allowedNodeEnvironmentFlags.has('--allow-net'));
+  });
+
   it('lets an operator opt out of the permission model', () => {
     process.env.TREK_PLUGIN_PERMISSIONS = 'off';
     expect(pluginPermissionArgs('flight-tracker')).toEqual([]);
@@ -109,17 +140,7 @@ describe('paths', () => {
  * still matches the route and arrives here decoded.
  */
 describe('plugin id containment', () => {
-  const traversals = [
-    '../../uploads',
-    '../..',
-    '..',
-    '.',
-    'a/b',
-    'a\b',
-    'C:\Windows',
-    '.hidden',
-    '',
-  ];
+  const traversals = ['../../uploads', '../..', '..', '.', 'a/b', 'a\b', 'C:\Windows', '.hidden', ''];
 
   it('refuses any id that could point outside its parent', () => {
     for (const id of traversals) {

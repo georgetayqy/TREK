@@ -53,16 +53,20 @@ const system_notice: TranslationStrings = {
   'system_notice.pager.goto': '通知{n}へ',
   'system_notice.pager.position': '{total}件中{current}件目',
   'system_notice.release_notes.eyebrow': 'アップデート完了',
-  'system_notice.release_notes.headline': 'TREKが自分でできるようになった4つのこと。',
-  'system_notice.release_notes.intro': '独自の場所API、最初から最後まで計画できるロードトリップ、あなたの手に戻る位置情報の履歴、そして同期される書類。',
+  'system_notice.release_notes.headline': '正しい場所を、いちばんに。',
+  'system_notice.release_notes.intro':
+    '場所の検索、住所の検索、ルート計算が、dataforest cloud の協賛のもと TREK 自身のサーバーで動くようになりました。さらに、どの TREK も場所について知っていることを、ほかのすべての TREK と共有できます。',
   'system_notice.release_notes.features_label': '今回の目玉',
   'system_notice.release_notes.features_aside': 'ほんの一部です',
-  'system_notice.release_notes.feature_places_title': 'TREK Places API',
-  'system_notice.release_notes.feature_places_body': '独自の場所APIを持つ初のオープンソース旅行プランナー。7,360万件の場所、キー不要、制限なし。',
-  'system_notice.release_notes.feature_roadtrip_title': 'ロードトリップアドオン',
-  'system_notice.release_notes.feature_roadtrip_body': '走行を自動で計画：ルート、距離、時間、停車地。管理者が有効にするまではオフ。',
-  'system_notice.release_notes.feature_dawarich_title': 'Dawarich連携',
-  'system_notice.release_notes.feature_dawarich_body': 'Google Timelineのセルフホスト版とも言えるDawarichを、TREKの中で読めるようになりました。TREKは読み取るだけで、それ以上のことはしません。',
+  'system_notice.release_notes.feature_search_title': 'ちゃんと見つかる場所検索',
+  'system_notice.release_notes.feature_search_body':
+    '都市、島、名所、そしてコードで探す空港が最初に並び、カフェはあなたの周辺から見つかります。候補は入力しているそばから表示されます。',
+  'system_notice.release_notes.feature_share_title': '場所の詳細を、みんなで',
+  'system_notice.release_notes.feature_share_body':
+    'ウェブサイト、営業時間、写真を項目ごとにすべての TREK と共有できます。保存した場所には、ほかの人が追加した情報が自動で反映されます。',
+  'system_notice.release_notes.feature_routing_title': 'もっと速いルート計算',
+  'system_notice.release_notes.feature_routing_body':
+    '最大 20 か所の立ち寄り先がある一日も、まとめて一度にルート計算。遅いルートが一つあっても、ほかを待たせません。公共交通は、最初のプロバイダーで見つからなければ別のプロバイダーにも問い合わせます。',
   'system_notice.release_notes.footnote': 'ほかにも、TREKのあちこちに細かな変更がたくさん入っています。',
   'system_notice.release_notes.notes_label': 'リリースノート',
   'system_notice.release_notes.note_eyebrow': '開発者より',
@@ -76,13 +80,11 @@ const system_notice: TranslationStrings = {
   'system_notice.release_notes.note_body_after':
     'そして、あなたが開いてくれました。数か月のうちに、それが何千人にもなりました。スター、バグ報告、私の話せない言語への翻訳、会ったこともない人からのプルリクエスト。今でも毎朝いちばんにリポジトリを確認していますが、まだ少し夢のように感じています。',
   'system_notice.release_notes.note_closing': 'ここにいてくれて、ありがとう。Mauriceより',
-  'system_notice.release_notes.support_lead':
-    'TREKは無料で、これからもずっと無料です。でも、サーバーやドメイン、数えきれない夜なべはタダではありません。',
+  'system_notice.release_notes.support_label': '独立したままで',
+  'system_notice.release_notes.support_lead': 'Google などに頼らずに。',
   'system_notice.release_notes.support_text':
-    'TREKがあなたの旅に欠かせないものになっていたら、コーヒーを一杯おごってください。次のリリースを届ける力になります。',
-  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+    '場所の検索、住所の検索、ルート計算は TREK 自身のサーバーで動いていて、今は dataforest cloud に協賛してもらっています。私はそのために毎日奮闘しています。この形を守り続けるには、あなたの応援が必要です。',
+  'system_notice.release_notes.cta_bmc': 'コーヒーをおごる',
   'system_notice.release_notes.cta_kofi': 'Ko-fiで応援する',
-  'system_notice.release_notes.feature_docsync_title': '書類の同期',
-  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx、Papra、Nextcloud、OpenCloud、Synology Drive。旅程の書類が、すでに運用しているストレージと双方向で同期されます。',
 };
 export default system_notice;

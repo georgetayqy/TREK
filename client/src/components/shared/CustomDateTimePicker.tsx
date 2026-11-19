@@ -3,13 +3,16 @@ import { localIsoDate } from '../../utils/localDate';
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from '../../i18n';
+import { dateInputPattern } from '../../utils/dateInputPattern';
+import { type DateField, dateFieldOrder, dateLayout, formatDisplayDate } from '../../utils/dateFormat';
+import { useDateFormat } from '../../hooks/useDateFormat';
 import { useRemeasureSignal } from '../../hooks/useAnchoredPosition';
+import { useWeekStartDay } from '../../hooks/useWeekStartDay';
+import { leadingBlanks, weekdayLabels } from '../../utils/calendarWeek';
+import { selectionHaptic } from '../../native/haptics';
 
 function daysInMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
-}
-function getWeekday(year: number, month: number, day: number): number {
-  return new Date(year, month, day).getDay();
 }
 const YEAR_PAGE_SIZE = 12;
 type CalendarView = 'days' | 'months' | 'years';
@@ -27,6 +30,8 @@ interface CustomDatePickerProps {
   // disabled in the calendar and rejected on manual entry.
   min?: string;
   max?: string;
+  /** What the field is, for a picker without a visible label around it; the trigger reads it with its date. */
+  ariaLabel?: string;
 }
 
 export function CustomDatePicker({
@@ -39,8 +44,11 @@ export function CustomDatePicker({
   disabled = false,
   min,
   max,
+  ariaLabel,
 }: CustomDatePickerProps) {
   const { locale, t } = useTranslation();
+  const weekStart = useWeekStartDay();
+  const dateFormat = useDateFormat();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<CalendarView>('days');
   const [yearPageStart, setYearPageStart] = useState(0);
@@ -140,32 +148,25 @@ export function CustomDatePicker({
   };
 
   const days = daysInMonth(viewYear, viewMonth);
-  const startDay = (getWeekday(viewYear, viewMonth, 1) + 6) % 7;
-  const weekdays = Array.from({ length: 7 }, (_, i) =>
-    new Date(2024, 0, i + 1).toLocaleDateString(locale, { weekday: 'narrow' })
-  );
+  const startDay = leadingBlanks(viewYear, viewMonth, weekStart);
+  const weekdays = weekdayLabels(locale, weekStart);
 
   const monthNames = Array.from({ length: 12 }, (_, i) =>
     new Date(viewYear, i).toLocaleDateString(locale, { month: 'short' })
   );
   const years = Array.from({ length: YEAR_PAGE_SIZE }, (_, i) => yearPageStart + i);
 
-  const displayValue = parsed
-    ? parsed.toLocaleDateString(
-        locale,
-        compact
-          ? { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'UTC' }
-          : { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }
-      )
-    : null;
+  // A chosen date format (#2971) writes the field in numbers, the whole year
+  // included; 'auto' keeps the language's short month as before.
+  const fieldOptions: Intl.DateTimeFormatOptions = dateLayout(dateFormat)
+    ? { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }
+    : compact
+      ? { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'UTC' }
+      : { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' };
+  const displayValue = parsed ? formatDisplayDate(parsed, locale, fieldOptions, dateFormat) : null;
 
   const inputValue = parsed
-    ? parsed.toLocaleDateString(locale, {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        timeZone: 'UTC',
-      })
+    ? formatDisplayDate(parsed, locale, { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' }, dateFormat)
     : '';
 
   // Inclusive range check on ISO (YYYY-MM-DD) strings — lexicographic order
@@ -178,6 +179,7 @@ export function CustomDatePicker({
     const d = String(day).padStart(2, '0');
     const iso = `${y}-${m}-${d}`;
     if (isOutOfRange(iso)) return;
+    if (iso !== value) selectionHaptic();
     onChange(iso);
     setOpen(false);
   };
@@ -213,13 +215,11 @@ export function CustomDatePicker({
       return;
     }
 
-    // Determine field order for active locale via Intl
-    const parts = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'numeric', year: 'numeric' }).formatToParts(
-      new Date(2001, 5, 15)
-    ); // known date: June 15, 2001
-    const order = parts
-      .filter((p) => ['day', 'month', 'year'].includes(p.type))
-      .map((p) => p.type as 'day' | 'month' | 'year');
+    // The order of the chosen date format (#2971), or the active locale's. A
+    // four-digit first number is a year in every format, so 2026/11/04 or
+    // 2026.11.04 reads as year, month, day whichever format is set.
+    const yearFirst = /^\D*\d{4}\D/.test(input);
+    const order: readonly DateField[] = yearFirst ? ['year', 'month', 'day'] : dateFieldOrder(locale, dateFormat);
 
     // Strip non-numeric chars (handles RTL marks, dots, slashes, spaces)
     const nums = input
@@ -278,8 +278,8 @@ export function CustomDatePicker({
             if (e.key === 'Escape') setIsTyping(false);
           }}
           onBlur={handleTextSubmit}
-          placeholder="DD.MM.YYYY"
-          aria-label="Enter date manually"
+          placeholder={dateInputPattern(locale, dateFormat)}
+          aria-label={t('common.datepicker.enterManually')}
           style={{
             width: '100%',
             padding: '8px 14px',
@@ -300,10 +300,15 @@ export function CustomDatePicker({
         <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
           {/* Calendar trigger */}
           <button
+            data-field-trigger={compact || borderless ? undefined : ''}
             type="button"
             onClick={() => setOpen((o) => !o)}
             disabled={disabled}
-            aria-label={displayValue || placeholder || t('common.date')}
+            aria-label={
+              ariaLabel
+                ? [ariaLabel, displayValue].filter(Boolean).join(': ')
+                : displayValue || placeholder || t('common.date')
+            }
             aria-expanded={open}
             aria-haspopup="dialog"
             style={{
@@ -343,6 +348,7 @@ export function CustomDatePicker({
           {/* Keyboard / text-input trigger (non-compact only; compact gets it in the popup footer) */}
           {!compact && !borderless && (
             <button
+              data-field-trigger=""
               type="button"
               onClick={() => {
                 setTextInput(inputValue || '');
@@ -701,9 +707,12 @@ interface CustomDateTimePickerProps {
   onChange: (value: string) => void;
   placeholder?: string;
   style?: React.CSSProperties;
+  /** Earliest and latest day (YYYY-MM-DD), as CustomDatePicker takes them. */
+  min?: string;
+  max?: string;
 }
 
-export function CustomDateTimePicker({ value, onChange, placeholder, style = {} }: CustomDateTimePickerProps) {
+export function CustomDateTimePicker({ value, onChange, placeholder, style = {}, min, max }: CustomDateTimePickerProps) {
   const { locale } = useTranslation();
   const [datePart, timePart] = (value || '').split('T');
 
@@ -717,7 +726,13 @@ export function CustomDateTimePicker({ value, onChange, placeholder, style = {} 
 
   return (
     <div style={{ display: 'flex', gap: 8, ...style }}>
-      <CustomDatePicker value={datePart || ''} onChange={handleDateChange} style={{ flex: 1, minWidth: 0 }} />
+      <CustomDatePicker
+        value={datePart || ''}
+        onChange={handleDateChange}
+        style={{ flex: 1, minWidth: 0 }}
+        min={min}
+        max={max}
+      />
       <div style={{ width: 110, flexShrink: 0 }}>
         <CustomTimePicker value={timePart || ''} onChange={handleTimeChange} />
       </div>

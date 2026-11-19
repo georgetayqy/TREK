@@ -11,7 +11,7 @@ import { resetAllStores, seedStore } from '../../../helpers/store'
 import { act, fireEvent, render, screen, waitFor } from '../../../helpers/render'
 import { isBlurred } from '../../../helpers/bookingCodeBlur'
 
-// FE-MOB-DAYSH-001 to FE-MOB-DAYSH-030
+// FE-MOB-DAYSH-001 to FE-MOB-DAYSH-031
 
 const DAYS = [
   { id: 1, trip_id: 5, day_number: 1, date: '2026-05-01', title: null },
@@ -212,6 +212,20 @@ describe('MDaySheet', () => {
     expect(planner.handleUpdateDayTitle).toHaveBeenCalledWith(2, 'Ringstrasse')
   })
 
+  it('FE-MOB-DAYSH-031: with the date first the pencil and the input sit on the name line under the date (#2921)', async () => {
+    seedStore(useSettingsStore, { settings: { ...useSettingsStore.getState().settings, day_date_first: true } })
+    const { planner } = await renderSheet()
+    const pencil = screen.getByRole('button', { name: 'Rename day' })
+    expect(pencil.parentElement?.textContent).toBe('Old Town')
+    fireEvent.click(pencil)
+    const input = screen.getByPlaceholderText('Day 2')
+    expect(input).toHaveValue('Old Town')
+    expect(screen.getByText(/May 2/)).toBeInTheDocument()
+    fireEvent.change(input, { target: { value: 'Ringstrasse' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(planner.handleUpdateDayTitle).toHaveBeenCalledWith(2, 'Ringstrasse')
+  })
+
   it('FE-MOB-DAYSH-011: Escape leaves the rename without saving', async () => {
     const { planner } = await renderSheet()
     fireEvent.click(screen.getByRole('button', { name: 'Rename day' }))
@@ -301,14 +315,14 @@ describe('MDaySheet', () => {
     expect(screen.queryByText('Opera (other day)')).not.toBeInTheDocument()
     expect(screen.queryByText('Hotel Sacher booking')).not.toBeInTheDocument()
 
+    // Each booking opens its detail sheet first, with the pencil there, as on the desktop.
     fireEvent.click(screen.getByText('Train to Salzburg'))
-    expect(planner.setEditingTransport).toHaveBeenCalledWith(expect.objectContaining({ id: 22 }))
-    expect(planner.setShowTransportModal).toHaveBeenCalledWith(true)
+    expect(shell.openSheet).toHaveBeenCalledWith('transport', { reservationId: 22 })
 
     fireEvent.click(screen.getByText('Dinner at Figlmueller'))
-    expect(planner.setEditingReservation).toHaveBeenCalledWith(expect.objectContaining({ id: 21 }))
-    expect(planner.setShowReservationModal).toHaveBeenCalledWith(true)
-    expect(shell.closeSheet).toHaveBeenCalledTimes(2)
+    expect(shell.openSheet).toHaveBeenCalledWith('transport', { reservationId: 21 })
+    expect(planner.setShowTransportModal).not.toHaveBeenCalled()
+    expect(planner.setShowReservationModal).not.toHaveBeenCalled()
   })
 
   it('FE-MOB-DAYSH-021: a booking row does nothing without the matching permission', async () => {
@@ -318,7 +332,7 @@ describe('MDaySheet', () => {
     fireEvent.click(screen.getByText('Train to Salzburg'))
     expect(planner.setShowReservationModal).not.toHaveBeenCalled()
     expect(planner.setShowTransportModal).not.toHaveBeenCalled()
-    expect(shell.closeSheet).not.toHaveBeenCalled()
+    expect(shell.openSheet).not.toHaveBeenCalled()
   })
 
   it('FE-MOB-DAYSH-022: renders notes sorted, splits a leading time off the detail line, and routes taps', async () => {
@@ -341,11 +355,13 @@ describe('MDaySheet', () => {
     expect(screen.getByText('Hotel Sacher')).toBeInTheDocument()
     expect(screen.getByText('Philharmonikerstrasse 4')).toBeInTheDocument()
     expect(screen.getByText('15:00 – 18:00')).toBeInTheDocument()
-    expect(screen.getByText('11:00')).toBeInTheDocument()
+    // The arrival day names the desk time that matters that day, not the departure (#2393).
+    expect(screen.queryByText('11:00')).not.toBeInTheDocument()
     expect(screen.getByText('ABC123')).toBeInTheDocument()
     expect(screen.getByText('Confirmed · #X9')).toBeInTheDocument()
-    // start_day_id is this day, end_day_id a later one → check-in badge plus the stat label.
-    expect(screen.getAllByText('Check-in')).toHaveLength(2)
+    // start_day_id is this day, end_day_id a later one → the check-in time carries the
+    // state in its own label, so the head drops the badge (#2393).
+    expect(screen.getAllByText('Check-in')).toHaveLength(1)
 
     // Tapping the stay edits the stay; the place is one tap further right (#2001).
     fireEvent.click(screen.getByText('Hotel Sacher'))
@@ -359,8 +375,16 @@ describe('MDaySheet', () => {
     expect(shell.openSheet).toHaveBeenCalledWith('accommodation', { dayId: 2 })
   })
 
-  it('FE-MOB-DAYSH-024: labels a stay that both starts and ends on this day', async () => {
+  it('FE-MOB-DAYSH-024: a stay that both starts and ends on this day shows both desk times', async () => {
     const acc = [{ ...ACCOMMODATIONS[0], end_day_id: 2 }] as unknown as Accommodation[]
+    await renderSheet(makePlanner({ tripAccommodations: acc }))
+    expect(screen.getByText('15:00 – 18:00')).toBeInTheDocument()
+    expect(screen.getByText('11:00')).toBeInTheDocument()
+    expect(screen.queryByText('Check-in & Check-out')).not.toBeInTheDocument()
+  })
+
+  it('FE-MOB-DAYSH-024b: a stay without desk times keeps its badge in the head', async () => {
+    const acc = [{ ...ACCOMMODATIONS[0], end_day_id: 2, check_in: null, check_in_end: null, check_out: null }] as unknown as Accommodation[]
     await renderSheet(makePlanner({ tripAccommodations: acc }))
     expect(screen.getByText('Check-in & Check-out')).toBeInTheDocument()
   })
@@ -368,8 +392,10 @@ describe('MDaySheet', () => {
   it('FE-MOB-DAYSH-025: labels the check-out day and a plain mid-stay day', async () => {
     const checkOutDay = [{ ...ACCOMMODATIONS[0], start_day_id: 1, end_day_id: 2 }] as unknown as Accommodation[]
     const { unmount } = await renderSheet(makePlanner({ tripAccommodations: checkOutDay }))
-    // Badge plus the check-out stat label.
-    expect(screen.getAllByText('Check-out')).toHaveLength(2)
+    // Only the check-out stat, which carries the state itself.
+    expect(screen.getAllByText('Check-out')).toHaveLength(1)
+    expect(screen.getByText('11:00')).toBeInTheDocument()
+    expect(screen.queryByText('15:00 – 18:00')).not.toBeInTheDocument()
     expect(screen.queryByText('Stay')).not.toBeInTheDocument()
     unmount()
 

@@ -7,6 +7,7 @@
 
 import type { Trip } from '../../types'
 import { localIsoDate } from '../../utils/localDate'
+import { sortTripsByRelevance } from '../../utils/heroTrip'
 
 // The dashboard works with the canonical Trip shape returned by the list/get
 // endpoints (it already carries the computed day_count/place_count/is_owner/
@@ -38,6 +39,9 @@ export function upcomingKey(r: UpcomingReservation): string {
   return `${r.type}:${r.id}`
 }
 
+/** The label a stay's moment carries in place of a location. */
+export const MOMENT_LABEL: Record<string, string> = { checkin: 'day.checkIn', checkout: 'day.checkOut' }
+
 export const MS_PER_DAY = 86400000
 
 /**
@@ -56,6 +60,18 @@ export function daysUntil(dateStr: string | null | undefined): number | null {
   return Math.round((d.getTime() - today.getTime()) / MS_PER_DAY)
 }
 
+// Localized date for the cards. The year is included only when it isn't the
+// current year, and order/punctuation follow the locale (EN "Sep 10, 2026",
+// DE "10. Sep 2026", vs a plain "Sep 10" this year), never a hard-coded layout.
+export function fullDate(dateStr: string | null | undefined, locale: string): string | null {
+  if (!dateStr) return null
+  const date = new Date(dateStr + 'T00:00:00Z')
+  if (Number.isNaN(date.getTime())) return null
+  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', timeZone: 'UTC' }
+  if (date.getUTCFullYear() !== new Date().getUTCFullYear()) opts.year = 'numeric'
+  return date.toLocaleDateString(locale, opts)
+}
+
 export function getTripStatus(trip: DashboardTrip): 'ongoing' | 'today' | 'tomorrow' | 'future' | 'past' | null {
   const today = localIsoToday()
   if (trip.start_date && trip.end_date && trip.start_date <= today && trip.end_date >= today) return 'ongoing'
@@ -68,17 +84,5 @@ export function getTripStatus(trip: DashboardTrip): 'ongoing' | 'today' | 'tomor
 }
 
 export function sortTrips(trips: DashboardTrip[]): DashboardTrip[] {
-  const today = localIsoToday()
-  const rank = (t: DashboardTrip) => {
-    if (t.start_date && t.end_date && t.start_date <= today && t.end_date >= today) return 0
-    if (t.start_date && t.start_date >= today) return 1
-    return 2
-  }
-  return [...trips].sort((a, b) => {
-    const ra = rank(a), rb = rank(b)
-    if (ra !== rb) return ra - rb
-    const ad = a.start_date || '', bd = b.start_date || ''
-    if (ra <= 1) return ad.localeCompare(bd)
-    return bd.localeCompare(ad)
-  })
+  return sortTripsByRelevance(trips, localIsoToday())
 }

@@ -1,24 +1,13 @@
-import { useState, useEffect, type ReactNode } from 'react'
-import { Tag, Calendar, ExternalLink, ChevronDown, ChevronUp, Loader2, Heart, Coffee, Bug, Lightbulb, BookOpen } from 'lucide-react'
-import { getLocaleForLanguage, useTranslation } from '../../../i18n'
-import apiClient from '../../../api/client'
+import { type ReactNode } from 'react'
+import { Tag, Calendar, ExternalLink, ChevronDown, ChevronUp, Heart, Coffee, Bug, Lightbulb, BookOpen } from 'lucide-react'
+import { useTranslation } from '../../../i18n'
+import { useGithubReleases } from '../../../components/Admin/useGithubReleases'
+import { escapeReleaseHtml as escapeHtml, parseReleaseNotes } from '../../../utils/releaseNotes'
 import { MAdminButton, MAdminCard } from './MAdminUi'
+import { withoutDonationsInApp } from '../../../utils/donations'
+import MSkeleton from '../../components/MSkeleton'
 
-const REPO = 'mauriceboe/TREK'
-const PER_PAGE = 10
-const MAX_PAGES_PER_LOAD = 5
-
-interface GithubRelease {
-  id: number
-  prerelease: boolean
-  tag_name: string
-  name: string | null
-  body: string | null
-  published_at: string | null
-  created_at: string
-  author: { login: string } | null
-  [key: string]: unknown
-}
+const REPO = 'liketrek/TREK'
 
 // Support / community link cards (design: brand-tinted icon tile + title/sub).
 // Brand hex stays as content identity; every surface/border uses --m-* tokens.
@@ -31,94 +20,15 @@ interface LinkCard {
 }
 
 export default function MAdminGitHubPanel({ isPrerelease = false }: { isPrerelease?: boolean }) {
-  const { t, language } = useTranslation()
-  const [releases, setReleases] = useState<GithubRelease[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<Record<number, boolean>>({})
-  const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-
-  const isShown = (release: GithubRelease) => isPrerelease || !release.prerelease
-
-  const fetchPage = async (pageNum: number) => {
-    try {
-      const res = await apiClient.get(`/admin/github-releases`, { params: { per_page: PER_PAGE, page: pageNum } })
-      return Array.isArray(res.data) ? res.data as GithubRelease[] : []
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-      return null
-    }
-  }
-
-  // Keep pulling pages until at least one release survives the prerelease filter,
-  // otherwise a page of nothing but prereleases leaves an empty timeline behind a
-  // "Load more" button. MAX_PAGES_PER_LOAD bounds the walk.
-  const loadFrom = async (startPage: number, append: boolean) => {
-    const collected: GithubRelease[] = []
-    let pageNum = startPage
-    let more = true
-
-    for (let i = 0; i < MAX_PAGES_PER_LOAD; i++) {
-      const data = await fetchPage(pageNum)
-      if (!data) return
-      collected.push(...data)
-      more = data.length === PER_PAGE
-      if (!more || collected.some(isShown)) break
-      pageNum += 1
-    }
-
-    setReleases(prev => append ? [...prev, ...collected] : collected)
-    setHasMore(more)
-    setPage(pageNum)
-    setError(null)
-  }
-
-  useEffect(() => {
-    setLoading(true)
-    loadFrom(1, false).finally(() => setLoading(false))
-  }, [])
-
-  const handleLoadMore = async () => {
-    setLoadingMore(true)
-    await loadFrom(page + 1, true)
-    setLoadingMore(false)
-  }
-
-  const toggleExpand = (id: number) => {
-    setExpanded(prev => ({ ...prev, [id]: !prev[id] }))
-  }
-
-  const formatDate = (dateStr: string) => {
-    const d = new Date(dateStr)
-    return d.toLocaleDateString(getLocaleForLanguage(language), { day: 'numeric', month: 'short', year: 'numeric' })
-  }
+  const { t } = useTranslation()
+  const {
+    releases, shownReleases, loading, error, expanded, toggleExpand, hasMore, loadingMore, handleLoadMore, formatDate,
+  } = useGithubReleases({ isPrerelease, fillPages: true })
 
   // Simple markdown-to-html for release notes (handles headers, bold, lists, links)
   const renderBody = (body: string | null) => {
     if (!body) return null
-    const lines = body.split('\n')
-    const elements: ReactNode[] = []
-    let listItems: string[] = []
 
-    const flushList = () => {
-      if (listItems.length > 0) {
-        elements.push(
-          <ul key={`ul-${elements.length}`} className="space-y-1 my-2">
-            {listItems.map((item, i) => (
-              <li key={i} className="flex gap-2 text-xs text-m-muted">
-                <span className="mt-1.5 w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--m-faint)' }} />
-                <span dangerouslySetInnerHTML={{ __html: inlineFormat(item) }} />
-              </li>
-            ))}
-          </ul>
-        )
-        listItems = []
-      }
-    }
-
-    const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
     // `[label](url)` → anchor, exactly as /\[([^\]]+)\]\(([^)]+)\)/g did. Written as a
     // scan because that pattern backtracks from both ends: `[^\]]` matches `[` and
     // `[^)]` matches `(`, so a run of either made the engine retry the whole match from
@@ -162,53 +72,60 @@ export default function MAdminGitHubPanel({ isPrerelease = false }: { isPrerelea
       )
     }
 
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed) { flushList(); continue }
-
-      if (trimmed.startsWith('### ')) {
-        flushList()
-        elements.push(
-          <h4 key={elements.length} className="text-xs font-semibold mt-3 mb-1 text-m-ink">
-            {trimmed.slice(4)}
-          </h4>
-        )
-      } else if (trimmed.startsWith('## ')) {
-        flushList()
-        elements.push(
-          <h3 key={elements.length} className="text-sm font-semibold mt-3 mb-1 text-m-ink">
-            {trimmed.slice(3)}
-          </h3>
-        )
-      } else if (/^[-*] /.test(trimmed)) {
-        listItems.push(trimmed.slice(2))
-      } else {
-        flushList()
-        elements.push(
-          <p key={elements.length} className="text-xs my-1 text-m-muted"
-            dangerouslySetInnerHTML={{ __html: inlineFormat(trimmed) }}
-          />
+    return parseReleaseNotes(body).map((block, idx) => {
+      if (block.kind === 'ul') {
+        return (
+          <ul key={`ul-${idx}`} className="space-y-1 my-2">
+            {block.items.map((item, i) => (
+              <li key={i} className="flex gap-2 text-xs text-m-muted">
+                <span className="mt-1.5 w-1 h-1 rounded-full flex-shrink-0" style={{ background: 'var(--m-faint)' }} />
+                <span dangerouslySetInnerHTML={{ __html: inlineFormat(item) }} />
+              </li>
+            ))}
+          </ul>
         )
       }
-    }
-    flushList()
-    return elements
+      if (block.kind === 'h5') {
+        return (
+          <h5 key={idx} className="text-caption font-semibold mt-3 mb-1 text-m-ink">
+            {block.text}
+          </h5>
+        );
+      }
+      if (block.kind === 'h4') {
+        return (
+          <h4 key={idx} className="text-xs font-semibold mt-3 mb-1 text-m-ink">
+            {block.text}
+          </h4>
+        )
+      }
+      if (block.kind === 'h3') {
+        return (
+          <h3 key={idx} className="text-sm font-semibold mt-3 mb-1 text-m-ink">
+            {block.text}
+          </h3>
+        )
+      }
+      return (
+        <p key={idx} className="text-xs my-1 text-m-muted"
+          dangerouslySetInnerHTML={{ __html: inlineFormat(block.text) }}
+        />
+      )
+    })
   }
 
   const discordIcon = (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="#5865F2"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
   )
 
-  const cards: LinkCard[] = [
+  const cards: LinkCard[] = withoutDonationsInApp([
     { href: 'https://ko-fi.com/mauriceboe', color: '#ff5e5b', icon: <Coffee size={18} className="text-[#ff5e5b]" />, title: 'Ko-fi', sub: t('admin.github.support') },
     { href: 'https://buymeacoffee.com/mauriceboe', color: '#ffdd00', icon: <Heart size={18} className="text-[#ffdd00]" />, title: 'Buy Me a Coffee', sub: t('admin.github.support') },
     { href: 'https://discord.gg/NhZBDSd4qW', color: '#5865F2', icon: discordIcon, title: 'Discord', sub: 'Join the community' },
-    { href: 'https://github.com/mauriceboe/TREK/issues/new?template=bug_report.yml', color: '#ef4444', icon: <Bug size={18} className="text-[#ef4444]" />, title: t('settings.about.reportBug'), sub: t('settings.about.reportBugHint') },
-    { href: 'https://github.com/mauriceboe/TREK/discussions/new?category=feature-requests', color: '#f59e0b', icon: <Lightbulb size={18} className="text-[#f59e0b]" />, title: t('settings.about.featureRequest'), sub: t('settings.about.featureRequestHint') },
-    { href: 'https://github.com/mauriceboe/TREK/wiki', color: '#6366f1', icon: <BookOpen size={18} className="text-[#6366f1]" />, title: 'Wiki', sub: t('settings.about.wikiHint') },
-  ]
-
-  const shownReleases = releases.filter(isShown)
+    { href: 'https://github.com/liketrek/TREK/issues/new?template=bug_report.yml', color: '#ef4444', icon: <Bug size={18} className="text-[#ef4444]" />, title: t('settings.about.reportBug'), sub: t('settings.about.reportBugHint') },
+    { href: 'https://github.com/liketrek/TREK/discussions/new?category=feature-requests', color: '#f59e0b', icon: <Lightbulb size={18} className="text-[#f59e0b]" />, title: t('settings.about.featureRequest'), sub: t('settings.about.featureRequestHint') },
+    { href: 'https://github.com/liketrek/TREK/wiki', color: '#6366f1', icon: <BookOpen size={18} className="text-[#6366f1]" />, title: 'Wiki', sub: t('settings.about.wikiHint') },
+  ])
 
   return (
     <div className="space-y-3">
@@ -232,7 +149,7 @@ export default function MAdminGitHubPanel({ isPrerelease = false }: { isPrerelea
               <div className="truncate text-[0.8125rem] font-bold text-m-ink">{card.title}</div>
               <div className="mt-[1px] truncate font-geist text-[0.625rem] text-m-faint">{card.sub}</div>
             </div>
-            <ExternalLink size={14} className="ml-auto flex-none text-m-faint" />
+            <ExternalLink size={14} className="ms-auto flex-none text-m-faint" />
           </a>
         ))}
       </div>
@@ -240,9 +157,7 @@ export default function MAdminGitHubPanel({ isPrerelease = false }: { isPrerelea
       {/* Loading / Error / Releases */}
       {loading ? (
         <MAdminCard>
-          <div className="flex items-center justify-center py-6">
-            <Loader2 className="h-6 w-6 animate-spin text-m-muted" />
-          </div>
+          <MSkeleton variant="rows" count={4} framed={false} />
         </MAdminCard>
       ) : error && releases.length === 0 ? (
         <MAdminCard>
@@ -275,7 +190,7 @@ export default function MAdminGitHubPanel({ isPrerelease = false }: { isPrerelea
           <div className="px-[14px] py-3">
             <div className="relative">
               {/* Timeline line */}
-              <div className="absolute left-[11px] top-3 bottom-3 w-px" style={{ background: 'var(--m-rowbr)' }} />
+              <div className="absolute start-[11px] top-3 bottom-3 w-px" style={{ background: 'var(--m-rowbr)' }} />
 
               <div className="space-y-0">
                 {shownReleases.map((release, idx) => {
@@ -283,10 +198,10 @@ export default function MAdminGitHubPanel({ isPrerelease = false }: { isPrerelea
                   const isExpanded = expanded[release.id]
 
                   return (
-                    <div key={release.id} className="relative pb-5 pl-8">
+                    <div key={release.id} className="relative pb-5 ps-8">
                       {/* Timeline dot */}
                       <div
-                        className="absolute left-0 top-1 flex h-[23px] w-[23px] items-center justify-center rounded-full border-2"
+                        className="absolute start-0 top-1 flex h-[23px] w-[23px] items-center justify-center rounded-full border-2"
                         style={{
                           background: isLatest ? 'var(--m-ink)' : 'var(--m-sheetop)',
                           borderColor: isLatest ? 'var(--m-ink)' : 'var(--m-rowbr)',

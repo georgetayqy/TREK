@@ -9,6 +9,11 @@ import { usePoiExplore } from '../../../../components/Map/usePoiExplore'
 import { useMergedMapPois } from '../../../../components/Map/useMergedMapPois'
 import { firstStopOfPlace, stageOf } from '../../../../components/Roadtrip/roadtripRowModel'
 import { stageMapData } from '../../../../components/Roadtrip/stageMap'
+import { usePlanMapViewport } from '../../../../hooks/usePlanMapViewport'
+import { useIsDark } from '../../../../hooks/useIsDark'
+import { useTileUrl } from '../../../../hooks/useTileUrl'
+import { useIsWide } from '../../../../hooks/sizeClass'
+import { OFM_DARK } from '../../../../constants/mapDefaults'
 import { useRoadtripSettings } from '../../../../hooks/useRoadtripSettings'
 import { useSettingsStore } from '../../../../store/settingsStore'
 import { useTripStore } from '../../../../store/tripStore'
@@ -21,11 +26,13 @@ import type { ViewportPadding } from '../../../../utils/mapViewport'
 const NO_POIS: Poi[] = []
 
 /**
- * The compass stands one gap to the right of the base-layer switcher both engines draw
- * in the bottom left corner. Worked out from the switcher's own numbers rather than
- * written down as 70, so moving or resizing the switcher carries the compass along.
+ * The compass stands one gap above the base-layer switcher both engines draw in the
+ * bottom left corner, on the same left edge, so the two round controls form a column
+ * instead of a row. Worked out from the switcher's own numbers, so moving or resizing
+ * the switcher carries the compass along.
  */
-const COMPASS_LEFT = MAP_LAYER_SWITCHER_INSET + MAP_ROUND_CONTROL_SIZE + 8
+const COMPASS_LEFT = MAP_LAYER_SWITCHER_INSET
+const COMPASS_RAISE = MAP_ROUND_CONTROL_SIZE + 8
 
 /** The safe-area insets at the top and the bottom of the screen, in pixels. */
 interface SafeInsets {
@@ -162,8 +169,23 @@ function holdFocus(
  */
 export default function MMapArea({ planner, shell }: MMapAreaProps) {
   const poi = usePoiExplore()
+  // The place sheet's search looks where this map looks (#2620).
+  const reportViewport = usePlanMapViewport(planner.tripId)
+  const poiViewportChange = poi.onViewportChange
+  const onViewportChange = useCallback((bounds: Parameters<typeof poiViewportChange>[0]) => {
+    poiViewportChange(bounds)
+    reportViewport(bounds)
+  }, [poiViewportChange, reportViewport])
   const [glMap, setGlMap] = useState<CompassMap | null>(null)
   const poiPillEnabled = useSettingsStore(s => s.settings.map_poi_pill_enabled) !== false
+  // On a wide window the map stands beside the pane and under the rail, a third
+  // or more of the screen, so in the dark theme it takes the dark basemap the
+  // journey and the atlas use rather than a bright patch beside a black pane.
+  // A basemap of the user's own choosing stays (useTileUrl prefers it).
+  const darkTileUrl = useTileUrl(OFM_DARK)
+  const wide = useIsWide()
+  const dark = useIsDark()
+  const tileUrl = wide && dark ? darkTileUrl : planner.mapTileUrl
   const distanceUnit = useSettingsStore(s => s.settings.distance_unit)
 
   const dayColorsOn = useRoadtripSettings(s => s.roadtrip_day_colors, planner.tripId)
@@ -261,7 +283,9 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
    * store write and on every sheet it opens, this handler's own included.
    */
   const latest = useRef({ planner, shell, stage })
-  latest.current = { planner, shell, stage }
+  useLayoutEffect(() => {
+    latest.current = { planner, shell, stage }
+  })
   const openStagePin = useCallback((placeId?: number) => {
     const { planner: now, shell: chrome, stage: card } = latest.current
     const stop = placeId == null ? null : firstStopOfPlace(card ? [card] : now.roadtripRoutes.days, placeId)
@@ -321,12 +345,14 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
     // the overview stack) follows on its own. The band used to float a further 38px up to
     // leave the corner under it to the map credit; the phone map carries no visible credit
     // any more (see mobile.css), so that row would now only be a gap over the dock.
+    // A wide window has no dock (the rail stands on the side), so there the floor is
+    // the safe area alone and the controls sit down in the corners.
     //
     // The metrics are classes rather than an inline --bottom-nav-h, and the lift is its
     // OWN variable folded into them: the compass band below is identified by being the
     // one element that sets that name inline, and a second one would make that ambiguous.
     <div
-      className="absolute inset-0 isolate overflow-hidden bg-[color:var(--m-mapb)] [--m-map-floor:calc(env(safe-area-inset-bottom,0px)+74px+var(--m-stage-lift,0px))] [--bottom-nav-h:var(--m-map-floor)]"
+      className="absolute inset-0 isolate overflow-hidden bg-[color:var(--m-mapb)] [--m-map-floor:calc(env(safe-area-inset-bottom,0px)+74px+var(--m-stage-lift,0px))] wide:[--m-map-floor:calc(env(safe-area-inset-bottom,0px)+8px+var(--m-stage-lift,0px))] [--bottom-nav-h:var(--m-map-floor)]"
       // A stage bar used to stand over the dock for the whole of the road trip tab, and the
       // floor cleared its 61px plus a gap the year round. It is gone, so the only thing
       // left in that slot is the bar the picker raises while other ways of driving a leg
@@ -344,7 +370,7 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
       <span
         ref={insetProbe}
         aria-hidden="true"
-        className="pointer-events-none invisible absolute left-0 top-0 pb-[env(safe-area-inset-bottom,0px)] pt-[env(safe-area-inset-top,0px)]"
+        className="pointer-events-none invisible absolute start-0 top-0 pb-[env(safe-area-inset-bottom,0px)] pt-[env(safe-area-inset-top,0px)]"
       />
       <MapViewAuto
         tripId={planner.tripId}
@@ -353,6 +379,7 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
         dayPlaces={onStage ? undefined : planner.dayPlaces}
         route={stageMap ? stageMap.lines : planner.overviewActive ? planner.tripOverview.lines : planner.route}
         routeColors={stageMap ? stageMap.lineColors : planner.overviewActive ? planner.tripOverview.lineColors : undefined}
+        routeWalking={stageMap || planner.overviewActive ? undefined : planner.routeWalking}
         accessLines={stageMap ? stageMap.accessLines : undefined}
         // A hit somebody tapped in the search sheet, a stop shown from its sheet, or the
         // stations the fuel search is offering take the camera while their day is on
@@ -376,7 +403,7 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
         // nothing, which keeps its pool behaviour (#1998).
         onMapContextMenu={e => planner.handleMapContextMenu(e, planner.selectedDayId)}
         // No center/zoom: the map frames itself on the trip's places at mount.
-        tileUrl={planner.mapTileUrl}
+        tileUrl={tileUrl}
         fitKey={planner.fitKey}
         dayOrderMap={planner.dayOrderMap}
         reservations={planner.reservations}
@@ -401,7 +428,7 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
         onPoiClick={onStage
           ? planner.handlePoiClick
           : marker => planner.openAddPlaceFromPoi(marker, planner.selectedDayId)}
-        onViewportChange={poi.onViewportChange}
+        onViewportChange={onViewportChange}
         onMapReady={setGlMap}
         // Other ways of driving the leg the stage asked about, and the one lit up.
         alternativeRoutes={onStage ? planner.alternativeOverlays : undefined}
@@ -413,6 +440,13 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
         // and the leave would put out the road the tap has just lit.
         onChooseAlternative={onStage ? planner.setHighlightedAlternative : undefined}
         fitPadding={fitPadding}
+        // The assistant's suggestions on the plan map. A tap marks one, as a hover does on
+        // the desk; the hover itself stays off, since the emulated leave after a tap would
+        // take the mark straight off again. The same goes for the routes its cards draw: a
+        // tap on one lights its card, puts its spot in focus and opens the route's peek.
+        {...(onStage ? {} : planner.assistantMap)}
+        onAssistantGhostHover={undefined}
+        onAssistantRouteHover={undefined}
       />
 
       {/* Floating map chrome — only while the map view is front-most. The POI bar
@@ -420,9 +454,17 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
           takes the full width between the screen margins, so its segments are
           the same size as everything else the thumb aims at on this screen. */}
       {mapActive && !onStage && poiPillEnabled && (
-        <div className="pointer-events-none absolute left-4 right-4 z-[25] flex flex-col items-center gap-2 top-[calc(var(--m-safe-top,12px)+96px)]">
+        <div
+          // Beside the trip's pane nothing lies over the map, so the bar takes the
+          // top edge, level with the pane's own top row.
+          className={`pointer-events-none absolute end-4 start-[calc(var(--trip-map-inset,0px)+16px)] z-[25] flex flex-col items-center gap-2 ${
+            shell.paneOpen ? 'top-[var(--m-safe-top,12px)]' : 'top-[calc(var(--m-safe-top,12px)+96px)]'
+          }`}
+        >
           <PoiCategoryPill
             fullWidth
+            phoneChrome
+            categories={poi.categories}
             active={poi.active}
             onToggle={poi.toggle}
             loadingKeys={poi.loadingKeys}
@@ -433,26 +475,38 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
         </div>
       )}
 
-      {/* Compass, GL maps only (Leaflet cannot rotate). Both engines draw the base-layer
-          switcher in the bottom left corner, so the compass sits beside it rather than in
-          the corner: at `left-3` it started 8px left of the switcher and ran on under it,
-          reading as a second button showing through the frosted shell. Same
-          --bottom-nav-h band as the locate button's `right: 12`, so the round controls
-          still share one line. The left offset is inline because it is computed from the
-          switcher's own numbers. */}
-      {mapActive && glMap && (
-        <div className="pointer-events-none absolute z-[25]" style={{ left: COMPASS_LEFT, bottom: 'calc(var(--bottom-nav-h, 84px) + 12px)' }}>
-          <MapCompassPill map={glMap} />
+      {/* The left column, over the base-layer switcher both engines draw in the bottom
+          left corner: the recorded Dawarich route, and the compass, which only shows
+          while the map is turned off north. Two round controls a side at most, one
+          frosted style and one 8px gap, so neither corner crowds the dock. The offsets
+          are inline because they are computed from the switcher's own numbers. */}
+      {mapActive && (glMap || planner.dawarichEnabled) && (
+        <div
+          className="pointer-events-none absolute z-[25] flex flex-col-reverse items-start gap-2"
+          style={{ left: COMPASS_LEFT, marginInlineStart: 'var(--trip-map-inset, 0px)', bottom: `calc(var(--bottom-nav-h, 84px) + ${12 + COMPASS_RAISE}px)` }}
+        >
+          {/* Kept in road-trip mode: the recorded route beside the planned one is
+              exactly the comparison a drive invites. */}
+          {!onStage && planner.dawarichEnabled && (
+            <DawarichTrailPill
+              active={planner.dawarichTrailShown}
+              status={planner.dawarichTrail.status}
+              onToggle={planner.toggleDawarichTrail}
+            />
+          )}
+          {glMap && <MapCompassPill map={glMap} onlyWhenRotated />}
         </div>
       )}
 
-      {/* Whole-trip overview (#1736): the stages stack above their toggle on the right,
-          clear of the round-controls band below it and of the base-layer switcher and
-          the compass, which both sit bottom left. The offset is Tailwind rather than
-          inline because the compass band is identified by being the one element with
-          an inline --bottom-nav-h, and a second would make that ambiguous. */}
-      {mapActive && !onStage && (!planner.roadtripActive || planner.dawarichEnabled) && (
-        <div className="pointer-events-none absolute left-3 right-3 z-[25] flex flex-col items-end gap-2 bottom-[calc(var(--bottom-nav-h,84px)+58px)]">
+      {/* The right column: the whole-trip overview (#1736) over the locate button, its
+          stages stacking above their toggle. 20px off the edge and 8px over the locate
+          button, mirroring the left column. The places filter has no button here: it
+          is set in the places tab, whose filter the map's pins follow. The offset is
+          Tailwind rather than inline because the compass band is identified by being
+          the one element with an inline --bottom-nav-h, and a second would make that
+          ambiguous. */}
+      {mapActive && !onStage && (
+        <div className="pointer-events-none absolute inset-x-5 z-[25] flex flex-col items-end gap-2 bottom-[calc(var(--bottom-nav-h,84px)+62px)]">
           {!planner.roadtripActive && planner.overviewActive && (
             <TripRouteOverviewPanel
               overview={planner.tripOverview}
@@ -466,15 +520,6 @@ export default function MMapArea({ planner, shell }: MMapAreaProps) {
           )}
           {!planner.roadtripActive && (
             <TripRouteOverviewPill active={planner.overviewShown} onToggle={planner.toggleOverview} />
-          )}
-          {/* Kept in road-trip mode: the recorded route beside the planned one is
-              exactly the comparison a drive invites. */}
-          {planner.dawarichEnabled && (
-            <DawarichTrailPill
-              active={planner.dawarichTrailShown}
-              status={planner.dawarichTrail.status}
-              onToggle={planner.toggleDawarichTrail}
-            />
           )}
         </div>
       )}

@@ -7,6 +7,7 @@ const common: TranslationStrings = {
   'common.cancel': '取消',
   'common.clear': '清除',
   'common.delete': '删除',
+  'common.remove': '删除',
   'common.preview': '预览',
   'common.edit': '编辑',
   'common.add': '添加',
@@ -35,7 +36,11 @@ const common: TranslationStrings = {
   'common.rename': '重命名',
   'common.discardChanges': '放弃更改',
   'common.discard': '放弃',
+  'common.unsavedTitle': '放弃更改？',
+  'common.unsavedMessage': '你在这里输入的内容尚未保存。',
+  'common.keepEditing': '继续编辑',
   'common.name': '名称',
+  'common.title': '标题',
   'common.email': '邮箱',
   'common.password': '密码',
   'common.saving': '保存中...',
@@ -73,5 +78,8 @@ const common: TranslationStrings = {
   'common.errorUpdateTitle': '有新版本可用',
   'common.errorUpdateBody': '此标签页打开期间 TREK 已更新。请重新加载以获取新版本。',
   'common.errorPluginTitle': '无法显示此插件',
+  'common.needsConnection': '此操作需要网络连接。请在 TREK 恢复联网后重试。',
+  'common.errorDetails': '详细信息',
+  'common.share': '分享',
 };
 export default common;

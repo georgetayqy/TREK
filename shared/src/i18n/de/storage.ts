@@ -6,10 +6,10 @@ const storage: TranslationStrings = {
   'storage.field.endpoint': 'Endpunkt-URL',
   'storage.help.endpoint':
     'Basis-URL des S3-kompatiblen Dienstes, z. B. https://s3.example.com oder http://127.0.0.1:9000.',
-  'storage.field.bucket': 'Bucket',
+  'storage.field.bucket': 'Bucket', // same-as-en
   'storage.field.accessKeyId': 'Zugriffsschlüssel-ID',
   'storage.field.secretAccessKey': 'Geheimer Zugriffsschlüssel',
-  'storage.field.region': 'Region',
+  'storage.field.region': 'Region', // same-as-en
   'storage.help.region': 'Belasse die Standardeinstellung, sofern dein Anbieter keine bestimmte Region verlangt.',
   'storage.field.keyPrefix': 'Schlüsselpräfix',
   'storage.help.keyPrefix': 'Optionales Präfix, das jedem Objektschlüssel vorangestellt wird, z. B. trek/prod.',
@@ -29,11 +29,11 @@ const storage: TranslationStrings = {
   'storage.discardAndReload': 'Meine Änderungen verwerfen und neu laden',
   'storage.configError.banner':
     'Die gespeicherten Speichereinstellungen konnten nicht geladen werden — durch Speichern werden sie ersetzt: {error}',
-  'storage.backends.title': 'Backends',
+  'storage.backends.title': 'Backends', // same-as-en
   'storage.backends.add': 'Backend hinzufügen',
   'storage.backends.usedBy': 'Verwendet von: {categories}',
   'storage.backends.unused': 'Keiner Kategorie zugewiesen',
-  'storage.backends.envReadOnly': 'Durch eine Umgebungsvariable definiert — schreibgeschützt',
+  'storage.backends.envReadOnly': 'Durch eine Umgebungsvariable definiert (schreibgeschützt)',
   'storage.source.built-in': 'Integriert',
   'storage.source.env': 'Umgebung',
   'storage.source.settings': 'Einstellungen',
@@ -52,7 +52,7 @@ const storage: TranslationStrings = {
   'storage.remove.stillAssigned': 'Noch zugewiesen zu: {categories}',
   'storage.form.addTitle': 'Backend hinzufügen',
   'storage.form.editTitle': 'Backend bearbeiten',
-  'storage.form.name': 'Name',
+  'storage.form.name': 'Name', // same-as-en
   'storage.form.type': 'Typ',
   'storage.form.apply': 'Übernehmen',
   'storage.form.cancel': 'Abbrechen',
@@ -68,7 +68,7 @@ const storage: TranslationStrings = {
   'storage.category.places': 'Ortsbilder',
   'storage.category.photos-google': 'Google-Fotocache',
   'storage.category.photos-trek': 'TREK-Fotocache',
-  'storage.category.backups': 'Backups',
+  'storage.category.backups': 'Backups', // same-as-en
 
   // What each category stores — rendered under the label in the category map.
   'storage.categoryDesc.files':
@@ -114,7 +114,8 @@ const storage: TranslationStrings = {
   'storage.sync.error': 'Synchronisierung fehlgeschlagen: {error}',
   'storage.sync.prompt': 'Vorhandene Objekte wurden noch nicht repliziert — jetzt synchronisieren?',
   'storage.sync.dismiss': 'Verwerfen',
-  'storage.usage.line': '{objects} Objekte · {size}',
+  'storage.usage.line': '{count} Objekte · {size}',
+  'storage.usage.line.one': '{count} Objekt · {size}',
   'storage.usage.computed': 'Nutzung berechnet {age}',
   'storage.usage.never': 'Nutzung noch nicht berechnet',
   'storage.usage.refresh': 'Aktualisieren',
@@ -123,7 +124,8 @@ const storage: TranslationStrings = {
 
   // Category migration (copy → flip → delta sweep)
   'storage.migrate.promptTitle': 'Vorhandene Objekte auf das neue Backend verschieben?',
-  'storage.migrate.promptLine': '{category}: {objects} Objekte ({size}) von {from} nach {to}',
+  'storage.migrate.promptLine': '{category}: {count} Objekte ({size}) von {from} nach {to}',
+  'storage.migrate.promptLine.one': '{category}: {count} Objekt ({size}) von {from} nach {to}',
   'storage.migrate.promptLineUnknown':
     '{category}: unbekannte Größe (Nutzung noch nicht gescannt) von {from} nach {to}',
   'storage.migrate.move': 'Vorhandene Objekte verschieben',
@@ -133,10 +135,50 @@ const storage: TranslationStrings = {
   'storage.migrate.doneFailures': '{failed} fehlgeschlagen — diese Objekte wurden nicht auf das neue Backend kopiert',
   'storage.migrate.failed': 'Verschieben fehlgeschlagen: {error} — die Kategorie wurde nicht umgestellt',
   'storage.migrate.cancelled': 'Verschieben abgebrochen — nichts wurde umgestellt',
-  'storage.migrate.reclaimable': '{objects} Objekte ({size}) verbleiben auf {from} — manuell freigeben',
+  'storage.migrate.reclaimable': '{count} Objekte ({size}) verbleiben auf {from}, manuell freigeben',
+  'storage.migrate.reclaimable.one': '{count} Objekt ({size}) verbleibt auf {from}, manuell freigeben',
   'storage.migrate.cancel': 'Verschieben abbrechen',
   'storage.migrate.promptCancel': 'Abbrechen',
   'storage.migrate.queued': 'In Warteschlange: {categories}',
-  'storage.migrate.queueDropped': 'Die nächste Verschiebung konnte nicht gestartet werden — die verbleibende Warteschlange wurde geleert: {categories}',
+  'storage.migrate.queueDropped':
+    'Die nächste Verschiebung konnte nicht gestartet werden — die verbleibende Warteschlange wurde geleert: {categories}',
+  'storage.reclaim.title': 'Nicht mehr genutzte Dateien',
+  'storage.reclaim.hint':
+    'Jede Nacht sucht TREK nach hochgeladenen Dateien, die keine Reise, kein Ort, kein Reisetagebuch, keine Sammlung und kein Nutzer mehr verwendet, etwa nach dem Löschen einer Reise.',
+  'storage.reclaim.check': 'Jetzt prüfen',
+  'storage.reclaim.checked': 'Letzte Prüfung: {age}',
+  'storage.reclaim.never': 'Noch nicht geprüft',
+  'storage.reclaim.delete': 'Nicht mehr genutzte Dateien löschen',
+  'storage.reclaim.deleteHint':
+    'Aus: Die nächtliche Prüfung berichtet nur. An: Eine Datei, die eine Woche lang nichts mehr verwendet, wird gelöscht. Was du in TREK löschst, wird so oder so einen Tag später entfernt, sobald kein Rückgängig es mehr zurückholen kann.',
+  'storage.reclaim.freeable': 'Kann freigegeben werden',
+  'storage.reclaim.waiting': 'Seit weniger als einer Woche ungenutzt',
+  'storage.reclaim.deleted': 'Bei der letzten nächtlichen Bereinigung freigegeben',
+  'storage.reclaim.nothing': 'Keine ungenutzten Dateien gefunden.',
+  'storage.reclaim.stopped':
+    'Die letzte Prüfung wurde vorzeitig beendet, weil währenddessen die Datenbank wiederhergestellt wurde.',
+  'storage.reclaim.skip.sources_missing': 'Übersprungen: Nicht jeder Teil von TREK konnte gefragt werden',
+  'storage.reclaim.skip.shared_location': 'Übersprungen: teilt den Speicherort mit einer anderen Kategorie',
+  'storage.reclaim.skip.list_failed': 'Übersprungen: Die Dateien konnten nicht aufgelistet werden',
+  'storage.reclaim.skip.source_failed': 'Übersprungen: Eine Abfrage ist fehlgeschlagen',
+  'storage.reclaim.running': 'Wird geprüft…',
+  'storage.reclaim.stoppedFailed':
+    'Die letzte Prüfung wurde nach einem Fehler abgebrochen. Sie läuft heute Nacht erneut.',
+  'storage.reclaim.skip.foreign_install': 'Übersprungen: Eine andere TREK-Installation nutzt diesen Speicher',
+  'storage.reclaim.skip.owner_unknown': 'Übersprungen: TREK konnte diesen Speicher nicht als eigenen markieren',
+  'storage.reclaim.skip.delete_failed': 'Abgebrochen: Der Speicher hat ein Löschen verweigert',
+  'storage.reclaim.skip.interrupted': 'Vorzeitig beendet, die Zahlen sind unvollständig',
+  'storage.reclaim.confirmNeeded':
+    'Mehr als ein Fünftel dieser Dateien wirkt ungenutzt. Hier wird nichts gelöscht, bis du bestätigst, dass das so stimmt.',
+  'storage.reclaim.confirm': 'Bestätigen',
+  'storage.reclaim.confirmed': 'Für die nächsten 14 Tage bestätigt.',
+  'storage.reclaim.error.reclaim_busy': 'Gerade läuft eine andere Speicheraufgabe. Versuch es gleich noch einmal.',
+  'storage.reclaim.error.reclaim_demo': 'Auf einer Demo-Instanz nicht verfügbar.',
+  'storage.reclaim.error.reclaim_nothing_to_confirm': 'Es gibt nichts mehr zu bestätigen. Starte zuerst eine Prüfung.',
+  'storage.reclaim.skip.backup_running': 'Übersprungen: Ein Backup lief',
+  'storage.reclaim.error.reclaim_confirm_stale':
+    'Die Zahl hat sich seit der Anzeige geändert. Prüf den neuen Wert und bestätige noch einmal.',
+  'storage.reclaim.error.reclaim_install_unknown':
+    'TREK konnte seine Installationskennung nicht lesen und löscht deshalb nichts. Prüf den Datenordner.',
 };
 export default storage;

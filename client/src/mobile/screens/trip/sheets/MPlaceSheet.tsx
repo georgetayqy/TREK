@@ -1,18 +1,19 @@
 import { useMemo, useRef, useState } from 'react'
 import DawarichIcon from '../../../../components/shared/DawarichIcon'
 import {
-  Bookmark, Camera, ChevronRight, ExternalLink, Loader2, Map as MapIcon, Navigation, Paperclip,
-  Pencil, Phone, Plus, Route, Trash2, Upload, X,
+  Bookmark, ChevronRight, ExternalLink, Map as MapIcon, Navigation, Paperclip,
+  Pencil, Phone, Plus, Route, RouteOff, Sparkles, Trash2, Upload, X,
 } from 'lucide-react'
 import MSheet from '../../../components/MSheet'
 import type { MTripSheetsProps } from '../MTripShell'
 import { useTranslation, translateApiError } from '../../../../i18n'
-import { normalizeImageFile } from '../../../../utils/convertHeic'
-import { assignmentsApi } from '../../../../api/client'
-import { useTripStore } from '../../../../store/tripStore'
 import { useAddonStore } from '../../../../store/addonStore'
 import { useSaveToCollectionStore } from '../../../../store/saveToCollectionStore'
-import { collectionTargetFromPlace } from '../lib/collectionTarget'
+import { placeToSaveTarget } from '../../../../components/Collections/saveTarget'
+import { useAssistantAsk } from '../../../../components/Assistant/useAssistantAsk'
+import {
+  participantsWith, participantsWithout, placeActions, splitParticipants, usePlaceFileUpload,
+} from '../../../../components/Planner/usePlaceActions'
 import { getCategoryIcon } from '../../../../components/shared/categoryIcons'
 import PlaceRating from '../../../../components/shared/StarRating'
 import MarkdownText from '../../../../components/shared/MarkdownText'
@@ -22,11 +23,13 @@ import { avatarSrc } from '../../../../utils/avatarSrc'
 import { safeHttpUrl } from '../../../../utils/safeUrl'
 import { openFile } from '../../../../utils/fileDownload'
 import { filesForPlace } from '../../../../utils/placeFiles'
-import { getNavigationTargets, openNavigationTarget } from '../../../../components/Planner/placeNavigation'
+import { navigationTargetLabel, getNavigationTargets, openNavigationTarget } from '../../../../components/Planner/placeNavigation'
 import { NavigationMenu } from '../../../../components/shared/NavigationMenu'
-import { getAssignmentReservations } from '../../../../utils/dayMerge'
+import { getPlaceBookings } from '../../../../utils/dayMerge'
 import type { Assignment, Day, Reservation, TripMember } from '../../../../types'
+import PlacePhotoGallery from '../../../../components/Planner/PlacePhotoGallery'
 import { ActionCircle, Eyebrow, INNER_CLS } from './MTripSheetUi'
+import { FormSheetBody } from './PlSheetChrome'
 
 /**
  * Place inspector sheet (glass card), opened by the current place selection —
@@ -36,25 +39,30 @@ import { ActionCircle, Eyebrow, INNER_CLS } from './MTripSheetUi'
  * attached files, plus the inspector action row.
  */
 export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const place = planner.selectedPlace ?? null
-  const open = !!place
+  // Match the desktop inspector gate: while the Tours facet is loading, wait
+  // before choosing a surface; once identified as a tour, its purpose-built
+  // dialog is the only detail surface that should open.
+  const open = !!place && (!planner.toursEnabled || planner.tourDataReady) && !planner.selectedTour
 
   const canEditPlaces = planner.can('place_edit', planner.trip)
   const canEditDays = planner.can('day_edit', planner.trip)
+  const isTourPlace = place != null && planner.isTourPlace(place.id)
+  const canManagePlace = canEditPlaces && !isTourPlace
   const collectionsEnabled = useAddonStore(s => s.isEnabled('collections'))
   const openSavePicker = useSaveToCollectionStore(s => s.open)
+  const assistant = useAssistantAsk(planner.tripId)
 
-  const [filesExpanded, setFilesExpanded] = useState(false)
+  const actions = placeActions({ tripId: planner.tripId, tripActions: planner.tripActions, toast: planner.toast, t })
+  const {
+    uploading, filesExpanded, setFilesExpanded, fileInputRef, handleUpload,
+  } = usePlaceFileUpload(place && !isTourPlace ? place.id : null, fd => planner.tripActions.addFile(planner.tripId, fd), planner.toast)
   const [dayPickerOpen, setDayPickerOpen] = useState(false)
   const [participantPickerOpen, setParticipantPickerOpen] = useState(false)
-  const [uploading, setUploading] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
   const navBtnRef = useRef<HTMLButtonElement>(null)
-  const [imgBusy, setImgBusy] = useState(false)
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const imageInputRef = useRef<HTMLInputElement | null>(null)
 
   const close = () => {
     planner.setSelectedPlaceId(null)
@@ -92,8 +100,9 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
   // The bookings attached to that assignment. The desktop inspector shows this
   // strip; the phone sheet never did, so a booking reached from a map marker was
   // just as unreachable here, only invisibly so (#2012). All of them, because a
-  // stop can carry a parking pass next to its tickets (#2201).
-  const linkedReservations = getAssignmentReservations(planner.reservations, assignmentInDay?.id)
+  // stop can carry a parking pass next to its tickets (#2201). A hotel also lists
+  // the stay booked for it, the way back to its booking (#2363).
+  const linkedReservations = getPlaceBookings(planner.reservations, assignmentInDay?.id, place?.id)
   // A ferry or a flight has its own form — the reservation modal cannot hold one.
   // Resolved up front so a user without the matching right gets no button at all,
   // rather than one that does nothing (#2012).
@@ -103,54 +112,30 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
   )
   const openRes = (res: Reservation) => {
     if (!canOpenRes(res)) return
-    if (planner.TRANSPORT_TYPES.has(res.type)) {
-      planner.setEditingTransport(res)
-      planner.setTransportModalDayId(res.day_id ?? null)
-      planner.setTransportModalAutomated(false)
-      planner.setShowTransportModal(true)
-    } else {
-      planner.setEditingReservation(res)
-      planner.setShowReservationModal(true)
-    }
     // This sheet hangs off the place selection, not the sheet stack, so its own
-    // close() is what dismisses it — otherwise the editor opens on top of it.
+    // close() is what dismisses it; the booking's detail sheet then opens alone,
+    // with its pencil for editing, as on the desktop.
     close()
+    shell.openSheet('transport', { reservationId: res.id })
   }
 
   const participants = assignmentInDay?.participants || []
   const participantIds = participants.map(p => p.user_id)
   const allJoined = participants.length === 0
   const members = planner.tripMembers as TripMember[]
-  const activeMembers = allJoined ? members : members.filter(m => participantIds.includes(m.id))
-  const availableMembers = allJoined ? [] : members.filter(m => !participantIds.includes(m.id))
+  const { activeMembers, availableMembers } = splitParticipants(members, participantIds, allJoined)
 
   const setParticipants = async (userIds: number[]) => {
     if (!assignmentInDay || !planner.selectedDayId) return
-    const dayId = planner.selectedDayId
-    try {
-      const data = await assignmentsApi.setParticipants(planner.tripId, assignmentInDay.id, userIds)
-      useTripStore.setState(state => ({
-        assignments: {
-          ...state.assignments,
-          [String(dayId)]: (state.assignments[String(dayId)] || []).map(a =>
-            a.id === assignmentInDay.id ? { ...a, participants: data.participants } : a,
-          ),
-        },
-      }))
-    } catch (err: unknown) {
-      planner.toast.error(err instanceof Error ? err.message : t('common.unknownError'))
-    }
+    await actions.setParticipants(assignmentInDay.id, planner.selectedDayId, userIds)
   }
 
   const removeParticipant = (userId: number) => {
-    let next = allJoined ? members.filter(m => m.id !== userId).map(m => m.id) : participantIds.filter(id => id !== userId)
-    if (next.length === members.length) next = []
-    setParticipants(next)
+    void setParticipants(participantsWithout(members, participantIds, allJoined, userId))
   }
 
   const addParticipant = (userId: number) => {
-    const next = [...participantIds, userId]
-    setParticipants(next.length === members.length ? [] : next)
+    void setParticipants(participantsWith(members, participantIds, userId))
     setParticipantPickerOpen(false)
   }
 
@@ -162,22 +147,8 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
     assignmentInDay ? [assignmentInDay.id] : [],
   )
 
-  const handleImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file || !place) return
-    setImgBusy(true)
-    try {
-      await planner.tripActions.uploadPlaceImage(planner.tripId, place.id, await normalizeImageFile(file))
-    } catch (err: unknown) {
-      planner.toast.error(translateApiError(t, err, 'places.imageUploadError'))
-    } finally {
-      setImgBusy(false)
-    }
-  }
-
   const handleTrackColor = async (color: string | null) => {
-    if (!place) return
+    if (!place || isTourPlace) return
     try {
       await planner.tripActions.updatePlace(planner.tripId, place.id, { route_color: color })
     } catch (err: unknown) {
@@ -185,51 +156,15 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
     }
   }
 
-  const handleImageRemove = async () => {
-    if (!place) return
-    setImgBusy(true)
-    try {
-      await planner.tripActions.updatePlace(planner.tripId, place.id, { image_url: null })
-    } catch (err: unknown) {
-      planner.toast.error(translateApiError(t, err, 'places.imageRemoveError'))
-    } finally {
-      setImgBusy(false)
-    }
-  }
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files || [])
-    if (!selected.length || !place) return
-    setUploading(true)
-    try {
-      for (const file of selected) {
-        const fd = new FormData()
-        fd.append('file', file)
-        fd.append('place_id', String(place.id))
-        await planner.tripActions.addFile(planner.tripId, fd)
-      }
-      setFilesExpanded(true)
-    } catch (err: unknown) {
-      planner.toast.error(translateApiError(t, err, 'files.uploadError'))
-    } finally {
-      setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }
-
   const saveToCollection = () => {
     if (!place) return
-    openSavePicker(collectionTargetFromPlace(place))
+    openSavePicker(placeToSaveTarget(place))
   }
 
   // Collaborative rating (#1435): every trip member casts their own star vote.
   const handleRate = async (rating: number | null) => {
     if (!place) return
-    try {
-      await planner.tripActions.ratePlace(planner.tripId, place.id, rating)
-    } catch (err: unknown) {
-      planner.toast.error(err instanceof Error ? err.message : t('common.unknownError'))
-    }
+    await actions.ratePlace(place.id, rating)
   }
 
   const showOnMap = () => {
@@ -249,13 +184,15 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
   }
 
   return (
-    <MSheet open={open} onClose={close} variant="card" material="glass" ariaLabel={place?.name}>
+    <MSheet open={open} onClose={close} variant="card" form ariaLabel={place?.name}>
       {place && (
         <>
           <div className="flex-none px-[18px] pt-4">
             <div className="flex items-start gap-3">
-              <div className="flex flex-none flex-col items-center gap-[5px]">
-                <div className="relative h-[52px] w-[52px]">
+              {/* The picture opens the place's photos; it is changed in the editor.
+                  It stands on the same leading edge as the cards below. */}
+              <div className="flex-none">
+                <PlacePhotoGallery place={place} language={language} label={t('places.openPhotos')} className="rounded-[16px]">
                   {place.image_url ? (
                     <div
                       className="h-[52px] w-[52px] rounded-[16px] border-[1.5px] border-[color:var(--m-avbr)] bg-cover bg-center"
@@ -266,45 +203,11 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                       <CatIcon size={20} strokeWidth={1.8} className="text-m-muted" />
                     </div>
                   )}
-                  {canEditPlaces && (
-                    <>
-                      {/* Tap the thumbnail to set a custom image (#1136). */}
-                      <button
-                        type="button"
-                        onClick={() => { if (!imgBusy) imageInputRef.current?.click() }}
-                        aria-label={place.image_url ? t('places.changeImage') : t('places.uploadImage')}
-                        className="absolute inset-0 flex items-center justify-center rounded-[16px]"
-                        style={{ background: imgBusy ? 'rgba(0,0,0,0.45)' : 'transparent' }}
-                      >
-                        <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full" style={{ background: 'rgba(0,0,0,0.55)', color: '#fff' }}>
-                          {imgBusy ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
-                        </span>
-                      </button>
-                      {place.image_url && !imgBusy && (
-                        <button
-                          type="button"
-                          onClick={handleImageRemove}
-                          aria-label={t('places.removeImage')}
-                          className="absolute flex items-center justify-center rounded-full"
-                          style={{ top: -5, right: -5, width: 18, height: 18, background: '#ef4444', color: '#fff', border: '2px solid var(--m-sheet)' }}
-                        >
-                          <X size={9} strokeWidth={3} />
-                        </button>
-                      )}
-                      <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp,.heic,.heif" className="hidden" onChange={handleImagePick} />
-                    </>
-                  )}
-                </div>
-                {category && (
-                  <span className="flex max-w-[76px] items-center gap-1 rounded-full border border-[color:var(--m-faint)] px-2 py-[2px] font-geist text-[0.625rem] font-semibold text-m-muted">
-                    <CatIcon size={10} strokeWidth={2} className="flex-none" />
-                    <span className="truncate">{category.name}</span>
-                  </span>
-                )}
+                </PlacePhotoGallery>
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="min-w-0 truncate text-[1rem] font-bold leading-snug">{place.name}</span>
+                  <span dir="auto" className="min-w-0 truncate text-[1rem] font-bold leading-snug">{place.name}</span>
                   {/* Accepted out of the traveller's own recordings — the same
                       mark the desktop inspector carries. */}
                   {place.source === 'dawarich' && (
@@ -314,7 +217,15 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                   )}
                 </div>
                 {place.address && (
-                  <div className="mt-[2px] font-geist text-[0.6875rem] leading-[1.4] text-m-muted">{place.address}</div>
+                  <div className="mt-[2px] font-geist text-[0.6875rem] leading-[1.4] text-m-muted"><bdi>{place.address}</bdi></div>
+                )}
+                {/* The category under the name and address, as wide as its name:
+                    squeezed under the photo it was cut to "Shoppi…". */}
+                {category && (
+                  <span className="mt-[6px] inline-flex max-w-full items-center gap-1 rounded-full border border-[color:var(--m-faint)] px-2 py-[2px] font-geist text-[0.625rem] font-semibold text-m-muted">
+                    <CatIcon size={10} strokeWidth={2} className="flex-none" />
+                    <span dir="auto" className="truncate">{category.name}</span>
+                  </span>
                 )}
               </div>
               <button
@@ -328,7 +239,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[18px]">
+          <FormSheetBody>
             {place.phone && (
               <a href={`tel:${place.phone}`} className="mt-3 flex items-center gap-[7px] text-[0.78125rem] font-medium">
                 <Phone size={13} strokeWidth={2} className="flex-none text-m-muted" />
@@ -338,7 +249,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
 
             {/* Collaborative rating (#1435) — tap a star to cast/clear your vote. */}
             <div className={`mt-[10px] rounded-[14px] px-3 py-[10px] ${INNER_CLS}`}>
-              <PlaceRating ratings={place.ratings ?? []} ratingAvg={place.rating_avg} onRate={handleRate} size={18} />
+              <PlaceRating ratings={place.ratings ?? []} ratingAvg={place.rating_avg} onRate={isTourPlace ? undefined : handleRate} size={18} />
             </div>
 
             {place.description && (
@@ -349,7 +260,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
 
             {place.notes && (
               <>
-                <Eyebrow className="mb-[6px] mt-3">{t('mobileTrip.notes')}</Eyebrow>
+                <Eyebrow className="mb-[6px] mt-3 uppercase">{t('mobileTrip.notes')}</Eyebrow>
                 <div className={`rounded-[14px] px-3 py-[10px] ${INNER_CLS}`}>
                   <MarkdownText className="font-geist text-[0.75rem] leading-[1.5] text-m-muted [overflow-wrap:anywhere]">{place.notes}</MarkdownText>
                 </div>
@@ -359,49 +270,65 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
             {/* ── Track colour (#776) ── */}
             {place.route_geometry && (
               <>
-                <Eyebrow className="mb-[6px] mt-3">{t('inspector.trackColor')}</Eyebrow>
+                <Eyebrow className="mb-[6px] mt-3 uppercase">{t('inspector.trackColor')}</Eyebrow>
                 <div className={`rounded-[14px] px-3 py-[10px] ${INNER_CLS}`}>
-                  <button
-                    type="button"
-                    onClick={() => setColorPickerOpen(v => !v)}
-                    aria-expanded={colorPickerOpen}
-                    className="flex w-full items-center justify-between gap-3"
-                  >
-                    {/* The eyebrow above already names the section — this row says
-                        which colour is in effect, not the same word again. */}
-                    <span className="flex min-w-0 items-center gap-2">
-                      <Route size={14} className="shrink-0 text-m-muted" />
-                      <span className="truncate font-geist text-[0.75rem] font-medium">
-                        {place.route_color ?? t('inspector.trackColorAuto')}
-                      </span>
-                    </span>
-                    <span
-                      className="h-6 w-6 shrink-0 rounded-full ring-1 ring-inset ring-black/10 dark:ring-white/15"
-                      style={{ background: resolveTrackColor(place) }}
-                    />
-                  </button>
-                  {colorPickerOpen && (
-                    <div className="mt-[10px] border-t border-[color:var(--m-faint)] pt-[10px]">
-                      <TrackColorPicker
-                        value={place.route_color ?? null}
-                        inheritedColor={inheritedTrackColor(place)}
-                        onChange={handleTrackColor}
-                      />
-                    </div>
+                  {isTourPlace ? (
+                    <span aria-label={t('inspector.trackColor')} style={{ display: 'block', width: 24, height: 24, borderRadius: 12, background: resolveTrackColor(place) }} />
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setColorPickerOpen(v => !v)}
+                        aria-expanded={colorPickerOpen}
+                        className="flex w-full items-center justify-between gap-3"
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Route size={14} className="shrink-0 text-m-muted" />
+                          <span className="truncate font-geist text-[0.75rem] font-medium">
+                            {place.route_color ?? t('inspector.trackColorAuto')}
+                          </span>
+                        </span>
+                        <span
+                          className="h-6 w-6 shrink-0 rounded-full ring-1 ring-inset ring-black/10 dark:ring-white/15"
+                          style={{ background: resolveTrackColor(place) }}
+                        />
+                      </button>
+                      {colorPickerOpen && (
+                        <div className="mt-[10px] border-t border-[color:var(--m-faint)] pt-[10px]">
+                          <TrackColorPicker
+                            value={place.route_color ?? null}
+                            inheritedColor={inheritedTrackColor(place)}
+                            onChange={handleTrackColor}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </>
             )}
 
             {/* ── Day assignments ── */}
-            <Eyebrow className="mb-[6px] mt-3">{t('mobileTrip.assignedDays')}</Eyebrow>
+            <Eyebrow className="mb-[6px] mt-3 uppercase">{t('mobileTrip.assignedDays')}</Eyebrow>
             <div className="flex flex-wrap items-center gap-[6px]">
               {placeAssignments.map(({ day, assignment }) => (
                 <span
                   key={assignment.id}
-                  className={`flex items-center gap-1 rounded-full py-1 pl-[10px] text-[0.75rem] font-semibold ${INNER_CLS} ${canEditDays ? 'pr-1' : 'pr-[10px]'}`}
+                  className={`flex items-center gap-1 rounded-full py-1 ps-[10px] text-[0.75rem] font-semibold ${INNER_CLS} ${canEditDays ? 'pe-1' : 'pe-[10px]'}`}
                 >
                   {day.title || t('planner.dayN', { n: (day.day_number ?? planner.days.indexOf(day) + 1) || '?' })}
+                  {canEditDays && !isTourPlace && place.lat != null && place.lng != null && (
+                    // In or out of that day's route (#2532); the icon says which it is.
+                    <button
+                      type="button"
+                      onClick={() => { planner.tripActions.setAssignmentRouteExcluded(planner.tripId, day.id, assignment.id, !assignment.route_excluded).catch((err: unknown) => planner.toast.error(err instanceof Error ? err.message : t('common.unknownError'))) }}
+                      aria-label={assignment.route_excluded ? t('dayplan.includeInRoute') : t('dayplan.excludeFromRoute')}
+                      aria-pressed={!!assignment.route_excluded}
+                      className={`flex h-[18px] w-[18px] items-center justify-center rounded-full ${assignment.route_excluded ? 'bg-m-act text-m-actfg' : 'bg-[color:var(--m-ic)] text-m-muted'}`}
+                    >
+                      <RouteOff size={10} strokeWidth={2.4} />
+                    </button>
+                  )}
                   {canEditDays && (
                     <button
                       type="button"
@@ -433,7 +360,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                     key={d.id}
                     type="button"
                     onClick={() => { planner.handleAssignToDay(place.id, d.id); setDayPickerOpen(false) }}
-                    className="flex w-full items-center gap-2 rounded-[10px] px-[10px] py-[9px] text-left text-[0.78125rem] font-semibold"
+                    className="flex w-full items-center gap-2 rounded-[10px] px-[10px] py-[9px] text-start text-[0.78125rem] font-semibold"
                   >
                     <span className="min-w-0 flex-1 truncate">
                       {d.title || t('planner.dayN', { n: (d.day_number ?? planner.days.indexOf(d) + 1) || '?' })}
@@ -452,7 +379,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                 only appears when the place sits on more than one day. ── */}
             {placeAssignments.some(r => r.assignment.notes) && (
               <>
-                <Eyebrow className="mb-[6px] mt-3">{t('mobileTrip.assignmentNotes')}</Eyebrow>
+                <Eyebrow className="mb-[6px] mt-3 uppercase">{t('mobileTrip.assignmentNotes')}</Eyebrow>
                 <div className="flex flex-col gap-[6px]">
                   {placeAssignments.filter(r => r.assignment.notes).map(({ day, assignment }) => (
                     <div key={assignment.id} className={`rounded-[14px] px-3 py-[10px] ${INNER_CLS}`}>
@@ -461,7 +388,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                           {day.title || t('planner.dayN', { n: (day.day_number ?? planner.days.indexOf(day) + 1) || '?' })}
                         </div>
                       )}
-                      <div className="whitespace-pre-wrap font-geist text-[0.75rem] leading-[1.5] text-m-muted">{assignment.notes}</div>
+                      <div className="whitespace-pre-wrap [overflow-wrap:anywhere] font-geist text-[0.75rem] leading-[1.5] text-m-muted">{assignment.notes}</div>
                     </div>
                   ))}
                 </div>
@@ -471,7 +398,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
             {/* ── The bookings attached to this stop (#2012, #2201) ── */}
             {linkedReservations.length > 0 && (
               <>
-                <Eyebrow className="mb-[6px] mt-3">{t('reservations.title')}</Eyebrow>
+                <Eyebrow className="mb-[6px] mt-3 uppercase">{t('reservations.title')}</Eyebrow>
                 <div className="flex flex-col gap-[6px]">
                   {linkedReservations.map(res => (
                     <button
@@ -479,14 +406,13 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                       type="button"
                       onClick={() => openRes(res)}
                       disabled={!canOpenRes(res)}
-                      aria-label={canOpenRes(res) ? t('inspector.editRes') : undefined}
-                      className={`flex w-full items-center gap-2 rounded-[14px] px-3 py-[10px] text-left ${INNER_CLS}`}
+                      className={`flex w-full items-center gap-2 rounded-[14px] px-3 py-[10px] text-start ${INNER_CLS}`}
                     >
                       <span
                         className="h-2 w-2 flex-none rounded-full"
                         style={{ background: res.status === 'confirmed' ? 'var(--m-st-confirmed)' : 'var(--m-st-pending)' }}
                       />
-                      <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-semibold">{res.title}</span>
+                      <span dir="auto" className="min-w-0 flex-1 truncate text-[0.8125rem] font-semibold">{res.title}</span>
                       <span className="flex-none font-geist text-[0.65625rem] text-m-muted">
                         {res.status === 'confirmed' ? t('reservations.confirmed') : t('reservations.pending')}
                       </span>
@@ -498,16 +424,16 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
             )}
 
             {/* ── Participants of the selected day's assignment ── */}
-            {assignmentInDay && members.length > 1 && (
+            {!isTourPlace && assignmentInDay && members.length > 1 && (
               <>
-                <Eyebrow className="mb-[6px] mt-3">{t('inspector.participants')}</Eyebrow>
+                <Eyebrow className="mb-[6px] mt-3 uppercase">{t('inspector.participants')}</Eyebrow>
                 <div className="flex flex-wrap items-center gap-[6px]">
                   {activeMembers.map(m => (
                     <button
                       key={m.id}
                       type="button"
                       onClick={() => { if (activeMembers.length > 1) removeParticipant(m.id) }}
-                      className={`flex items-center gap-[6px] rounded-full p-1 pr-[11px] ${INNER_CLS}`}
+                      className={`flex items-center gap-[6px] rounded-full p-1 pe-[11px] ${INNER_CLS}`}
                     >
                       <span className="flex h-[22px] w-[22px] flex-none items-center justify-center overflow-hidden rounded-full bg-m-act text-[0.625rem] font-bold text-m-actfg">
                         {(m.avatar_url || m.avatar)
@@ -536,14 +462,14 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                         key={m.id}
                         type="button"
                         onClick={() => addParticipant(m.id)}
-                        className="flex w-full items-center gap-2 rounded-[10px] px-[10px] py-2 text-left text-[0.78125rem] font-semibold"
+                        className="flex w-full items-center gap-2 rounded-[10px] px-[10px] py-2 text-start text-[0.78125rem] font-semibold"
                       >
                         <span className="flex h-[20px] w-[20px] flex-none items-center justify-center overflow-hidden rounded-full bg-[color:var(--m-ic)] text-[0.5625rem] font-bold text-m-muted">
                           {(m.avatar_url || m.avatar)
                             ? <img src={m.avatar_url || avatarSrc(m.avatar)!} alt="" className="h-full w-full object-cover" />
                             : m.username?.[0]?.toUpperCase()}
                         </span>
-                        <span className="min-w-0 flex-1 truncate">{m.username}</span>
+                        <span dir="auto" className="min-w-0 flex-1 truncate">{m.username}</span>
                       </button>
                     ))}
                   </div>
@@ -567,7 +493,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                 <span className="min-w-0 flex-1 truncate text-[0.78125rem] font-semibold">
                   {placeFiles.length > 0 ? t('inspector.filesCount', { count: placeFiles.length }) : t('inspector.files')}
                 </span>
-                {planner.canUploadFiles && (
+                {planner.canUploadFiles && !isTourPlace && (
                   <button
                     type="button"
                     onClick={e => { e.stopPropagation(); fileInputRef.current?.click() }}
@@ -586,9 +512,9 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                       key={f.id}
                       type="button"
                       onClick={() => openFile(f.url, f.original_name)}
-                      className="flex w-full items-center gap-2 rounded-[10px] bg-[color:var(--m-ic)] px-[10px] py-[7px] text-left"
+                      className="flex w-full items-center gap-2 rounded-[10px] bg-[color:var(--m-ic)] px-[10px] py-[7px] text-start"
                     >
-                      <span className="min-w-0 flex-1 truncate text-[0.75rem] font-medium">{f.original_name}</span>
+                      <span dir="auto" className="min-w-0 flex-1 truncate text-[0.75rem] font-medium">{f.original_name}</span>
                       <ExternalLink size={11} strokeWidth={2} className="flex-none text-m-faint" />
                     </button>
                   ))}
@@ -599,7 +525,12 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
 
             {/* ── Action row ── */}
             <div className="mt-[14px] flex items-center gap-[7px]">
-              {collectionsEnabled && (
+              {assistant.available && (
+                <ActionCircle onClick={() => { close(); assistant.askAbout(place.id) }} label={t('assistant.context.ask')}>
+                  <Sparkles size={15} strokeWidth={2} />
+                </ActionCircle>
+              )}
+              {collectionsEnabled && !isTourPlace && (
                 <ActionCircle onClick={saveToCollection} label={t('inspector.saveToCollection')}>
                   <Bookmark size={15} strokeWidth={2} />
                 </ActionCircle>
@@ -609,7 +540,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                   <ActionCircle
                     ref={navBtnRef}
                     onClick={openDirections}
-                    label={navTargets.length === 1 ? navTargets[0].label : t('inspector.navigation')}
+                    label={navTargets.length === 1 ? navigationTargetLabel(navTargets[0], t) : t('inspector.navigation')}
                   >
                     <Navigation size={15} strokeWidth={2} />
                   </ActionCircle>
@@ -636,17 +567,17 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                   <ExternalLink size={15} strokeWidth={2} />
                 </ActionCircle>
               )}
-              {canEditPlaces && (
+              {canManagePlace && (
                 <ActionCircle
                   onClick={() => { planner.openPlaceEditor(place, assignmentInDay?.id ?? null); close() }}
                   label={t('common.edit')}
                   primary
-                  className="ml-auto"
+                  className="ms-auto"
                 >
                   <Pencil size={15} strokeWidth={2} />
                 </ActionCircle>
               )}
-              {canEditPlaces && (
+              {canManagePlace && (
                 <ActionCircle
                   onClick={() => { planner.handleDeletePlace(place.id); close() }}
                   label={t('common.delete')}
@@ -656,7 +587,7 @@ export default function MPlaceSheet({ planner, shell }: MTripSheetsProps) {
                 </ActionCircle>
               )}
             </div>
-          </div>
+          </FormSheetBody>
         </>
       )}
     </MSheet>

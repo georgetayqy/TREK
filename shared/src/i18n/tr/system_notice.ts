@@ -47,7 +47,7 @@ const system_notice: TranslationStrings = {
   'system_notice.thank_you_support.highlight_opensource': "GitHub'da %100 açık kaynak",
   'system_notice.thank_you_support.highlight_free': 'Sonsuza dek ücretsiz — hiçbir ücretli plan yok',
   'system_notice.thank_you_support.highlight_community': 'Toplulukla birlikte geliştirildi',
-  'system_notice.thank_you_support.cta_bmc': 'Buy Me a Coffee',
+  'system_notice.thank_you_support.cta_bmc': 'Bana bir kahve ısmarla',
   'system_notice.thank_you_support.cta_kofi': "Ko-fi'de Destek Ol",
   'system_notice.pager.prev': 'Önceki bildirim',
   'system_notice.pager.next': 'Sonraki bildirim',
@@ -57,12 +57,15 @@ const system_notice: TranslationStrings = {
   'system_notice.release_notes.eyebrow': 'Güncelleme yüklendi',
   'system_notice.release_notes.features_label': 'Öne çıkanlar',
   'system_notice.release_notes.features_aside': 'Hepsi bu kadar değil',
-  'system_notice.release_notes.feature_places_title': 'TREK Places API',
-  'system_notice.release_notes.feature_places_body': 'Kendi yer API’sine sahip ilk açık kaynak seyahat planlayıcısı. 73,6 milyon yer, anahtar yok, kota yok.',
-  'system_notice.release_notes.feature_roadtrip_title': 'Yol gezisi eklentisi',
-  'system_notice.release_notes.feature_roadtrip_body': 'Sürüşü kendi planlar: rota, mesafe, saatler ve duraklar. Bir yönetici açana kadar kapalı.',
-  'system_notice.release_notes.feature_dawarich_title': 'Dawarich entegrasyonu',
-  'system_notice.release_notes.feature_dawarich_body': 'Google Timeline’ın kendi sunucunda çalışan alternatifi, artık TREK içinden okunabiliyor. TREK okur, yalnızca okur.',
+  'system_notice.release_notes.feature_search_title': 'İsabetli yer arama',
+  'system_notice.release_notes.feature_search_body':
+    'Şehirler, adalar, simge yapılar ve koduyla aranan havalimanları önce gelir, kafeler çevrenizden gelir ve öneriler siz yazarken belirir.',
+  'system_notice.release_notes.feature_share_title': 'Paylaşılan yer ayrıntıları',
+  'system_notice.release_notes.feature_share_body':
+    'Web sitelerini, çalışma saatlerini ve fotoğrafları alan alan her TREK ile paylaşın, kayıtlı yerleriniz de başkalarının eklediklerini alır.',
+  'system_notice.release_notes.feature_routing_title': 'Daha hızlı rota hesaplama',
+  'system_notice.release_notes.feature_routing_body':
+    'Bütün bir gün, yirmi durağa kadar tek seferde hesaplanır, yavaş bir rota artık diğerlerini bekletmez ve toplu taşıma, ilk sağlayıcı bir şey bulamazsa ikinci bir sağlayıcıya sorar.',
   'system_notice.release_notes.footnote':
     "Ayrıca TREK'in geri kalanına yayılmış, daha küçük değişikliklerden oluşan uzun bir liste var.",
   'system_notice.release_notes.notes_label': 'Sürüm notları',
@@ -77,15 +80,14 @@ const system_notice: TranslationStrings = {
   'system_notice.release_notes.note_body_after':
     "Sonra sizler açtınız. Birkaç ay içinde sayınız binleri buldu: yıldızlar, hata bildirimleri, konuşmadığım dillere çeviriler, hiç tanışmadığım insanlardan pull request'ler. Hâlâ her sabah ilk iş repoya bakıyorum ve bu hâlâ tam olarak gerçekmiş gibi gelmiyor.",
   'system_notice.release_notes.note_closing': 'Burada olduğun için teşekkür ederim. Sevgiler, Maurice.',
-  'system_notice.release_notes.support_lead':
-    'TREK ücretsiz ve hep öyle kalacak, ama sunucular, alan adları ve bir sürü geç gece ücretsiz değil.',
+  'system_notice.release_notes.support_label': 'Bağımsız kalmak',
+  'system_notice.release_notes.support_lead': 'Google ve benzerleri olmadan.',
   'system_notice.release_notes.support_text':
-    'TREK seyahatlerinde kendine bir yer edindiyse, bana bir kahve ısmarla ve bir sonraki sürümün gelmesine yardım et.',
-  'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
+    "Yer arama, adres arama ve rota hesaplama TREK'in kendi sunucularında çalışıyor, bugün dataforest cloud sponsorluğunda. Bunun için her gün mücadele ediyorum ve böyle kalması sizin desteğinize bağlı.",
+  'system_notice.release_notes.cta_bmc': 'Bana bir kahve ısmarla',
   'system_notice.release_notes.cta_kofi': "Ko-fi'de Destek Ol",
-  'system_notice.release_notes.headline': 'TREK’in artık kendi başına yaptığı dört şey.',
-  'system_notice.release_notes.intro': 'Kendi yer API’si, baştan sona planlanan yol gezileri, konum geçmişiniz sizin elinizde, ve belgeleriniz eşitlenmiş.',
-  'system_notice.release_notes.feature_docsync_title': 'Belge Eşitleme',
-  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud ve Synology Drive. Bir seyahatin belgeleri, zaten kullandığınız depoyla iki yönlü akar.',
+  'system_notice.release_notes.headline': 'Önce doğru yer.',
+  'system_notice.release_notes.intro':
+    "Yer arama, adres arama ve rota hesaplama artık dataforest cloud sponsorluğunda TREK'in kendi sunucularında çalışıyor ve her TREK, yerler hakkında bildiklerini diğer tüm TREK'lerle paylaşabiliyor.",
 };
 export default system_notice;

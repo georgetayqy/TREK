@@ -7,7 +7,7 @@ import { buildPlanner, buildShell } from '../../../helpers/mobileTrip'
 import { resetAllStores, seedStore } from '../../../helpers/store'
 import { fireEvent, render, screen } from '../../../helpers/render'
 
-// FE-MOB-TRSH-001 to FE-MOB-TRSH-030
+// FE-MOB-TRSH-001 to FE-MOB-TRSH-035
 
 vi.mock('../../../../src/utils/fileDownload', () => ({ openFile: vi.fn() }))
 
@@ -181,7 +181,7 @@ describe('MTransportSheet', () => {
     const planner = makePlanner()
     const shell = makeShell({ trTab: 'transports', view: 'plan' })
     render(<MTransportSheet planner={planner} shell={shell} />)
-    const btn = screen.getByRole('button', { name: 'On map' })
+    const btn = screen.getByRole('button', { name: 'Map' })
     expect(btn).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(btn)
     expect(planner.toggleConnection).toHaveBeenCalledWith(7)
@@ -194,7 +194,7 @@ describe('MTransportSheet', () => {
     const planner = makePlanner({ visibleConnections: [7] })
     const shell = makeShell({ trTab: 'plan', view: 'map' })
     render(<MTransportSheet planner={planner} shell={shell} />)
-    const btn = screen.getByRole('button', { name: 'On map' })
+    const btn = screen.getByRole('button', { name: 'Map' })
     expect(btn).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(btn)
     expect(planner.toggleConnection).toHaveBeenCalledWith(7)
@@ -253,7 +253,7 @@ describe('MTransportSheet', () => {
     render(<MTransportSheet planner={planner} shell={makeShell()} />)
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'On map' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Map' })).toBeInTheDocument()
   })
 
   it('FE-MOB-TRSH-021: keeps the last booking on screen while the sheet animates out', () => {
@@ -323,7 +323,7 @@ describe('MTransportSheet', () => {
       const shell = makeShell({ trTab: 'transports', view: 'plan' })
       render(<MTransportSheet planner={planner} shell={shell} />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'On map' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Map' }))
 
       expect(planner.toggleConnection).toHaveBeenCalledWith(7)
       expect(planner.handleSelectDay).toHaveBeenCalledWith(3, false)
@@ -338,7 +338,7 @@ describe('MTransportSheet', () => {
       const shell = makeShell({ trTab: 'transports', view: 'map' })
       render(<MTransportSheet planner={planner} shell={shell} />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'On map' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Map' }))
 
       expect(shell.toggleView).not.toHaveBeenCalled()
       expect(planner.handleSelectDay).toHaveBeenCalledWith(3, false)
@@ -351,7 +351,7 @@ describe('MTransportSheet', () => {
       const planner = makePlanner({ days: DAYS, selectedDayId: 4, reservations: [overnight] })
       render(<MTransportSheet planner={planner} shell={makeShell({ trTab: 'plan', view: 'plan' })} />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'On map' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Map' }))
 
       expect(planner.toggleConnection).toHaveBeenCalledWith(7)
       expect(planner.handleSelectDay).not.toHaveBeenCalled()
@@ -362,13 +362,13 @@ describe('MTransportSheet', () => {
       const unbound = { ...FLIGHT, day_id: null, end_day_id: null } as unknown as Reservation
       const allDays = makePlanner({ days: DAYS, selectedDayId: null })
       const { unmount } = render(<MTransportSheet planner={allDays} shell={makeShell({ trTab: 'transports', view: 'map' })} />)
-      fireEvent.click(screen.getByRole('button', { name: 'On map' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Map' }))
       expect(allDays.handleSelectDay).not.toHaveBeenCalled()
       unmount()
 
       const noDay = makePlanner({ days: DAYS, selectedDayId: 5, reservations: [unbound] })
       render(<MTransportSheet planner={noDay} shell={makeShell({ trTab: 'transports', view: 'plan' })} />)
-      fireEvent.click(screen.getByRole('button', { name: 'On map' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Map' }))
       expect(noDay.toggleConnection).toHaveBeenCalledWith(7)
       expect(noDay.handleSelectDay).not.toHaveBeenCalled()
     })
@@ -381,7 +381,7 @@ describe('MTransportSheet', () => {
       const shell = makeShell({ trTab: 'transports', view: 'plan' })
       render(<MTransportSheet planner={planner} shell={shell} />)
 
-      const btn = screen.getByRole('button', { name: 'On map' })
+      const btn = screen.getByRole('button', { name: 'Map' })
       expect(btn).toHaveAttribute('aria-pressed', 'false')
       fireEvent.click(btn)
 
@@ -398,13 +398,78 @@ describe('MTransportSheet', () => {
       const shell = makeShell({ trTab: 'plan', view: 'map' })
       render(<MTransportSheet planner={planner} shell={shell} />)
 
-      const btn = screen.getByRole('button', { name: 'On map' })
+      const btn = screen.getByRole('button', { name: 'Map' })
       expect(btn).toHaveAttribute('aria-pressed', 'true')
       fireEvent.click(btn)
 
       expect(planner.toggleConnection).toHaveBeenCalledWith(7)
       expect(shell.closeSheet).not.toHaveBeenCalled()
       expect(planner.handleSelectDay).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('a booking the chat points at', () => {
+    it('FE-MOB-TRSH-031: ?booking= of a transport opens its sheet once and leaves the URL', () => {
+      const shell = makeShell({ sheet: null })
+      render(<MTransportSheet planner={makePlanner()} shell={shell} />, { initialEntries: ['/trips/1?booking=7'] })
+      expect(shell.openSheet).toHaveBeenCalledTimes(1)
+      expect(shell.openSheet).toHaveBeenCalledWith('transport', { reservationId: 7 })
+    })
+
+    it('FE-MOB-TRSH-032: a booking that is no transport, or an id the trip does not hold, opens nothing', () => {
+      const dinner = { ...FLIGHT, id: 8, type: 'restaurant', endpoints: [] } as unknown as Reservation
+      const shell = makeShell({ sheet: null })
+      render(<MTransportSheet planner={makePlanner({ reservations: [FLIGHT, dinner] })} shell={shell} />, {
+        initialEntries: ['/trips/1?booking=8'],
+      })
+      render(<MTransportSheet planner={makePlanner()} shell={shell} />, { initialEntries: ['/trips/1?booking=99'] })
+      expect(shell.openSheet).not.toHaveBeenCalled()
+    })
+
+    it('FE-MOB-TRSH-033: with &map=1 the route is switched on and the map shown on its day, no sheet opened', () => {
+      const days = [
+        { id: 3, trip_id: 1, day_number: 1, date: '2026-05-01' },
+        { id: 5, trip_id: 1, day_number: 3, date: '2026-05-03' },
+      ]
+      const planner = makePlanner({ days, selectedDayId: 5 })
+      const shell = makeShell({ sheet: null, trTab: 'transports', view: 'plan' })
+      render(<MTransportSheet planner={planner} shell={shell} />, { initialEntries: ['/trips/1?booking=7&map=1'] })
+      expect(shell.openSheet).not.toHaveBeenCalled()
+      expect(planner.toggleConnection).toHaveBeenCalledTimes(1)
+      expect(planner.toggleConnection).toHaveBeenCalledWith(7)
+      expect(shell.setTrTab).toHaveBeenCalledWith('plan')
+      expect(shell.toggleView).toHaveBeenCalledTimes(1)
+      expect(planner.handleSelectDay).toHaveBeenCalledWith(3, false)
+    })
+  })
+
+  // #2701: a leg row opens the sheet on that leg, not on the booking's first one.
+  describe('opened from one leg of a multi-leg train', () => {
+    const TRAIN = {
+      ...FLIGHT, id: 8, type: 'train', title: 'Takayama to Kyoto', confirmation_number: null,
+      metadata: JSON.stringify({
+        train_number: 'Hida 6', seat: '10-4C',
+        legs: [
+          { from: 'Takayama', to: 'Nagoya', train_number: 'Hida 6', seat: '10-4C', platform: '1', dep_time: '09:40', arr_time: '12:10' },
+          { from: 'Nagoya', to: 'Kyoto', train_number: 'Nozomi 67', seat: '4-5A', platform: '14', dep_time: '12:35', arr_time: '13:10' },
+        ],
+      }),
+    } as unknown as Reservation
+
+    it("FE-MOB-TRSH-034: shows the second leg's own train, seat, platform and times", () => {
+      render(<MTransportSheet planner={makePlanner({ reservations: [TRAIN] })} shell={makeShell({ sheet: { id: 'transport', payload: { reservationId: 8, legIndex: 1 } } })} />)
+      expect(screen.getByText(/Nozomi 67/)).toBeInTheDocument()
+      expect(screen.getByText('4-5A')).toBeInTheDocument()
+      expect(screen.getByText('14')).toBeInTheDocument()
+      expect(screen.getByText('12:35')).toBeInTheDocument()
+      expect(screen.getByText('13:10')).toBeInTheDocument()
+      expect(screen.queryByText('10-4C')).not.toBeInTheDocument()
+    })
+
+    it('FE-MOB-TRSH-035: without a leg the sheet still shows the booking as a whole', () => {
+      render(<MTransportSheet planner={makePlanner({ reservations: [TRAIN] })} shell={makeShell({ sheet: { id: 'transport', payload: { reservationId: 8 } } })} />)
+      expect(screen.getByText('10-4C')).toBeInTheDocument()
+      expect(screen.queryByText('4-5A')).not.toBeInTheDocument()
     })
   })
 })

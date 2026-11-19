@@ -1,6 +1,8 @@
+import { readEnv } from '../../app-config';
+import { resolveDataPaths } from '../../app-config/data-paths';
+
 import fs from 'node:fs';
 import path from 'node:path';
-import { readEnv } from '../../app-config';
 
 /**
  * Filesystem layout for the plugin system (#plugins). Code and data are two
@@ -12,7 +14,7 @@ import { readEnv } from '../../app-config';
  * so a Docker deployment can point them at dedicated volumes.
  */
 
-const DATA_ROOT = path.resolve(__dirname, '../../../data');
+const DATA_ROOT = resolveDataPaths().dataDir;
 
 // Read lazily so a deployment (or a test) can point these at dedicated volumes
 // via env without import-order surprises.
@@ -125,6 +127,24 @@ export function serverCodeRoot(): string {
 }
 
 /**
+ * The network grant for a plugin child, on the Node versions that need one.
+ *
+ * Up to Node 24 `--permission` leaves the network alone. From Node 25 it covers the
+ * network too, and a child started without `--allow-net` gets ERR_ACCESS_DENIED on
+ * every lookup and connect, so no plugin can reach even a host it was granted (#3045).
+ * Node 24 exits with "bad option" when given the flag, so it is passed only where
+ * this Node knows it.
+ *
+ * This restores what Node 24 does and widens nothing: which hosts a plugin may reach
+ * is decided by the egress guard inside the child, from its granted `egress[]`.
+ */
+export function pluginNetPermissionArgs(
+  knownFlags: { has(flag: string): boolean } = process.allowedNodeEnvironmentFlags,
+): string[] {
+  return knownFlags.has('--allow-net') ? ['--allow-net'] : [];
+}
+
+/**
  * Node OS-level permission-model flags for a plugin child (#plugins, #2 security
  * hardening). `--permission` denies filesystem write, child_process, worker
  * threads and native addons outright; `--allow-fs-read` is scoped to exactly the
@@ -153,7 +173,9 @@ export function pluginPermissionArgs(pluginId: string): string[] {
     // off by accident.
     if (!warnedPermissionsOff) {
       warnedPermissionsOff = true;
-      console.warn('[plugins] TREK_PLUGIN_PERMISSIONS=off — the OS permission jail is DISABLED; installed plugins run with full Node access to this process. Only use this on a machine you fully trust.');
+      console.warn(
+        '[plugins] TREK_PLUGIN_PERMISSIONS=off — the OS permission jail is DISABLED; installed plugins run with full Node access to this process. Only use this on a machine you fully trust.',
+      );
     }
     return [];
   }
@@ -167,5 +189,6 @@ export function pluginPermissionArgs(pluginId: string): string[] {
     `--allow-fs-read=${path.join(codeRoot, '..', 'package.json')}`,
     // The plugin's own code, by REAL path (see pluginRealCodeDir).
     `--allow-fs-read=${pluginRealCodeDir(pluginId)}`,
+    ...pluginNetPermissionArgs(),
   ];
 }

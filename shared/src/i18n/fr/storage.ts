@@ -6,7 +6,7 @@ const storage: TranslationStrings = {
   'storage.field.endpoint': 'URL du point de terminaison',
   'storage.help.endpoint':
     'URL de base du service compatible S3, par ex. https://s3.example.com ou http://127.0.0.1:9000.',
-  'storage.field.bucket': 'Bucket',
+  'storage.field.bucket': 'Bucket', // same-as-en
   'storage.field.accessKeyId': "ID de clé d'accès",
   'storage.field.secretAccessKey': "Clé d'accès secrète",
   'storage.field.region': 'Région',
@@ -29,15 +29,15 @@ const storage: TranslationStrings = {
   'storage.discardAndReload': 'Abandonner mes modifications et recharger',
   'storage.configError.banner':
     "Échec du chargement des paramètres de stockage enregistrés — l'enregistrement les remplacera : {error}",
-  'storage.backends.title': 'Backends',
+  'storage.backends.title': 'Backends', // same-as-en
   'storage.backends.add': 'Ajouter un backend',
   'storage.backends.usedBy': 'Utilisé par : {categories}',
   'storage.backends.unused': 'Non assigné à aucune catégorie',
-  'storage.backends.envReadOnly': "Défini par une variable d'environnement — lecture seule",
+  'storage.backends.envReadOnly': "Défini par une variable d'environnement (lecture seule)",
   'storage.source.built-in': 'Intégré',
   'storage.source.env': 'Environnement',
   'storage.source.settings': 'Paramètres',
-  'storage.type.local': 'Local',
+  'storage.type.local': 'Local', // same-as-en
   'storage.type.s3': 'S3',
   'storage.type.mirror': 'Miroir',
   'storage.actions.test': 'Tester',
@@ -53,7 +53,7 @@ const storage: TranslationStrings = {
   'storage.form.addTitle': 'Ajouter un backend',
   'storage.form.editTitle': 'Modifier le backend',
   'storage.form.name': 'Nom',
-  'storage.form.type': 'Type',
+  'storage.form.type': 'Type', // same-as-en
   'storage.form.apply': 'Appliquer',
   'storage.form.cancel': 'Annuler',
   'storage.form.duplicateName': 'Un backend nommé {name} existe déjà',
@@ -116,7 +116,8 @@ const storage: TranslationStrings = {
   'storage.sync.error': 'Échec de la synchronisation : {error}',
   'storage.sync.prompt': 'Les objets existants ne sont pas encore répliqués — synchroniser maintenant ?',
   'storage.sync.dismiss': 'Ignorer',
-  'storage.usage.line': '{objects} objets · {size}',
+  'storage.usage.line': '{count} objets · {size}',
+  'storage.usage.line.one': '{count} objet · {size}',
   'storage.usage.computed': 'Utilisation calculée {age}',
   'storage.usage.never': 'Utilisation pas encore calculée',
   'storage.usage.refresh': 'Actualiser',
@@ -125,7 +126,8 @@ const storage: TranslationStrings = {
 
   // Category migration (copy → flip → delta sweep)
   'storage.migrate.promptTitle': 'Déplacer les objets existants vers le nouveau backend ?',
-  'storage.migrate.promptLine': '{category} : {objects} objets ({size}) de {from} vers {to}',
+  'storage.migrate.promptLine': '{category} : {count} objets ({size}) de {from} vers {to}',
+  'storage.migrate.promptLine.one': '{category} : {count} objet ({size}) de {from} vers {to}',
   'storage.migrate.promptLineUnknown':
     '{category} : taille inconnue (utilisation pas encore calculée) de {from} vers {to}',
   'storage.migrate.move': 'Déplacer les objets existants',
@@ -135,10 +137,50 @@ const storage: TranslationStrings = {
   'storage.migrate.doneFailures': "{failed} en échec — ces objets n'ont pas été copiés vers le nouveau backend",
   'storage.migrate.failed': "Échec du déplacement : {error} — la catégorie n'a pas été changée",
   'storage.migrate.cancelled': "Déplacement annulé — rien n'a été changé",
-  'storage.migrate.reclaimable': '{objects} objets ({size}) restent sur {from} — à récupérer manuellement',
+  'storage.migrate.reclaimable': '{count} objets ({size}) restent sur {from}, à récupérer manuellement',
+  'storage.migrate.reclaimable.one': '{count} objet ({size}) reste sur {from}, à récupérer manuellement',
   'storage.migrate.cancel': 'Annuler le déplacement',
   'storage.migrate.promptCancel': 'Annuler',
   'storage.migrate.queued': "En file d'attente : {categories}",
-  'storage.migrate.queueDropped': "Impossible de démarrer le déplacement suivant — la file d'attente restante a été vidée : {categories}",
+  'storage.migrate.queueDropped':
+    "Impossible de démarrer le déplacement suivant — la file d'attente restante a été vidée : {categories}",
+  'storage.reclaim.title': 'Fichiers non référencés',
+  'storage.reclaim.hint':
+    "Chaque nuit, TREK recherche les fichiers envoyés qu'aucun voyage, lieu, journal, collection ou utilisateur n'utilise plus, par exemple après la suppression d'un voyage.",
+  'storage.reclaim.check': 'Vérifier maintenant',
+  'storage.reclaim.checked': 'Dernière vérification : {age}',
+  'storage.reclaim.never': 'Pas encore vérifié',
+  'storage.reclaim.delete': 'Supprimer les fichiers non référencés',
+  'storage.reclaim.deleteHint':
+    "Désactivé, la vérification nocturne se contente de signaler. Activé, un fichier inutilisé depuis une semaine est supprimé. Les fichiers que tu supprimes dans TREK sont de toute façon supprimés un jour plus tard, une fois qu'aucune annulation ne peut plus les restaurer.",
+  'storage.reclaim.freeable': 'Peut être libéré',
+  'storage.reclaim.waiting': "Inutilisé depuis moins d'une semaine",
+  'storage.reclaim.deleted': 'Libéré lors du dernier nettoyage nocturne',
+  'storage.reclaim.nothing': 'Aucun fichier non référencé trouvé.',
+  'storage.reclaim.stopped':
+    "La dernière vérification s'est arrêtée prématurément, car la base de données a été restaurée pendant son exécution.",
+  'storage.reclaim.skip.sources_missing': "Ignoré : toutes les parties de TREK n'ont pas pu être interrogées",
+  'storage.reclaim.skip.shared_location': 'Ignoré : partage son emplacement avec une autre catégorie',
+  'storage.reclaim.skip.list_failed': "Ignoré : la liste des fichiers n'a pas pu être obtenue",
+  'storage.reclaim.skip.source_failed': 'Ignoré : une recherche a échoué',
+  'storage.reclaim.running': 'Vérification…',
+  'storage.reclaim.stoppedFailed':
+    "La dernière vérification s'est arrêtée après une erreur. Elle se relance cette nuit.",
+  'storage.reclaim.skip.foreign_install': 'Ignoré : une autre installation de TREK utilise ce stockage',
+  'storage.reclaim.skip.owner_unknown': "Ignoré : TREK n'a pas pu marquer ce stockage comme le sien",
+  'storage.reclaim.skip.delete_failed': 'Arrêté : le stockage a refusé une suppression',
+  'storage.reclaim.skip.interrupted': 'Arrêté avant la fin, les chiffres sont partiels',
+  'storage.reclaim.confirmNeeded':
+    "Plus d'un cinquième de ces fichiers semblent inutilisés. Rien n'est supprimé ici tant que tu n'as pas confirmé que c'est normal.",
+  'storage.reclaim.confirm': 'Confirmer',
+  'storage.reclaim.confirmed': 'Confirmé pour les 14 prochains jours.',
+  'storage.reclaim.error.reclaim_busy': 'Une autre tâche de stockage est en cours. Réessaie dans un instant.',
+  'storage.reclaim.error.reclaim_demo': 'Indisponible sur une instance de démonstration.',
+  'storage.reclaim.error.reclaim_nothing_to_confirm': "Il n'y a plus rien à confirmer. Lance d'abord une vérification.",
+  'storage.reclaim.skip.backup_running': 'Ignoré : une sauvegarde était en cours',
+  'storage.reclaim.error.reclaim_confirm_stale':
+    'Le nombre a changé depuis son affichage. Vérifie le nouveau chiffre et confirme à nouveau.',
+  'storage.reclaim.error.reclaim_install_unknown':
+    "TREK n'a pas pu lire l'identifiant de son installation, il ne supprime donc rien. Vérifie le dossier de données.",
 };
 export default storage;

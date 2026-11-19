@@ -92,8 +92,9 @@ export default function MCollLabelsSheet({
   const title = mode === 'assign' ? t('collections.labels.assignN', { count: selectedCount }) : t('collections.labels.manage')
 
   return (
-    <MSheet open={open} onClose={onClose} material="opaque" ariaLabel={title}>
-      <SheetHeader title={title} onClose={onClose} closeLabel={t('common.close')} />
+    <MSheet open={open} onClose={onClose} material="glass" ariaLabel={title}>
+      <SheetHeader
+        icon={<Tag size={19} strokeWidth={1.8} />} title={title} onClose={onClose} closeLabel={t('common.close')} />
       <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[18px] pt-4">
         {mode === 'manage' && (
           <>
@@ -101,7 +102,7 @@ export default function MCollLabelsSheet({
             <input
               value={name}
               onChange={e => setName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') submit() }}
+              onKeyDown={e => { if (e.key === 'Enter') void submit() }}
               placeholder={t('collections.labels.namePlaceholder')}
               className={INPUT_CLS}
             />
@@ -199,7 +200,7 @@ export default function MCollLabelsSheet({
           <button type="button" onClick={onSwitchToManage} className="text-[0.75rem] font-bold text-m-muted">
             {t('collections.labels.manage')}
           </button>
-          <PrimaryPill className="ml-auto" onClick={assign} disabled={checked.length === 0 || busy}>
+          <PrimaryPill className="ms-auto" onClick={assign} disabled={checked.length === 0 || busy}>
             <Tag size={13} strokeWidth={2.4} /> {t('collections.labels.assign')}
           </PrimaryPill>
         </SheetFooter>

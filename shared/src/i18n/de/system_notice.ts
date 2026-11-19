@@ -9,8 +9,8 @@ const system_notice: TranslationStrings = {
   'system_notice.welcome_v1.highlight_plan': 'Tagesweise Reisepläne für jede Reise',
   'system_notice.welcome_v1.highlight_share': 'Gemeinsam mit Reisepartnern planen',
   'system_notice.welcome_v1.highlight_offline': 'Funktioniert offline auf dem Handy',
-  'system_notice.dev_test_modal.title': '[Dev] Test notice',
-  'system_notice.dev_test_modal.body': 'This is a dev-only test notice.',
+  'system_notice.dev_test_modal.title': '[Dev] Testhinweis',
+  'system_notice.dev_test_modal.body': 'Dies ist ein Testhinweis nur für Entwickler.',
   // Dankeschön + Projektunterstützung (1x pro Installation und pro Update)
   'system_notice.thank_you_support.title': 'Danke, dass du TREK nutzt',
   'system_notice.thank_you_support.body':
@@ -57,16 +57,20 @@ const system_notice: TranslationStrings = {
     'Das 3.0.14-Upgrade hat einen oder mehrere Konflikte bei Benutzernamen oder E-Mail-Adressen festgestellt, die durch führende oder nachgestellte Leerzeichen in gespeicherten Konten verursacht wurden. Betroffene Konten wurden automatisch umbenannt. Prüfe die Serverprotokolle auf Zeilen, die mit **[migration] WHITESPACE COLLISION** beginnen, um die betroffenen Konten zu identifizieren.',
   // The release modal. One stable set of keys: each big release swaps the copy in place.
   'system_notice.release_notes.eyebrow': 'Update installiert',
-  'system_notice.release_notes.headline': 'Vier Dinge, die TREK jetzt selbst kann.',
-  'system_notice.release_notes.intro': 'Eine eigene Orts-API, Roadtrips komplett geplant, dein Standortverlauf wieder in deiner Hand, und deine Dokumente im Abgleich.',
+  'system_notice.release_notes.headline': 'Der richtige Ort, zuerst.',
+  'system_notice.release_notes.intro':
+    'Ortssuche, Adresssuche und Routing laufen jetzt auf TREKs eigenen Servern, gesponsert von dataforest cloud, und jedes TREK kann sein Wissen über Orte mit allen anderen teilen.',
   'system_notice.release_notes.features_label': 'Die Highlights',
   'system_notice.release_notes.features_aside': 'Längst nicht alles',
-  'system_notice.release_notes.feature_places_title': 'TREK Places API',
-  'system_notice.release_notes.feature_places_body': 'Der erste Open-Source-Reiseplaner mit eigener Orts-API. 73,6 Millionen Orte, kein Key, kein Kontingent.',
-  'system_notice.release_notes.feature_roadtrip_title': 'Roadtrip-Addon',
-  'system_notice.release_notes.feature_roadtrip_body': 'Plant die Fahrt selbst: Route, Strecke, Stunden und Stopps. Aus, bis ein Admin es einschaltet.',
-  'system_notice.release_notes.feature_dawarich_title': 'Dawarich-Integration',
-  'system_notice.release_notes.feature_dawarich_body': 'Die selbst gehostete Antwort auf Google Timeline, jetzt direkt in TREK lesbar. TREK liest, und nur das.',
+  'system_notice.release_notes.feature_search_title': 'Ortssuche, die trifft',
+  'system_notice.release_notes.feature_search_body':
+    'Städte, Inseln, Sehenswürdigkeiten und Flughäfen per Code stehen oben, Cafés kommen aus deiner Nähe, und Vorschläge erscheinen schon beim Tippen.',
+  'system_notice.release_notes.feature_share_title': 'Ortsdetails, geteilt',
+  'system_notice.release_notes.feature_share_body':
+    'Teile Websites, Öffnungszeiten und Fotos Feld für Feld mit jedem TREK, und deine gespeicherten Orte übernehmen, was andere ergänzt haben.',
+  'system_notice.release_notes.feature_routing_title': 'Schnelleres Routing',
+  'system_notice.release_notes.feature_routing_body':
+    'Ein ganzer Tag wird mit bis zu zwanzig Stopps in einem Zug berechnet, eine langsame Route hält den Rest nicht mehr auf, und ÖPNV fragt einen zweiten Anbieter, wenn der erste nichts findet.',
   'system_notice.release_notes.footnote': 'Dazu kommt eine lange Liste kleinerer Änderungen überall sonst in TREK.',
   'system_notice.release_notes.notes_label': 'Release Notes',
   'system_notice.release_notes.note_eyebrow': 'Ein Wort vom Maintainer',
@@ -80,13 +84,11 @@ const system_notice: TranslationStrings = {
   'system_notice.release_notes.note_body_after':
     'Dann kamt ihr. Innerhalb weniger Monate wart ihr Tausende: Sterne, Bug-Reports, Übersetzungen in Sprachen, die ich nicht spreche, Pull Requests von Leuten, die ich nie getroffen habe. Ich schaue noch immer jeden Morgen als Erstes ins Repository, und so richtig real fühlt es sich bis heute nicht an.',
   'system_notice.release_notes.note_closing': 'Danke, dass du dabei bist. Viele Grüße, Maurice.',
-  'system_notice.release_notes.support_lead':
-    'TREK ist kostenlos und wird es immer bleiben, aber Server, Domains und viele späte Nächte sind es nicht.',
+  'system_notice.release_notes.support_label': 'Unabhängig bleiben',
+  'system_notice.release_notes.support_lead': 'Ohne Google und Co.',
   'system_notice.release_notes.support_text':
-    'Wenn TREK sich einen Platz auf deinen Reisen verdient hat, spendier mir einen Kaffee und hilf mit, dass auch das nächste Release kommt.',
+    'Ortssuche, Adresssuche und Routing laufen auf TREKs eigenen Servern, heute gesponsert von dataforest cloud. Dafür kämpfe ich jeden Tag, und damit es so bleibt, braucht es deine Unterstützung.',
   'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
   'system_notice.release_notes.cta_kofi': 'Ko-fi unterstützen',
-  'system_notice.release_notes.feature_docsync_title': 'Dokumenten-Sync',
-  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud und Synology Drive. Die Dokumente einer Reise fließen in beide Richtungen mit dem Speicher, den du ohnehin betreibst.',
 };
 export default system_notice;

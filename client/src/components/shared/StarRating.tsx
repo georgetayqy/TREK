@@ -29,7 +29,7 @@ export function Stars({ value, size = 15, onRate, myRating = null, ariaLabel }: 
       role={onRate ? 'radiogroup' : undefined}
       aria-label={ariaLabel}
       style={{ display: 'inline-flex', gap: 2, cursor: onRate ? 'pointer' : 'default' }}
-      onMouseLeave={() => setHover(null)}
+      onPointerLeave={() => setHover(null)}
     >
       {[1, 2, 3, 4, 5].map(i => {
         // Fractional fill for averages: full below, empty above, clipped between.
@@ -52,7 +52,11 @@ export function Stars({ value, size = 15, onRate, myRating = null, ariaLabel }: 
             role="radio"
             aria-checked={myRating === i}
             aria-label={`${i}`}
-            onMouseEnter={() => setHover(i)}
+            // A preview for a pointer that hovers (a mouse, a trackpad, a pen held
+            // above the screen). A finger has no hover: the enter it fires on a
+            // tap has no leave after it, so the preview stuck and an unrated
+            // place showed five full stars beside "Not rated yet".
+            onPointerEnter={e => { if (e.pointerType !== 'touch') setHover(i) }}
             onFocus={() => setHover(i)}
             onBlur={() => setHover(null)}
             onClick={() => onRate(myRating === i ? null : i)}
@@ -111,13 +115,13 @@ export default function PlaceRating({ ratings, ratingAvg, onRate, size = 16, com
 
       {/* Who voted — avatar strip. */}
       {!compact && ratings.length > 0 && (
-        <span style={{ display: 'inline-flex', marginLeft: 'auto' }}>
+        <span style={{ display: 'inline-flex', marginInlineStart: 'auto' }}>
           {ratings.slice(0, 6).map((r, i) => (
             <span key={r.user_id} className="bg-surface-tertiary text-content-muted" style={{
               width: 18, height: 18, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 'calc(8px * var(--fs-scale-caption, 1))', fontWeight: 700,
-              marginLeft: i ? -5 : 0, border: '1.5px solid var(--bg-elevated, #fff)',
+              marginInlineStart: i ? -5 : 0, border: '1.5px solid var(--bg-elevated, #fff)',
             }}>
               {r.avatar ? <img src={avatarSrc(r.avatar)!} alt={r.username || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.username?.[0]?.toUpperCase()}
             </span>

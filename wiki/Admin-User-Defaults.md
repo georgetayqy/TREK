@@ -1,0 +1,102 @@
+# Admin: User Defaults
+
+The **User Defaults** tab (in the **Users** group of the admin side navigation, `/admin?tab=defaults`) sets instance-wide defaults for user settings. Users who have not changed a setting see these values; their own changes always take priority. The defaults are merged in every time a user's settings load, so a default you change later reaches everyone who never picked their own value.
+
+![Admin panel on the User Defaults tab: the Default User Settings card with colour mode, temperature unit, distance unit, time format, week start, display currency and blurred booking codes, beside the Map card with map template, CARTO key, routing fields, preview and map engine](assets/AdminUserDefaults.png)
+
+On a wide screen the tab has two cards side by side: **Default User Settings** on the left, **Map** on the right. On a narrow screen the map card follows below. The phone admin has the same tab as a section of its own.
+
+## Saving and resetting
+
+Every choice saves the moment you pick it, and a toast confirms **Default saved**. Text fields save when you leave the field.
+
+Once a default is set, a small **reset** link appears next to its name. It removes the default, so users without their own value fall back to TREK's built-in one. While no default is set, none of the choices in a row is highlighted.
+
+## Default User Settings
+
+| Row | Choices | Built-in value when no default is set |
+|-----|---------|------------------------------|
+| **Color Mode** | **Light**, **Dark**, **Auto** | Light |
+| **Temperature Unit** | **°C Celsius**, **°F Fahrenheit** | Celsius |
+| **Distance Unit** | **km Metric**, **mi Imperial** | Metric |
+| **Time Format** | **24h (14:30)**, **12h (2:30 PM)** | 24h |
+| **Week starts on** | Monday, Sunday, Saturday (named in your language) | Monday |
+| **Display currency** | A searchable list of currencies | None (Costs shows each trip's own currency) |
+| **Blur Booking Codes** | **On**, **Off** | Off |
+
+**Week starts on** decides which day opens each row of every date picker. Vacay keeps its own week start per plan.
+
+**Display currency**: amounts in Costs are shown converted to this currency for display only; the original amounts are unchanged. A user without a display currency of their own gets this one. See [Display-Settings](Display-Settings) and [Currencies](Currencies).
+
+**Blur Booking Codes** blurs confirmation codes and reference numbers until the user hovers or taps them. See [Display-Settings](Display-Settings#blur-booking-codes).
+
+## Map
+
+The map card configures the map users see and the routing services behind it, from top to bottom:
+
+### Map Template
+
+The tile source for the standard map. Pick a preset from **Select template...** or type any XYZ tile URL or MapLibre style URL into the field below it. The presets are **OpenStreetMap**, **OpenStreetMap DE**, **OpenFreeMap Positron**, **OpenFreeMap Bright**, **CartoDB Light**, **CartoDB Dark** and **Stadia Smooth**. Leave the field empty to keep TREK's built-in default. See [Map-Settings](Map-Settings) for what each preset looks like.
+
+### Shared CARTO key
+
+Used for every user who has not entered their own key, so the whole instance gets CARTO tiles without a watermark. The two CartoDB presets need it. Stored encrypted. See [Map-Settings](Map-Settings#carto-api-key).
+
+### Own routing engine
+
+The address of an OSRM instance of your own, for example `https://osrm.example.org`. Empty uses the public servers, which allow about one request a second: enough for a day plan, tight for a road trip. With the TREK services or an own Valhalla as **Routing service**, OSRM only calculates the days Valhalla cannot answer.
+
+### Routing service
+
+Which Valhalla TREK asks, and with it how much of the routing Valhalla does.
+
+- **Automatic** (nothing chosen): the TREK services, or **Own Valhalla instance** when one is set. If only **Own routing engine** is set, no Valhalla is asked.
+- **TREK services**: the Valhalla at `valhalla.liketrek.com` (or `TREK_VALHALLA_URL`), a planet with elevation data. It calculates every route: the days of the planner and the road trip on foot, by bike and by car, driving around toll roads, motorways and ferries, and the routes, heights and ways of tours. This server asks it with the installation key, so the browser never talks to it and no restart is needed. Where it cannot answer (no key yet, the day's allowance spent, the service unreachable or failing, a question that runs out its ten-second deadline, a shared page without a sign-in, or no way for one of the day's legs), OSRM calculates that day as it did before, without a message; a day is always calculated by one engine, never one leg by each, because the two estimate travel times differently. What only Valhalla can answer (avoiding road classes, tours) goes to the public FOSSGIS Valhalla instead, except a question that only ran out its deadline, which FOSSGIS would take as long over. Such a slow question, a very long bike route for example, is answered 504 and changes nothing for anyone else: the next question goes to the TREK services again. Only a host that cannot be reached or answers with a server error is left alone, for a minute on the server and ten minutes in a browser tab, and a spent allowance for as long as the service says (an hour at most). Each user may ask 60 routing questions a minute through this server, and the whole installation 100.
+- **Public Valhalla (FOSSGIS)**: `valhalla1.openstreetmap.de`, as before: OSRM calculates the routes, and Valhalla only answers what OSRM cannot (driving around toll roads, motorways and ferries, and tours). This is also what an installation without the TREK services gets.
+- **Own Valhalla instance**: the address below. Like the TREK services it calculates every route, with OSRM taking over a day it cannot answer.
+
+A day longer than one request may carry is asked in pieces that share a stop: twenty stops a piece on the TREK services and an own Valhalla, one after another without a pause, and ten on FOSSGIS, paced to its one request a second. A day cut for the TREK services that ends up at FOSSGIS is cut again into pieces of ten.
+
+Routes the browser has kept on the device are kept per engine, so switching the routing service never shows a day calculated by the other engine.
+
+The allowance the TREK services count for routing is shown in the TREK API card under **Admin → Settings**.
+
+### Own Valhalla instance
+
+The address of a Valhalla instance of your own, for example `https://valhalla.example.org`. It is asked when **Routing service** is set to it, or left on **Automatic**.
+
+Both routing fields save when you leave them (or press **Enter**), and only an admin can set them. After changing either one, **restart the server and reload the page**: the browser only talks to routing hosts the server names in its security policy, and that policy is built once at start. There is no environment variable for either engine. See [Road-Trip](Road-Trip#routing-engines) for what each combination does and what your own instances need.
+
+### Preview
+
+A small map centred on Paris shows the current **Map Template** (with the CARTO key applied), so you can check a tile source before users see it.
+
+### Map engine
+
+The default map for everyone on this instance; each user can still override it in their own settings.
+
+- **Standard (free)**: the Leaflet map, using the **Map Template** above. This is the built-in default.
+- **Mapbox (3D)**: Mapbox GL with 3D buildings and terrain. Needs a Mapbox token.
+- **MapLibre (OpenFreeMap)**: MapLibre GL with OpenFreeMap vector tiles. No token needed.
+
+Depending on the engine, more rows appear below it:
+
+| Row | Shown for | Notes |
+|-----|-----------|-------|
+| **Shared Mapbox token** | Mapbox (3D) | Used for every user who has not entered their own token, so the whole instance gets Mapbox without sharing the key one by one. Stored encrypted. |
+| **Map style** | Mapbox (3D), MapLibre (OpenFreeMap) | Pick a style from **Choose a style…** or type a style URL. Each engine keeps its own style, so switching engines does not overwrite the other one. |
+| **3D buildings & terrain** | Mapbox (3D) | **On** or **Off**. On unless set otherwise. |
+| **High-quality mode** | Mapbox (3D) | **On** or **Off**. Off unless set otherwise. |
+
+![The Map card with Mapbox (3D) picked as the map engine, showing the Shared Mapbox token, Map style, 3D buildings & terrain and High-quality mode rows below it](assets/AdminUserDefaults-Mapbox.png)
+
+See [Map-Settings](Map-Settings) for the styles and what the two Mapbox switches do.
+
+## See also
+
+- [Admin-Panel-Overview](Admin-Panel-Overview): all admin tabs
+- [Display-Settings](Display-Settings): the same settings from the user's side
+- [Appearance-Settings](Appearance-Settings): colour mode and the rest of the look
+- [Map-Settings](Map-Settings): map engines, tile sources, styles and keys
+- [Road-Trip](Road-Trip#routing-engines): routing engines in detail
+- [Currencies](Currencies): display and trip currencies

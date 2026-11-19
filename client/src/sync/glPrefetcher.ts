@@ -17,6 +17,8 @@
  */
 import { computeBbox, tileRange, type TileBbox } from './tilePrefetcher'
 import type { Place } from '../types'
+import { openCacheStorage } from './openCacheStorage'
+import { isNativeIos } from '../native/platform'
 
 /** OpenFreeMap serves vector tiles up to z14 and overzooms from there. */
 const VECTOR_MAX_ZOOM = 14
@@ -25,8 +27,15 @@ const VECTOR_MAX_ZOOM = 14
 // The low zooms cost a few dozen tiles at most.
 const VECTOR_MIN_ZOOM = 0
 
-/** Requests in flight, kept low for the same reason the raster side keeps it low. */
-const CONCURRENCY = 6
+/**
+ * Requests in flight. OpenFreeMap allows offline downloads with at most four
+ * parallel requests, at most 3000 tiles and at most 50 MB each
+ * (openfreemap.org/tos), so the run keeps under all three.
+ */
+const CONCURRENCY = 4
+
+/** Byte budget per run, the 50 MB OpenFreeMap allows for one download. */
+const MAX_RUN_BYTES = 50 * 1024 * 1024
 
 /**
  * Hard cap on vector tiles per run. Each is far larger than a raster tile but
@@ -35,19 +44,75 @@ const CONCURRENCY = 6
 const MAX_VECTOR_TILES = 2000
 
 /** Workbox runtime cache for the vector basemap (see vite.config.js). */
-const VECTOR_CACHE = 'gl-map-offline'
+export const VECTOR_CACHE = 'gl-map-offline'
 
 /**
- * Latin glyph ranges. A label needs the range its codepoints fall in, and Latin
- * text lives in the first few; asking for all 256 ranges would download megabytes
- * of CJK nobody on this map is going to render.
+ * Glyph ranges every map needs: Latin, Greek, Cyrillic, Hebrew, Arabic and the
+ * punctuation blocks. A label needs the range its codepoints fall in; asking for
+ * all 256 ranges would download megabytes of scripts nobody on this map renders.
  */
 const GLYPH_RANGES = ['0-255', '256-511', '512-767', '768-1023', '1024-1279', '1280-1535', '1536-1791', '8192-8447', '8448-8703']
+
+/** One range string per 256 codepoints from `from` up to `to`. */
+function rangesBetween(from: number, to: number): string[] {
+  const out: string[] = []
+  for (let start = from - (from % 256); start <= to; start += 256) out.push(`${start}-${start + 255}`)
+  return out
+}
+
+/**
+ * Scripts whose labels a trip in that part of the world shows in the local
+ * name, so a trip there gets their ranges too, or its labels render blank
+ * offline. Boxes are generous [minLng, minLat, maxLng, maxLat].
+ */
+const REGIONAL_GLYPHS: { box: [number, number, number, number]; ranges: string[] }[] = [
+  // China, Japan, Korea, Taiwan: kana and CJK punctuation, unified ideographs, Hangul, full-width forms.
+  {
+    box: [73, 18, 146, 54],
+    ranges: [...rangesBetween(0x3000, 0x30ff), ...rangesBetween(0x4e00, 0x9fff), ...rangesBetween(0xac00, 0xd7af), ...rangesBetween(0xff00, 0xffef)],
+  },
+  // Thailand, Laos, Cambodia, Myanmar.
+  { box: [92, 5, 110, 28], ranges: rangesBetween(0x0e00, 0x0eff).concat(rangesBetween(0x1000, 0x109f), rangesBetween(0x1780, 0x17ff)) },
+  // India, Nepal, Bangladesh, Sri Lanka: Devanagari through Malayalam, Sinhala.
+  { box: [60, 5, 98, 36], ranges: rangesBetween(0x0900, 0x0dff) },
+  // Georgia and Armenia.
+  { box: [39, 38, 47, 44], ranges: rangesBetween(0x0530, 0x058f).concat(rangesBetween(0x10a0, 0x10ff)) },
+  // Ethiopia and Eritrea.
+  { box: [33, 3, 48, 18], ranges: rangesBetween(0x1200, 0x139f) },
+]
+
+/** The glyph ranges a map of `bbox` needs: the common ones plus its region's scripts. */
+function glyphRangesFor(bbox: TileBbox | null): string[] {
+  const out = new Set(GLYPH_RANGES)
+  if (bbox) {
+    for (const { box, ranges } of REGIONAL_GLYPHS) {
+      const overlaps = bbox.minLng <= box[2] && bbox.maxLng >= box[0] && bbox.minLat <= box[3] && bbox.maxLat >= box[1]
+      if (overlaps) for (const r of ranges) out.add(r)
+    }
+  }
+  return [...out]
+}
+
+interface StyleSource {
+  type?: string
+  url?: string
+  tiles?: string[]
+  minzoom?: number
+  maxzoom?: number
+}
+
+/** One tiled source of the style, with the zooms it actually serves. */
+interface TileSource {
+  template: string
+  minZoom: number
+  maxZoom: number
+  vector: boolean
+}
 
 interface StyleDoc {
   sprite?: string
   glyphs?: string
-  sources?: Record<string, { url?: string; tiles?: string[] }>
+  sources?: Record<string, StyleSource>
   layers?: { layout?: { 'text-font'?: string[] } }[]
 }
 
@@ -80,48 +145,89 @@ function fontStacks(style: StyleDoc): string[] {
  * the Service Worker's handler, so a repeated or resumed run over a warm cache
  * costs almost nothing. Same reasoning as the raster side.
  */
-async function warm(cache: Cache | null, url: string): Promise<boolean> {
+async function warm(cache: Cache | null, url: string): Promise<number> {
   try {
-    if (cache && (await cache.match(url))) return false
+    if (cache && (await cache.match(url))) return 0
     const res = await fetch(url, { mode: 'cors' })
-    if (!res.ok) return false
+    if (!res.ok) return 0
     await cache?.put(url, res.clone())
-    return true
+    return await sizeOf(res)
   } catch {
-    return false
+    return 0
   }
 }
 
 async function openVectorCache(): Promise<Cache | null> {
-  try {
-    return await caches.open(VECTOR_CACHE)
-  } catch {
-    return null
-  }
+  return openCacheStorage(VECTOR_CACHE)
 }
 
-/** Tile coordinates covering the box, low zoom first so a truncated run is still useful. */
-function enumerateVectorTiles(bbox: TileBbox, minZoom: number, maxZoom: number): [number, number, number][] {
-  const out: [number, number, number][] = []
-  for (let z = minZoom; z <= maxZoom; z++) {
-    // Same screen-widened rectangle as the raster side: the opening fitBounds
-    // view shows more than the places extent on the non-limiting axis (#2180).
-    const { minX, maxX, minY, maxY } = tileRange(bbox, z)
-    for (let x = minX; x <= maxX; x++) {
-      for (let y = minY; y <= maxY; y++) {
-        out.push([z, x, y])
-        if (out.length >= MAX_VECTOR_TILES) return out
-      }
+/**
+ * Tile URLs covering the box, vector sources first and low zoom first within
+ * each, so a truncated run is still useful. A source is only asked for the
+ * zooms it serves: OpenFreeMap's shaded relief stops at z6 and answers 404
+ * above it.
+ */
+function enumerateTileUrls(bbox: TileBbox, sources: TileSource[]): string[] {
+  const out: string[] = []
+  for (const source of sources) {
+    for (let z = Math.max(source.minZoom, VECTOR_MIN_ZOOM); z <= Math.min(source.maxZoom, VECTOR_MAX_ZOOM); z++) {
+      if (!pushZoomTiles(out, source.template, bbox, z)) return out
     }
   }
   return out
 }
 
+/** One zoom's tiles of a source onto `out`; false once the run is full. */
+function pushZoomTiles(out: string[], template: string, bbox: TileBbox, z: number): boolean {
+  // Same screen-widened rectangle as the raster side: the opening fitBounds
+  // view shows more than the places extent on the non-limiting axis (#2180).
+  const { minX, maxX, minY, maxY } = tileRange(bbox, z)
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      out.push(template.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)))
+      if (out.length >= MAX_VECTOR_TILES) return false
+    }
+  }
+  return true
+}
+
+/**
+ * The style's tiled sources, vector first. A source given as a TileJSON
+ * reference gets its template and zooms from there: the tile path carries a
+ * planet version, and asking without that segment answers 200 with an empty
+ * body, so it cannot be guessed. A source without tiles (GeoJSON) is skipped.
+ */
+async function readTileSources(style: StyleDoc, cache: Cache | null): Promise<TileSource[]> {
+  const out: TileSource[] = []
+  for (const source of Object.values(style.sources ?? {})) {
+    let { tiles, minzoom, maxzoom } = source
+    if (!tiles?.[0] && source.url) {
+      await warm(cache, source.url)
+      const tileJson = await fetchJson<{ tiles?: string[]; minzoom?: number; maxzoom?: number }>(source.url)
+      tiles = tileJson?.tiles
+      minzoom ??= tileJson?.minzoom
+      maxzoom ??= tileJson?.maxzoom
+    }
+    if (!tiles?.[0]) continue
+    out.push({
+      template: tiles[0],
+      minZoom: minzoom ?? VECTOR_MIN_ZOOM,
+      maxZoom: maxzoom ?? VECTOR_MAX_ZOOM,
+      vector: source.type !== 'raster' && source.type !== 'raster-dem',
+    })
+  }
+  return out.sort((a, b) => Number(b.vector) - Number(a.vector))
+}
+
 /**
  * The device-wide half: the style, its TileJSON, the sprite and the glyphs.
- * Returns the tile URL template, or null when the style could not be read.
+ * Returns the vector tile URL template, or null when the style could not be read.
  */
-export async function prefetchStyleAssets(styleUrl: string): Promise<string | null> {
+export async function prefetchStyleAssets(styleUrl: string, bbox: TileBbox | null = null): Promise<string | null> {
+  return (await prefetchStyle(styleUrl, bbox))?.[0]?.template ?? null
+}
+
+async function prefetchStyle(styleUrl: string, bbox: TileBbox | null = null): Promise<TileSource[] | null> {
   const cache = await openVectorCache()
   const style = await fetchJson<StyleDoc>(styleUrl)
   if (!style) return null
@@ -137,30 +243,19 @@ export async function prefetchStyleAssets(styleUrl: string): Promise<string | nu
     ])
   }
 
-  if (style.glyphs) {
-    const stacks = fontStacks(style)
-    await Promise.all(
-      stacks.flatMap(stack =>
-        GLYPH_RANGES.map(range =>
-          warm(cache, style.glyphs!.replace('{fontstack}', encodeURIComponent(stack)).replace('{range}', range)),
-        ),
+  const glyphs = style.glyphs
+  if (glyphs) {
+    // Through the same pool as the tiles: a trip in East Asia asks for a few
+    // hundred glyph ranges, and OpenFreeMap allows four requests at a time.
+    const urls = fontStacks(style).flatMap(stack =>
+      glyphRangesFor(bbox).map(range =>
+        glyphs.replace('{fontstack}', encodeURIComponent(stack)).replace('{range}', range),
       ),
     )
+    await inPool(urls, url => warm(cache, url))
   }
 
-  // The vector source is a TileJSON reference, and the tile path it hands back
-  // carries a planet version. Asking without that segment answers 200 with an
-  // empty body, so the template has to come from the TileJSON rather than be
-  // guessed.
-  for (const source of Object.values(style.sources ?? {})) {
-    if (source.tiles?.[0]) return source.tiles[0]
-    if (source.url) {
-      await warm(cache, source.url)
-      const tileJson = await fetchJson<{ tiles?: string[] }>(source.url)
-      if (tileJson?.tiles?.[0]) return tileJson.tiles[0]
-    }
-  }
-  return null
+  return readTileSources(style, cache)
 }
 
 export interface VectorPrefetchResult {
@@ -180,35 +275,67 @@ export async function prefetchVectorForPlaces(
   isCancelled: () => boolean = () => false,
 ): Promise<VectorPrefetchResult> {
   if (!navigator.onLine) return { tiles: 0, template: null }
+  // The iOS app has no service worker: with Cache Storage given up on, nothing
+  // would keep what is downloaded, so nothing is downloaded.
+  if (isNativeIos() && !(await openVectorCache())) return { tiles: 0, template: null }
 
   const bbox = computeBbox(places)
   if (!bbox) return { tiles: 0, template: null }
 
-  const template = await prefetchStyleAssets(styleUrl)
-  if (!template || isCancelled()) return { tiles: 0, template }
+  const sources = await prefetchStyle(styleUrl, bbox)
+  const template = sources?.[0]?.template ?? null
+  if (!sources?.length || isCancelled()) return { tiles: 0, template }
 
   const cache = await openVectorCache()
-  const coords = enumerateVectorTiles(bbox, VECTOR_MIN_ZOOM, VECTOR_MAX_ZOOM)
+  const urls = enumerateTileUrls(bbox, sources)
 
   let cursor = 0
   let fetched = 0
+  let bytes = 0
 
   async function worker(): Promise<void> {
-    while (cursor < coords.length) {
-      if (isCancelled() || !navigator.onLine) return
-      const next = coords[cursor++]
-      if (!next) return
-      const [z, x, y] = next
-      const url = template!
-        .replace('{z}', String(z))
-        .replace('{x}', String(x))
-        .replace('{y}', String(y))
-      if (await warm(cache, url)) fetched++
+    while (cursor < urls.length) {
+      if (isCancelled() || !navigator.onLine || bytes >= MAX_RUN_BYTES) return
+      const url = urls[cursor++]
+      if (!url) return
+      const size = await warm(cache, url)
+      if (size > 0) {
+        fetched++
+        bytes += size
+      }
     }
   }
 
   await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
   return { tiles: fetched, template }
+}
+
+/**
+ * The bytes a response brought, for the run's budget: the length header when
+ * the server sends one, else the body itself, and at least 1 so a fetched tile
+ * always counts as fetched.
+ */
+async function sizeOf(res: Response): Promise<number> {
+  const header = Number(res.headers?.get('content-length'))
+  if (header > 0) return header
+  try {
+    return (await res.blob()).size || 1
+  } catch {
+    return 1
+  }
+}
+
+/** Runs `task` over `items`, CONCURRENCY at a time. */
+async function inPool<T>(items: T[], task: (item: T) => Promise<unknown>): Promise<void> {
+  let cursor = 0
+  async function worker(): Promise<void> {
+    while (cursor < items.length) {
+      const item = items[cursor++]
+      if (item === undefined) return
+      await task(item)
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()))
 }
 
 /** Drop the offline vector basemap, alongside the raster cache. */

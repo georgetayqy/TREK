@@ -1,4 +1,4 @@
-// FE-W4TIP-001 to FE-W4TIP-013
+// FE-W4TIP-001 to FE-W4TIP-018
 import { createRef, useRef } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '../../../tests/helpers/render'
@@ -48,15 +48,26 @@ describe('Tooltip', () => {
     expect(screen.queryByRole('tooltip')).toBeNull()
   })
 
-  it('FE-W4TIP-004: focus opens and blur closes the tooltip', () => {
+  it('FE-W4TIP-004: keyboard focus opens and blur closes the tooltip', () => {
     render(<Tooltip label="Delete"><button>x</button></Tooltip>)
     const trigger = screen.getByRole('button')
+    vi.spyOn(trigger, 'matches').mockImplementation(sel => sel === ':focus-visible')
 
     fireEvent.focus(trigger)
     act(() => { vi.advanceTimersByTime(300) })
     expect(screen.getByRole('tooltip')).toBeInTheDocument()
 
     fireEvent.blur(trigger)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('FE-W4TIP-014: focus handed back without the keyboard (a dialog closing) opens nothing', () => {
+    render(<Tooltip label="Export"><button>x</button></Tooltip>)
+    const trigger = screen.getByRole('button')
+    vi.spyOn(trigger, 'matches').mockReturnValue(false)
+
+    fireEvent.focus(trigger)
+    act(() => { vi.advanceTimersByTime(300) })
     expect(screen.queryByRole('tooltip')).toBeNull()
   })
 
@@ -169,5 +180,63 @@ describe('Tooltip — inside a component that owns the ref', () => {
     fireEvent.click(screen.getByRole('button'))
 
     expect(screen.getByRole('button')).toHaveAttribute('data-clicked', '1')
+  })
+
+  it('FE-W4TIP-015: a label of several lines breaks at them and stays within the window, a single line does not wrap', () => {
+    const { unmount } = render(<Tooltip label={'3 open\nNo safety or legal clearance.'}><button>x</button></Tooltip>)
+    hover(screen.getByRole('button'))
+    expect(screen.getByRole('tooltip')).toHaveStyle({ whiteSpace: 'pre-line' })
+    expect(screen.getByRole('tooltip').style.maxWidth).toContain('100vw')
+    unmount()
+
+    render(<Tooltip label="Delete"><button>y</button></Tooltip>)
+    hover(screen.getByRole('button'))
+    expect(screen.getByRole('tooltip')).toHaveStyle({ whiteSpace: 'nowrap' })
+  })
+})
+
+describe('Tooltip — with a shortcut', () => {
+  it('FE-W4TIP-016: shows the keys beside the label, one chip per key', () => {
+    render(<Tooltip label="Assistant" shortcut={['⌘', 'K']}><button>x</button></Tooltip>)
+    hover(screen.getByRole('button'))
+
+    const tip = screen.getByRole('tooltip')
+    expect(tip).toHaveTextContent('Assistant')
+    const keys = tip.querySelectorAll('kbd > span')
+    expect(Array.from(keys).map(k => k.textContent)).toEqual(['⌘', 'K'])
+  })
+
+  it('FE-W4TIP-017: an empty shortcut leaves the plain label', () => {
+    render(<Tooltip label="Assistant" shortcut={[]}><button>x</button></Tooltip>)
+    hover(screen.getByRole('button'))
+
+    expect(screen.getByRole('tooltip').querySelector('kbd')).toBeNull()
+  })
+})
+
+describe('Tooltip — with content', () => {
+  it('FE-W4TIP-018: shows the content in place of the label, which still opens it', () => {
+    render(<Tooltip label="brought by Anna, Ben" content={<ul><li>Anna</li><li>Ben</li></ul>}><button>x</button></Tooltip>)
+    hover(screen.getByRole('button'))
+
+    const tip = screen.getByRole('tooltip')
+    expect(tip.querySelectorAll('li')).toHaveLength(2)
+    expect(tip).not.toHaveTextContent('brought by')
+  })
+
+  it('FE-W4TIP-017: a tap opens nothing, a pointer that comes along later still does', () => {
+    render(<Tooltip label="Add a tour" delay={0}><button>+</button></Tooltip>)
+    const button = screen.getByRole('button')
+
+    // The browser follows a tap with a mouseenter and never sends the mouseleave.
+    fireEvent.touchStart(button)
+    fireEvent.mouseEnter(button)
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(screen.queryByRole('tooltip')).toBeNull()
+
+    act(() => { vi.advanceTimersByTime(2000) })
+    fireEvent.mouseEnter(button)
+    act(() => { vi.advanceTimersByTime(10) })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Add a tour')
   })
 })

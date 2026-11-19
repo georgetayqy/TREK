@@ -60,7 +60,8 @@ describe('AboutTab', () => {
   it('FE-COMP-ABOUT-009: all external links have rel="noopener noreferrer"', () => {
     render(<AboutTab appVersion="2.9.10" />);
     const links = document.querySelectorAll('a');
-    expect(links).toHaveLength(6);
+    // Six tiles, and the sponsor panel: its logo, its button and the name in its title and body.
+    expect(links).toHaveLength(10);
     links.forEach((link) => {
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     });
@@ -80,69 +81,74 @@ describe('AboutTab', () => {
     expect(screen.queryByText('v2.9.10')).toBeNull();
   });
 
-  it('FE-COMP-ABOUT-012: Ko-fi link hover changes border and box-shadow styles', () => {
+  // The hover look lives in Tailwind classes driven by the tile's `--tile`
+  // colour now, so the tests pin the colour each tile hands its classes.
+  const tile = (link: HTMLAnchorElement) => ({
+    color: link.style.getPropertyValue('--tile'),
+    hovers: link.className.includes('hover:border-[color:var(--tile)]'),
+  });
+
+  it('FE-COMP-ABOUT-012: the Ko-fi tile carries its brand colour for the hover border', () => {
     render(<AboutTab appVersion="1.0.0" />);
     const link = screen.getByText('Ko-fi').closest('a') as HTMLAnchorElement;
-    fireEvent.mouseEnter(link);
-    expect(link.style.borderColor).toBe('rgb(255, 94, 91)');
-    expect(link.style.boxShadow).not.toBe('');
-    fireEvent.mouseLeave(link);
-    expect(link.style.borderColor).toBe('var(--border-primary)');
-    expect(link.style.boxShadow).toBe('none');
+    expect(link).toHaveAttribute('href', 'https://ko-fi.com/mauriceboe');
+    expect(tile(link)).toEqual({ color: '#ff5e5b', hovers: true });
   });
 
-  it('FE-COMP-ABOUT-013: Buy Me a Coffee link hover changes border and box-shadow styles', () => {
+  it('FE-COMP-ABOUT-013: the Buy Me a Coffee tile carries its brand colour for the hover border', () => {
     render(<AboutTab appVersion="1.0.0" />);
     const link = screen.getByText('Buy Me a Coffee').closest('a') as HTMLAnchorElement;
-    fireEvent.mouseEnter(link);
-    expect(link.style.borderColor).toBe('rgb(255, 221, 0)');
-    expect(link.style.boxShadow).not.toBe('');
-    fireEvent.mouseLeave(link);
-    expect(link.style.borderColor).toBe('var(--border-primary)');
-    expect(link.style.boxShadow).toBe('none');
+    expect(link).toHaveAttribute('href', 'https://buymeacoffee.com/mauriceboe');
+    expect(tile(link)).toEqual({ color: '#ffdd00', hovers: true });
   });
 
-  it('FE-COMP-ABOUT-014: Discord link hover changes border and box-shadow styles', () => {
+  it('FE-COMP-ABOUT-014: the Discord tile carries its brand colour for the hover border', () => {
     render(<AboutTab appVersion="1.0.0" />);
     const link = screen.getByText('Discord').closest('a') as HTMLAnchorElement;
-    fireEvent.mouseEnter(link);
-    expect(link.style.borderColor).toBe('rgb(88, 101, 242)');
-    expect(link.style.boxShadow).not.toBe('');
-    fireEvent.mouseLeave(link);
-    expect(link.style.borderColor).toBe('var(--border-primary)');
-    expect(link.style.boxShadow).toBe('none');
+    expect(link).toHaveAttribute('href', 'https://discord.gg/NhZBDSd4qW');
+    expect(tile(link)).toEqual({ color: '#5865F2', hovers: true });
   });
 
-  it('FE-COMP-ABOUT-015: Bug report link hover changes border and box-shadow styles', () => {
+  it('FE-COMP-ABOUT-015: the bug report tile uses the danger token', () => {
     render(<AboutTab appVersion="1.0.0" />);
     const link = document.querySelector('a[href*="issues/new"]') as HTMLAnchorElement;
-    fireEvent.mouseEnter(link);
-    expect(link.style.borderColor).toBe('rgb(239, 68, 68)');
-    expect(link.style.boxShadow).not.toBe('');
-    fireEvent.mouseLeave(link);
-    expect(link.style.borderColor).toBe('var(--border-primary)');
-    expect(link.style.boxShadow).toBe('none');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(tile(link)).toEqual({ color: 'var(--danger)', hovers: true });
   });
 
-  it('FE-COMP-ABOUT-016: Feature request link hover changes border and box-shadow styles', () => {
+  it('FE-COMP-ABOUT-016: the feature request tile uses the warning token', () => {
     render(<AboutTab appVersion="1.0.0" />);
     const link = document.querySelector('a[href*="discussions/new"]') as HTMLAnchorElement;
-    fireEvent.mouseEnter(link);
-    expect(link.style.borderColor).toBe('rgb(245, 158, 11)');
-    expect(link.style.boxShadow).not.toBe('');
-    fireEvent.mouseLeave(link);
-    expect(link.style.borderColor).toBe('var(--border-primary)');
-    expect(link.style.boxShadow).toBe('none');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(tile(link)).toEqual({ color: 'var(--warning)', hovers: true });
   });
 
-  it('FE-COMP-ABOUT-017: Wiki link hover changes border and box-shadow styles', () => {
+  it('FE-COMP-ABOUT-017: the wiki tile uses the info token and no inline hover styles are left', () => {
     render(<AboutTab appVersion="1.0.0" />);
     const link = document.querySelector('a[href*="wiki"]') as HTMLAnchorElement;
+    expect(tile(link)).toEqual({ color: 'var(--info)', hovers: true });
     fireEvent.mouseEnter(link);
-    expect(link.style.borderColor).toBe('rgb(99, 102, 241)');
-    expect(link.style.boxShadow).not.toBe('');
-    fireEvent.mouseLeave(link);
-    expect(link.style.borderColor).toBe('var(--border-primary)');
-    expect(link.style.boxShadow).toBe('none');
+    expect(link.style.borderColor).toBe('');
+    expect(link.style.boxShadow).toBe('');
+  });
+
+  it('FE-COMP-ABOUT-018: the sponsor panel links dataforest cloud wherever it is named, with both logos bundled', () => {
+    render(<AboutTab appVersion="1.0.0" />);
+    const links = document.querySelectorAll('a[href="https://cloud.dataforest.net/en?mtm_campaign=trek"]');
+    // The logo tile, the call to action, and the brand name in the title and in the body.
+    expect(links).toHaveLength(4);
+    for (const link of links) {
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    }
+    const logos = [...document.querySelectorAll('img')].map((img) => img.getAttribute('src'));
+    expect(logos).toEqual(
+      expect.arrayContaining(['/brands/dataforest-cloud.svg', '/brands/dataforest-cloud-dark.svg'])
+    );
+    // Served by TREK itself: opening Settings must not reach a third party.
+    expect(logos.every((src) => src?.startsWith('/'))).toBe(true);
+    expect(screen.getByText('Place search')).toBeInTheDocument();
+    expect(screen.getByText('Address search')).toBeInTheDocument();
+    expect(screen.getByText('Routing')).toBeInTheDocument();
   });
 });

@@ -33,6 +33,12 @@ vi.mock('./MapboxPreview', () => ({
   ),
 }));
 
+// jsdom has no WebGL2; these cases are about a browser that has it.
+vi.mock('../../utils/webgl', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/webgl')>()),
+  hasWebGL: () => true,
+}));
+
 beforeEach(() => {
   resetAllStores();
   vi.clearAllMocks();
@@ -378,6 +384,27 @@ describe('MapSettingsTab – CARTO key', () => {
     render(<MapSettingsTab />);
 
     expect(screen.queryByText('CARTO API key')).not.toBeInTheDocument();
+  });
+
+  it('FE-COMP-MAP-032b: a managed instance without an operator token offers no Mapbox and no Amap tiles', async () => {
+    const user = userEvent.setup();
+    seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true, managed: true, hasAmapKey: false });
+    seedStore(useSettingsStore, { settings: buildSettings({ map_provider: 'leaflet', mapbox_access_token: '', map_tile_url: '' }) });
+    render(<MapSettingsTab />);
+
+    expect(screen.queryByText('Mapbox GL')).not.toBeInTheDocument();
+    expect(screen.getByText('MapLibre GL')).toBeInTheDocument();
+    await user.click(screen.getByText('Select template...'));
+    expect(screen.queryByText('高德地图 (Amap)')).not.toBeInTheDocument();
+    expect(screen.getByText('OpenStreetMap')).toBeInTheDocument();
+  });
+
+  it('FE-COMP-MAP-032c: the operator token brings Mapbox back on a managed instance', () => {
+    seedStore(useAuthStore, { user: buildUser(), isAuthenticated: true, managed: true });
+    seedStore(useSettingsStore, { settings: buildSettings({ map_provider: 'leaflet', mapbox_access_token: 'pk.operator' }) });
+    render(<MapSettingsTab />);
+
+    expect(screen.getByText('Mapbox GL')).toBeInTheDocument();
   });
 
   it('FE-COMP-MAP-033: the typed key is part of the save patch', async () => {

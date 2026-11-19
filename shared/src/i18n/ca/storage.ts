@@ -6,7 +6,7 @@ const storage: TranslationStrings = {
   'storage.field.endpoint': "URL de l'endpoint",
   'storage.help.endpoint':
     'URL base del servei compatible amb S3, p. ex. https://s3.example.com o http://127.0.0.1:9000.',
-  'storage.field.bucket': 'Bucket',
+  'storage.field.bucket': 'Bucket', // same-as-en
   'storage.field.accessKeyId': "ID de clau d'accés",
   'storage.field.secretAccessKey': "Clau d'accés secreta",
   'storage.field.region': 'Regió',
@@ -28,15 +28,15 @@ const storage: TranslationStrings = {
   'storage.discardAndReload': 'Descarta els meus canvis i torna a carregar',
   'storage.configError.banner':
     "No s'han pogut carregar els paràmetres d'emmagatzematge desats — desar-los els substituirà: {error}",
-  'storage.backends.title': 'Backends',
+  'storage.backends.title': 'Backends', // same-as-en
   'storage.backends.add': 'Afegir backend',
   'storage.backends.usedBy': 'Utilitzat per: {categories}',
   'storage.backends.unused': 'No assignat a cap categoria',
-  'storage.backends.envReadOnly': "Definit per una variable d'entorn — només lectura",
+  'storage.backends.envReadOnly': "Definit per una variable d'entorn (només lectura)",
   'storage.source.built-in': 'Integrat',
   'storage.source.env': 'Entorn',
   'storage.source.settings': 'Configuració',
-  'storage.type.local': 'Local',
+  'storage.type.local': 'Local', // same-as-en
   'storage.type.s3': 'S3',
   'storage.type.mirror': 'Mirall',
   'storage.actions.test': 'Provar',
@@ -56,7 +56,7 @@ const storage: TranslationStrings = {
   'storage.form.apply': 'Aplicar',
   'storage.form.cancel': 'Cancel·lar',
   'storage.form.duplicateName': 'Ja existeix un backend anomenat {name}',
-  'storage.categories.title': 'Categories',
+  'storage.categories.title': 'Categories', // same-as-en
   'storage.categories.default': 'predeterminada',
   'storage.categories.reassignWarning':
     "Els objectes existents no es mouen: els objectes nous van al backend acabat d'assignar, els antics es queden on són.",
@@ -115,7 +115,8 @@ const storage: TranslationStrings = {
   'storage.sync.error': 'Ha fallat la sincronització: {error}',
   'storage.sync.prompt': "Els objectes existents encara no s'han replicat — vols sincronitzar ara?",
   'storage.sync.dismiss': 'Descarta',
-  'storage.usage.line': '{objects} objectes · {size}',
+  'storage.usage.line': '{count} objectes · {size}',
+  'storage.usage.line.one': '{count} objecte · {size}',
   'storage.usage.computed': 'Ús calculat {age}',
   'storage.usage.never': 'Ús encara no calculat',
   'storage.usage.refresh': 'Actualitza',
@@ -124,7 +125,8 @@ const storage: TranslationStrings = {
 
   // Category migration (copy → flip → delta sweep)
   'storage.migrate.promptTitle': 'Vols moure els objectes existents al nou backend?',
-  'storage.migrate.promptLine': '{category}: {objects} objectes ({size}) de {from} a {to}',
+  'storage.migrate.promptLine': '{category}: {count} objectes ({size}) de {from} a {to}',
+  'storage.migrate.promptLine.one': '{category}: {count} objecte ({size}) de {from} a {to}',
   'storage.migrate.promptLineUnknown': "{category}: mida desconeguda (encara no s'ha calculat l'ús) de {from} a {to}",
   'storage.migrate.move': 'Mou els objectes existents',
   'storage.migrate.routeOnly': 'Només enruta les escriptures noves',
@@ -133,10 +135,50 @@ const storage: TranslationStrings = {
   'storage.migrate.doneFailures': "{failed} han fallat — aquests objectes no s'han copiat al nou backend",
   'storage.migrate.failed': "Ha fallat el trasllat: {error} — la categoria no s'ha canviat",
   'storage.migrate.cancelled': "Trasllat cancel·lat — no s'ha canviat res",
-  'storage.migrate.reclaimable': "{objects} objectes ({size}) romanen a {from} — recupera'ls manualment",
+  'storage.migrate.reclaimable': "{count} objectes ({size}) romanen a {from}, recupera'ls manualment",
+  'storage.migrate.reclaimable.one': "{count} objecte ({size}) roman a {from}, recupera'l manualment",
   'storage.migrate.cancel': 'Cancel·la el trasllat',
   'storage.migrate.promptCancel': 'Cancel·la',
   'storage.migrate.queued': 'En cua: {categories}',
-  'storage.migrate.queueDropped': "No s'ha pogut iniciar el trasllat següent — s'ha buidat la cua restant: {categories}",
+  'storage.migrate.queueDropped':
+    "No s'ha pogut iniciar el trasllat següent — s'ha buidat la cua restant: {categories}",
+  'storage.reclaim.title': 'Fitxers sense referència',
+  'storage.reclaim.hint':
+    "Cada nit TREK cerca fitxers pujats que cap viatge, lloc, diari, col·lecció o usuari fa servir ja, per exemple després d'eliminar un viatge.",
+  'storage.reclaim.check': 'Comprova ara',
+  'storage.reclaim.checked': 'Última comprovació: {age}',
+  'storage.reclaim.never': 'Encara no comprovat',
+  'storage.reclaim.delete': 'Elimina els fitxers sense referència',
+  'storage.reclaim.freeable': 'Es pot alliberar',
+  'storage.reclaim.waiting': "Sense ús fa menys d'una setmana",
+  'storage.reclaim.nothing': "No s'ha trobat cap fitxer sense referència.",
+  'storage.reclaim.stopped':
+    "L'última comprovació s'ha aturat abans d'hora perquè la base de dades es va restaurar mentre s'executava.",
+  'storage.reclaim.skip.sources_missing': "Omès: no s'han pogut consultar totes les parts de TREK",
+  'storage.reclaim.skip.shared_location': 'Omès: comparteix la ubicació amb una altra categoria',
+  'storage.reclaim.skip.list_failed': "Omès: no s'han pogut llistar els fitxers",
+  'storage.reclaim.skip.source_failed': 'Omès: ha fallat una consulta',
+  'storage.reclaim.deleted': "Alliberat per l'última neteja nocturna",
+  'storage.reclaim.deleteHint':
+    "Desactivat, la comprovació nocturna només informa. Activat, s'elimina un fitxer que ningú no ha fet servir durant una setmana. Els fitxers que elimines a TREK s'esborren un dia després en tots dos casos, quan ja no hi ha cap desfer que els pugui recuperar.",
+  'storage.reclaim.running': 'Comprovant…',
+  'storage.reclaim.stoppedFailed': "L'última comprovació s'ha aturat per un error. Torna a executar-se aquesta nit.",
+  'storage.reclaim.skip.foreign_install': 'Omès: una altra instal·lació de TREK fa servir aquest emmagatzematge',
+  'storage.reclaim.skip.owner_unknown': 'Omès: TREK no ha pogut marcar aquest emmagatzematge com a propi',
+  'storage.reclaim.skip.delete_failed': "Aturat: l'emmagatzematge ha rebutjat una eliminació",
+  'storage.reclaim.skip.interrupted': "Aturat abans d'acabar, les xifres són parcials",
+  'storage.reclaim.confirmNeeded':
+    "Més d'una cinquena part d'aquests fitxers semblen sense ús. No s'elimina res d'aquí fins que confirmis que és l'esperat.",
+  'storage.reclaim.confirm': 'Confirma',
+  'storage.reclaim.confirmed': 'Confirmat per als propers 14 dies.',
+  'storage.reclaim.error.reclaim_busy':
+    "Hi ha una altra tasca d'emmagatzematge en curs. Torna-ho a provar d'aquí a un moment.",
+  'storage.reclaim.error.reclaim_demo': 'No disponible en una instància de demostració.',
+  'storage.reclaim.error.reclaim_nothing_to_confirm': 'Ja no hi ha res per confirmar. Executa primer una comprovació.',
+  'storage.reclaim.skip.backup_running': "Omès: s'estava executant una còpia de seguretat",
+  'storage.reclaim.error.reclaim_confirm_stale':
+    'El recompte ha canviat des que es va mostrar. Comprova la xifra nova i confirma de nou.',
+  'storage.reclaim.error.reclaim_install_unknown':
+    "TREK no ha pogut llegir l'identificador de la seva instal·lació, així que no elimina res. Comprova la carpeta de dades.",
 };
 export default storage;

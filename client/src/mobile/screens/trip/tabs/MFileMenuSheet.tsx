@@ -4,7 +4,7 @@ import MSheet from '../../../components/MSheet'
 import MListRow from '../../../components/MListRow'
 import MConfirmSheet from '../../settings/MConfirmSheet'
 import { downloadFile } from '../../../../utils/fileDownload'
-import { filesApi } from '../../../../api/client'
+import { PHONE_FILE_UPDATE_RULES, trashFileWithToast, updateFileFields } from '../../../../components/Files/fileActions'
 import type { TripFile } from '../../../../types'
 import type { TripPlanner } from '../MTripShell'
 import { Eyebrow, TileHeader } from '../sheets/MTripSheetUi'
@@ -59,9 +59,7 @@ export default function MFileMenuSheet({ planner, file, onClose, onOpenLinks }: 
     const value = noteDraft.trim()
     if (value === (shown.description || '')) return
     setSaving(true)
-    filesApi.update(tripId, shown.id, { description: value })
-      .then(() => tripActions.loadFiles(tripId))
-      .catch(() => toast.error(t('files.toast.assignError')))
+    void updateFileFields(tripId, shown.id, { description: value }, { t, toast, refresh: () => tripActions.loadFiles(tripId) }, PHONE_FILE_UPDATE_RULES)
       .finally(() => setSaving(false))
   }
 
@@ -70,9 +68,7 @@ export default function MFileMenuSheet({ planner, file, onClose, onOpenLinks }: 
   const remove = () => {
     setConfirmDelete(false)
     setDeleting(true)
-    tripActions.deleteFile(tripId, shown.id)
-      .then(() => { toast.success(t('files.toast.trashed')); onClose() })
-      .catch(() => toast.error(t('files.toast.deleteError')))
+    void trashFileWithToast(() => tripActions.deleteFile(tripId, shown.id), { t, toast, onTrashed: onClose })
       .finally(() => setDeleting(false))
   }
 
@@ -82,14 +78,14 @@ export default function MFileMenuSheet({ planner, file, onClose, onOpenLinks }: 
         <div className="flex-none px-[18px] pt-4">
           <TileHeader
             icon={<TypeIcon size={19} strokeWidth={1.8} style={{ color: meta.color }} />}
-            title={<span className="truncate">{shown.original_name}</span>}
+            title={<span dir="auto" className="truncate">{shown.original_name}</span>}
             sub={[formatSize(shown.file_size), formatFileDate(shown.created_at, locale)].filter(Boolean).join(' · ')}
             onClose={onClose}
             closeLabel={t('common.close')}
           />
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[18px]">
+        <div className="m-scroll-fade mt-2 min-h-0 flex-1 overflow-y-auto px-[18px] pb-[18px] pt-[14px]">
           {canEdit && (
             <div className="mt-3">
               <Eyebrow className="mb-[6px]">{t('files.noteLabel')}</Eyebrow>

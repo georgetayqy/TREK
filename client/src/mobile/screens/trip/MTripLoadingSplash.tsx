@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from '../../../i18n'
-import MDancingTrek, { type TrekScene } from '../../components/MDancingTrek'
+import MDancingTrek from '../../components/MDancingTrek'
+import { useTripSplashBeats } from '../../../components/shared/useTripSplashBeats'
 
 /**
  * Trip-open splash — the TREK mascot acts out a little journey while the trip
@@ -10,40 +11,39 @@ import MDancingTrek, { type TrekScene } from '../../components/MDancingTrek'
  * progress dots track which beat is on. Under reduced motion it holds a single
  * frame (the real "loading photos" one) with no transitions.
  */
-const STEPS: { scene: TrekScene; key: string }[] = [
-  { scene: 'packing', key: 'trip.loadingSteps.pack' },
-  { scene: 'transport', key: 'trip.loadingSteps.road' },
-  { scene: 'dashboard', key: 'trip.loadingPhotos' },
-  { scene: 'collections', key: 'trip.loadingSteps.arrive' },
-]
+/**
+ * How long a trip may take to open before the splash comes up. The page
+ * transition holds the page the trip was opened from for up to 350ms
+ * (mobile/routeTransition.ts), so a trip that loads in that time slides in
+ * whole, the way the dashboard slides back in on the way out. A slower one gets
+ * the splash right after, so a slow connection never sees the app stand still.
+ */
+export const TRIP_SPLASH_AFTER_MS = 400
 
-const STEP_MS = 1400
-// Reduced motion parks on the paper-plane / "loading photos" beat.
-const STILL_INDEX = 2
-const REDUCE_MOTION = '(prefers-reduced-motion: reduce)'
+/**
+ * While a trip opens. At first nothing but the screen's own background, marked
+ * as a route fallback, which the page transition waits on; the splash only once
+ * the load takes longer than TRIP_SPLASH_AFTER_MS.
+ */
+export function MTripOpening({ title }: { title: string }) {
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), TRIP_SPLASH_AFTER_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+  if (slow) return <MTripLoadingSplash title={title} />
+  return (
+    <div
+      data-route-fallback=""
+      aria-busy="true"
+      className="fixed inset-0 z-50 bg-[color:var(--m-bg)] bg-[image:var(--m-scr)]"
+    />
+  )
+}
 
 export default function MTripLoadingSplash({ title }: { title: string }) {
   const { t } = useTranslation()
-  const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia?.(REDUCE_MOTION)?.matches ?? false)
-  // The splash can be up long enough for the OS setting to be flipped under it.
-  useEffect(() => {
-    const mq = window.matchMedia?.(REDUCE_MOTION)
-    if (!mq) return
-    const sync = () => setReduceMotion(mq.matches)
-    sync()
-    mq.addEventListener('change', sync)
-    return () => mq.removeEventListener('change', sync)
-  }, [])
-
-  const [index, setIndex] = useState(0)
-  useEffect(() => {
-    if (reduceMotion) return
-    const id = setInterval(() => setIndex(n => (n + 1) % STEPS.length), STEP_MS)
-    return () => clearInterval(id)
-  }, [reduceMotion])
-
-  const activeIndex = reduceMotion ? STILL_INDEX : index
-  const step = STEPS[activeIndex]
+  const { reduceMotion, activeIndex, step, steps } = useTripSplashBeats({ liveReducedMotion: true })
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[color:var(--m-bg)] bg-[image:var(--m-scr)] text-m-ink">
@@ -64,7 +64,7 @@ export default function MTripLoadingSplash({ title }: { title: string }) {
 
       {/* Beat dots — the active stage widens into an accent pill. */}
       <div className="flex items-center gap-1.5">
-        {STEPS.map((_, i) => (
+        {steps.map((_, i) => (
           <span
             key={i}
             className={`h-[6px] rounded-full transition-all duration-[400ms] ease-out ${

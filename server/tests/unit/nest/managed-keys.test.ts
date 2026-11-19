@@ -2,7 +2,7 @@
  * Who owns which setting, pinned.
  *
  * The lists grow and the mode does not: that is how this kind of switch drifts.
- * A key added to ADMIN_SETTINGS_KEYS or DEFAULTABLE_USER_SETTING_KEYS belongs to
+ * A key added to the admin form (ADMIN_FORM_SETTING_KEYS) or DEFAULTABLE_USER_SETTING_KEYS belongs to
  * neither set until somebody decides, and MANAGED-KEYS-001 is what makes that
  * decision unavoidable rather than optional.
  *
@@ -10,9 +10,7 @@
  * alone would pass forever while new keys quietly defaulted to "the admin may
  * set it", which is the failure this is here to prevent.
  */
-import { describe, it, expect } from 'vitest';
-import { ADMIN_SETTINGS_KEYS } from '../../../src/nest/auth/auth.helpers';
-import { DEFAULTABLE_USER_SETTING_KEYS } from '../../../src/nest/settings/settings.service';
+import { ADMIN_FORM_SETTING_KEYS } from '../../../src/nest/common/app-settings.registry';
 import {
   MANAGED_LOCKED_SETTING_KEYS,
   MANAGED_LOCKED_PROFILE_KEYS,
@@ -20,8 +18,11 @@ import {
   isManagedLockedKey,
   splitManagedKeys,
 } from '../../../src/nest/common/managed';
+import { DEFAULTABLE_USER_SETTING_KEYS } from '../../../src/nest/settings/settings.service';
 
-const SOURCE_KEYS: string[] = [...ADMIN_SETTINGS_KEYS, ...DEFAULTABLE_USER_SETTING_KEYS];
+import { describe, it, expect } from 'vitest';
+
+const SOURCE_KEYS: string[] = [...ADMIN_FORM_SETTING_KEYS, ...DEFAULTABLE_USER_SETTING_KEYS];
 const locked = new Set<string>(MANAGED_LOCKED_SETTING_KEYS);
 const customer = new Set<string>(MANAGED_CUSTOMER_KEYS);
 
@@ -38,10 +39,14 @@ describe('managed key assignment', () => {
     expect(MANAGED_CUSTOMER_KEYS.filter((k) => !SOURCE_KEYS.includes(k))).toEqual([]);
   });
 
-  it('MANAGED-KEYS-003: the only locked names outside both source lists are the users columns', () => {
-    expect(MANAGED_LOCKED_SETTING_KEYS.filter((k) => !SOURCE_KEYS.includes(k)).slice().sort()).toEqual(
-      [...MANAGED_LOCKED_PROFILE_KEYS].sort(),
-    );
+  it('MANAGED-KEYS-003: the only locked names outside both source lists are the users columns and the service key', () => {
+    // service_key is written by the server alone, never through a settings
+    // form; it is locked so a managed install keeps the operator's key.
+    expect(
+      MANAGED_LOCKED_SETTING_KEYS.filter((k) => !SOURCE_KEYS.includes(k))
+        .slice()
+        .sort(),
+    ).toEqual([...MANAGED_LOCKED_PROFILE_KEYS, 'service_key'].sort());
   });
 
   it('MANAGED-KEYS-004: neither set repeats itself', () => {
@@ -63,7 +68,10 @@ describe('managed key assignment', () => {
       'oidc_login',
       'oidc_registration',
       'openweather_api_key',
+      'places_provider',
       'routing_base_url',
+      'routing_valhalla_provider',
+      'service_key',
       'smtp_from',
       'smtp_host',
       'smtp_pass',
@@ -106,10 +114,7 @@ describe('splitManagedKeys', () => {
   });
 
   it('MANAGED-KEYS-009: reports blocked names sorted, so a response body is stable', () => {
-    const { blocked } = splitManagedKeys(
-      { webauthn_rp_id: 'x', llm_api_key: 'y', smtp_from: 'z' },
-      true,
-    );
+    const { blocked } = splitManagedKeys({ webauthn_rp_id: 'x', llm_api_key: 'y', smtp_from: 'z' }, true);
 
     expect(blocked).toEqual(['llm_api_key', 'smtp_from', 'webauthn_rp_id']);
   });

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import Kbd from './Kbd'
 
 type Placement = 'top' | 'bottom' | 'left' | 'right'
 
@@ -8,15 +9,32 @@ interface TooltipProps {
   placement?: Placement
   delay?: number
   disabled?: boolean
+  /** The keys that do the same, shown beside the label: ["⌘", "K"]. */
+  shortcut?: readonly string[]
+  /**
+   * Shown in place of the label when the tip holds more than words, such as a list of
+   * people with their pictures. `label` still names it and decides whether it opens.
+   */
+  content?: React.ReactNode
   children: React.ReactElement
 }
 
-export function Tooltip({ label, placement = 'bottom', delay = 250, disabled, children }: TooltipProps) {
+/** The emulated mouse events of a tap follow it within a few hundred milliseconds. */
+const TAP_MOUSE_WINDOW_MS = 1000
+
+function touchedRecently(touchedAt: number, now: number): boolean {
+  return touchedAt > 0 && now - touchedAt < TAP_MOUSE_WINDOW_MS
+}
+
+export function Tooltip({ label, placement = 'bottom', delay = 250, disabled, shortcut, content, children }: TooltipProps) {
   const [open, setOpen] = useState(false)
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
   const triggerRef = useRef<HTMLElement | null>(null)
   const tooltipRef = useRef<HTMLDivElement | null>(null)
   const timerRef = useRef<number | null>(null)
+  // When a finger last touched the trigger. A tap makes the browser send a mouseenter
+  // after it and never the mouseleave, so the tip would open on a tap and stay.
+  const touchedAtRef = useRef(0)
 
   const show = () => {
     if (disabled || !label) return
@@ -52,6 +70,7 @@ export function Tooltip({ label, placement = 'bottom', delay = 250, disabled, ch
   type TriggerProps = {
     ref?: React.Ref<HTMLElement>
     onMouseEnter?: (e: React.MouseEvent) => void
+    onTouchStart?: (e: React.TouchEvent) => void
     onMouseLeave?: (e: React.MouseEvent) => void
     onFocus?: (e: React.FocusEvent) => void
     onBlur?: (e: React.FocusEvent) => void
@@ -65,16 +84,20 @@ export function Tooltip({ label, placement = 'bottom', delay = 250, disabled, ch
       if (typeof r === 'function') r(node)
       else if (r && typeof r === 'object') (r as React.RefObject<HTMLElement | null>).current = node
     },
-    onMouseEnter: (e: React.MouseEvent) => { show(); childProps.onMouseEnter?.(e) },
+    onTouchStart: (e: React.TouchEvent) => { touchedAtRef.current = Date.now(); hide(); childProps.onTouchStart?.(e) },
+    // A touch screen has no hover to hint at: only a real pointer opens the tip.
+    onMouseEnter: (e: React.MouseEvent) => { if (!touchedRecently(touchedAtRef.current, Date.now())) show(); childProps.onMouseEnter?.(e) },
     onMouseLeave: (e: React.MouseEvent) => { hide(); childProps.onMouseLeave?.(e) },
-    onFocus: (e: React.FocusEvent) => { show(); childProps.onFocus?.(e) },
+    // Keyboard focus only. A dialog hands focus back to the button that opened it
+    // when it closes, and a tooltip over whatever comes next is noise, not help.
+    onFocus: (e: React.FocusEvent) => { if ((e.currentTarget as HTMLElement).matches(':focus-visible')) show(); childProps.onFocus?.(e) },
     onBlur: (e: React.FocusEvent) => { hide(); childProps.onBlur?.(e) },
   } as TriggerProps)
 
   return (
     <>
       {trigger}
-      {open && createPortal(
+      {open && !disabled && createPortal(
         <div
           ref={tooltipRef}
           role="tooltip"
@@ -88,15 +111,22 @@ export function Tooltip({ label, placement = 'bottom', delay = 250, disabled, ch
             zIndex: 100000,
             fontSize: 'calc(11px * var(--fs-scale-caption, 1))',
             fontWeight: 500,
-            padding: '5px 10px',
-            borderRadius: 8,
-            whiteSpace: 'nowrap',
+            padding: content ? '8px 10px' : '5px 10px',
+            borderRadius: content ? 10 : 8,
+            // A label of several lines (the paddle check bench) breaks at its lines and wraps within the window.
+            whiteSpace: label.includes('\n') ? 'pre-line' : 'nowrap',
+            maxWidth: label.includes('\n') ? 'min(22rem, calc(100vw - 12px))' : undefined,
             boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
             fontFamily: "var(--font-system)",
             transformOrigin: placement === 'top' ? 'bottom center' : placement === 'bottom' ? 'top center' : placement === 'left' ? 'center right' : 'center left',
           }}
         >
-          {label}
+          {content ?? (shortcut && shortcut.length > 0 ? (
+            <span className="inline-flex items-center gap-2">
+              {label}
+              <Kbd keys={shortcut} />
+            </span>
+          ) : label)}
         </div>,
         document.body,
       )}

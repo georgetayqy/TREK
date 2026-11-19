@@ -6,7 +6,9 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.prevMonth': 'Föregående månad',
   'mobileVacay.nextMonth': 'Nästa månad',
   'mobileVacay.usedCount': '{count} använda',
+  'mobileVacay.usedCount.one': '{count} använd',
   'mobileVacay.leftCount': '{count} kvar',
+  'mobileVacay.leftCount.one': '{count} kvar',
   'mobileVacay.left': 'kvar',
   'mobileVacay.modeCompany': 'Företag',
   'mobileVacay.decreaseAllowance': 'Minska kvot',
@@ -14,6 +16,8 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.companyLegend': 'Företagsledighet',
   'mobileVacay.editCalendar': 'Redigera kalender',
   'mobileVacay.viewYear': 'Visa år',
+  'mobileVacay.people': 'Personer',
+  'mobileVacay.legend': 'Teckenförklaring',
 };
 
 export default mobileVacay;

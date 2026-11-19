@@ -1,4 +1,4 @@
-// FE-COMP-JOURNEYMAP-001 to FE-COMP-JOURNEYMAP-050
+// FE-COMP-JOURNEYMAP-001 to FE-COMP-JOURNEYMAP-063
 
 vi.mock('../../api/websocket', () => ({
   connect: vi.fn(),
@@ -12,6 +12,35 @@ vi.mock('../../api/websocket', () => ({
 
 // Leaflet does not work in jsdom — mock the entire library
 vi.mock('leaflet', () => {
+  const domEvent = {
+    on: vi.fn((el: HTMLElement, types: string, fn: (e: Event) => void) => {
+      types.split(' ').forEach(type => el.addEventListener(type, fn));
+    }),
+    stopPropagation: vi.fn((e: Event) => e.stopPropagation()),
+    disableClickPropagation: vi.fn((el: HTMLElement) => {
+      for (const type of ['mousedown', 'touchstart', 'dblclick', 'contextmenu']) el.addEventListener(type, e => e.stopPropagation());
+    }),
+  };
+  // The openable card (#2885): one per map, put on and taken off by the map itself.
+  // Its element is built on the first add, inside a stand-in for the map container.
+  const cardState = { onMap: false, element: null as HTMLElement | null, onAdd: [] as (() => void)[] };
+  const mockCard = {
+    state: cardState,
+    once: vi.fn((_type: string, fn: () => void) => { cardState.onAdd.push(fn); }),
+    setLatLng: vi.fn().mockReturnThis(),
+    setContent: vi.fn().mockReturnThis(),
+    getElement: vi.fn(() => cardState.element),
+    addTo: vi.fn(() => {
+      if (!cardState.element) {
+        cardState.element = document.createElement('div');
+        cardState.element.innerHTML = '<div class="trek-journey-popup-title">card</div>';
+        document.createElement('div').appendChild(cardState.element);
+      }
+      cardState.onMap = true;
+      cardState.onAdd.splice(0).forEach(fn => fn());
+    }),
+    remove: vi.fn(() => { cardState.onMap = false; }),
+  };
   const mockMarker = {
     addTo: vi.fn().mockReturnThis(),
     bindTooltip: vi.fn().mockReturnThis(),
@@ -38,31 +67,38 @@ vi.mock('leaflet', () => {
     getCenter: vi.fn(() => ({ lat: 0, lng: 0 })),
     zoomIn: vi.fn(),
     zoomOut: vi.fn(),
-    // The photo layer subscribes to zoom/pan and clusters in screen space (#1614).
+    // The photo and mark layers subscribe to zoom/pan and cluster in world
+    // pixels at the current zoom (#1614, #2889).
     on: vi.fn(),
     off: vi.fn(),
+    project: vi.fn(() => ({ x: 0, y: 0 })),
     latLngToContainerPoint: vi.fn(() => ({ x: 0, y: 0 })),
+    hasLayer: vi.fn((layer: unknown) => (layer === mockCard ? cardState.onMap : true)),
   };
   return {
     default: {
       map: vi.fn(() => mockMap),
       tileLayer: vi.fn(() => ({ addTo: vi.fn(), setUrl: vi.fn() })),
       marker: vi.fn(() => mockMarker),
-      polyline: vi.fn(() => { const line: any = { addTo: vi.fn(() => line), bindTooltip: vi.fn(() => line) }; return line }),
+      polyline: vi.fn(() => { const line: any = { addTo: vi.fn(() => line), bindTooltip: vi.fn(() => line), remove: vi.fn() }; return line }),
       divIcon: vi.fn(() => ({})),
       latLngBounds: vi.fn(() => ({})),
       layerGroup: vi.fn(() => ({ addLayer: vi.fn(), addTo: vi.fn(), remove: vi.fn() })),
       // The map builds its own attribution control so it can collapse to the credit
       // alone (see the GL twin: the phone lays a carousel over the bottom edge).
       control: { attribution: vi.fn(() => ({ addTo: vi.fn() })) },
+      tooltip: vi.fn(() => mockCard),
+      DomEvent: domEvent,
     },
     map: vi.fn(() => mockMap),
     tileLayer: vi.fn(() => ({ addTo: vi.fn(), setUrl: vi.fn() })),
     marker: vi.fn(() => mockMarker),
-    polyline: vi.fn(() => { const line: any = { addTo: vi.fn(() => line), bindTooltip: vi.fn(() => line) }; return line }),
+    polyline: vi.fn(() => { const line: any = { addTo: vi.fn(() => line), bindTooltip: vi.fn(() => line), remove: vi.fn() }; return line }),
     divIcon: vi.fn(() => ({})),
     latLngBounds: vi.fn(() => ({})),
     control: { attribution: vi.fn(() => ({ addTo: vi.fn() })) },
+    tooltip: vi.fn(() => mockCard),
+    DomEvent: domEvent,
   };
 });
 
@@ -76,6 +112,9 @@ import type { Mock } from 'vitest';
 import L from 'leaflet';
 import JourneyMap from './JourneyMap';
 import type { JourneyMapHandle } from './JourneyMap';
+import type { JourneyMapLayerVisibility } from './journeyMapLayers';
+import { mercatorWorldPx } from './journeyMapMarks';
+import type { JourneyMapStay } from '@trek/shared';
 
 // maplibre-gl-leaflet hangs the vector basemap into Leaflet's tile pane. The mock
 // only has to be callable and hand back a layer with the three methods the callers
@@ -178,6 +217,115 @@ describe('JourneyMap', () => {
     );
   });
 
+  describe('the marker card as a way into the entry (#2885)', () => {
+    interface MockCard {
+      state: { onMap: boolean; element: HTMLElement | null; onAdd: (() => void)[] };
+      addTo: Mock;
+      remove: Mock;
+      setContent: Mock;
+    }
+    // The leaflet mock hands every map the same card, so each case starts it unbuilt and off the map.
+    function mockedCard(): MockCard {
+      const card = vi.mocked(L.tooltip)() as unknown as MockCard;
+      vi.mocked(L.tooltip).mockClear();
+      return card;
+    }
+
+    beforeEach(() => {
+      Object.assign(mockedCard().state, { onMap: false, element: null, onAdd: [] });
+    });
+
+    function renderOpenable(onMarkerCardClick = vi.fn(), visibility?: JourneyMapLayerVisibility) {
+      const ref = React.createRef<JourneyMapHandle>();
+      const view = render(
+        <JourneyMap ref={ref} checkins={[]} entries={entriesWithCoords} onMarkerCardClick={onMarkerCardClick} layerVisibility={visibility} />,
+      );
+      return { ...view, ref, onMarkerCardClick };
+    }
+
+    function cardElement(): HTMLElement {
+      const { element } = mockedCard().state;
+      if (!element) throw new Error('the card was never built');
+      return element;
+    }
+
+    function cardTitle(): HTMLElement {
+      return cardElement().firstElementChild as HTMLElement;
+    }
+
+    it('FE-COMP-JOURNEYMAP-059: a tap on the card over the active pin opens that entry and never reaches the map', () => {
+      const { ref, onMarkerCardClick } = renderOpenable();
+      act(() => ref.current?.highlightMarker('e2'));
+
+      expect(L.tooltip).toHaveBeenCalledWith(expect.objectContaining({ className: 'map-tooltip trek-journey-tooltip is-openable' }));
+      const container = cardElement().parentElement as HTMLElement;
+      const mapClick = vi.fn();
+      const mapPress = vi.fn();
+      container.addEventListener('click', mapClick);
+      container.addEventListener('mousedown', mapPress);
+
+      cardTitle().dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      cardTitle().click();
+      act(() => ref.current?.highlightMarker('e1'));
+      cardTitle().click();
+
+      expect(onMarkerCardClick.mock.calls).toEqual([['e2'], ['e1']]);
+      expect(mapClick).not.toHaveBeenCalled();
+      expect(mapPress).not.toHaveBeenCalled();
+    });
+
+    it('FE-COMP-JOURNEYMAP-060: the pins do not open or close the card, so leaving the pin for the card keeps it', () => {
+      const { ref } = renderOpenable();
+      act(() => ref.current?.highlightMarker('e1'));
+
+      // A bound tooltip is what Leaflet closes on the pin's mouseout and blur, which
+      // a tap on the card sends first. The pins bind none and listen for the tap alone.
+      expect(mockedMarker().bindTooltip).not.toHaveBeenCalled();
+      expect(vi.mocked(mockedMarker().on).mock.calls.map((call: unknown[]) => call[0])).toEqual(['click', 'click']);
+      expect(mockedCard().state.onMap).toBe(true);
+      expect(mockedCard().remove).not.toHaveBeenCalled();
+    });
+
+    it('FE-COMP-JOURNEYMAP-061: the card follows the active pin and leaves with it or with the pins', () => {
+      mockedMarkerWithRemove();
+      const card = mockedCard();
+      const shown = { plan: true, recorded: true, entries: true };
+      const onMarkerCardClick = vi.fn();
+      const { ref, rerender } = renderOpenable(onMarkerCardClick, shown);
+      const map = mockedMap();
+
+      act(() => ref.current?.highlightMarker('e1'));
+      expect(card.setContent).toHaveBeenLastCalledWith(expect.stringContaining('Paris'));
+      act(() => ref.current?.highlightMarker('e2'));
+      expect(card.setContent).toHaveBeenLastCalledWith(expect.stringContaining('Berlin'));
+      expect(card.addTo).toHaveBeenCalledTimes(1);
+
+      act(() => ref.current?.highlightMarker(null));
+      expect(card.state.onMap).toBe(false);
+
+      act(() => ref.current?.highlightMarker('e1'));
+      map.hasLayer.mockImplementation((layer: unknown) => layer === card && card.state.onMap);
+      try {
+        rerender(<JourneyMap ref={ref} checkins={[]} entries={entriesWithCoords} onMarkerCardClick={onMarkerCardClick} layerVisibility={{ ...shown, entries: false }} />);
+        expect(card.state.onMap).toBe(false);
+      } finally {
+        map.hasLayer.mockImplementation((layer: unknown) => (layer === card ? card.state.onMap : true));
+      }
+    });
+
+    it('FE-COMP-JOURNEYMAP-062: without a handler the card stays a hover label on each pin that the drags on the map pass through', () => {
+      const ref = React.createRef<JourneyMapHandle>();
+      render(<JourneyMap ref={ref} checkins={[]} entries={entriesWithCoords} />);
+      act(() => ref.current?.highlightMarker('e1'));
+
+      expect(mockedMarker().bindTooltip).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ className: 'map-tooltip trek-journey-tooltip' }),
+      );
+      expect(L.tooltip).not.toHaveBeenCalled();
+    });
+  });
+
   it('FE-COMP-JOURNEYMAP-006: exposes imperative handle (focusMarker)', () => {
     const ref = React.createRef<JourneyMapHandle>();
     render(
@@ -199,6 +347,15 @@ describe('JourneyMap', () => {
     expect(firstCall.html).toContain('</svg>');
     // Marker index label "1" for first entry
     expect(firstCall.html).toContain('>1<');
+  });
+
+  it('FE-COMP-JOURNEYMAP-058: a stop without a number (a draft) gets an unnumbered pin', () => {
+    render(
+      <JourneyMap checkins={[]} entries={[{ ...entriesWithCoords[0], dayLabel: null }]} />
+    );
+    const html = String(vi.mocked(L.divIcon).mock.calls[0][0]?.html);
+    expect(html).toContain('<svg');
+    expect(html).toMatch(/font-weight="700"><\/text>/);
   });
 
   it('FE-COMP-JOURNEYMAP-008: renders markers with mood-based entry labels', () => {
@@ -386,13 +543,17 @@ describe('JourneyMap', () => {
     expect(L.polyline).not.toHaveBeenCalled();
   });
 
-  it('FE-COMP-JOURNEYMAP-022: fullScreen enables wheel zoom and drops the route polyline', () => {
+  it('FE-COMP-JOURNEYMAP-022: fullScreen enables wheel zoom and still draws the dashed route polyline', () => {
     render(
       <JourneyMap checkins={[]} entries={entriesWithCoords} fullScreen />
     );
     expect(vi.mocked(L.map).mock.calls[0][1]).toMatchObject({ scrollWheelZoom: true });
-    // The connecting route line is a sidebar-only decoration
-    expect(L.polyline).not.toHaveBeenCalled();
+    // The public sidebar and the mobile map+carousel view both pass fullScreen,
+    // and the line joining the entries has to show there too (#2606)
+    expect(L.polyline).toHaveBeenCalledWith(
+      [[48.8566, 2.3522], [52.52, 13.405]],
+      expect.objectContaining({ dashArray: '4 6' }),
+    );
   });
 
   it('FE-COMP-JOURNEYMAP-023: clicking a marker reports the entry id', () => {
@@ -427,6 +588,28 @@ describe('JourneyMap', () => {
         expect.objectContaining({ paddingBottomRight: [50, 200] }),
       );
     } finally {
+      globalThis.requestAnimationFrame = origRAF;
+    }
+  });
+
+  it('FE-COMP-JOURNEYMAP-063: paddingStart keeps the journey clear of a rail on the leading side, either way round', () => {
+    const origRAF = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => { cb(0); return 0; };
+    try {
+      const { unmount } = render(<JourneyMap checkins={[]} entries={entriesWithCoords} paddingBottom={200} paddingStart={100} />);
+      expect(mockedMap().fitBounds).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ paddingTopLeft: [150, 50], paddingBottomRight: [50, 200] }),
+      );
+      unmount();
+      document.documentElement.dir = 'rtl';
+      render(<JourneyMap checkins={[]} entries={entriesWithCoords} paddingBottom={200} paddingStart={100} />);
+      expect(mockedMap().fitBounds).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ paddingTopLeft: [50, 50], paddingBottomRight: [150, 200] }),
+      );
+    } finally {
+      document.documentElement.dir = '';
       globalThis.requestAnimationFrame = origRAF;
     }
   });
@@ -619,8 +802,31 @@ describe('JourneyMap', () => {
     expect(line).toBeDefined();
     // Leaflet wants [lat, lng], which is the order the geometry is stored in.
     expect(line![0]).toEqual([[47.1, 11.2], [47.2, 11.3]]);
-    // Solid, unlike the dashed line that merely connects entries in time order.
-    expect((line![1] as any).dashArray).toBeUndefined();
+    // A trip's GPX track is the plan: dashed, and wider apart than the faint
+    // line that merely connects entries in time order.
+    expect((line![1] as any).dashArray).toBe('8 7');
+  });
+
+  it('FE-COMP-JOURNEYMAP-051: a recorded route is drawn solid, apart from the planned one (JRN-01)', () => {
+    vi.mocked(L.polyline).mockClear();
+    render(
+      <JourneyMap
+        checkins={[]}
+        entries={entriesWithCoords}
+        tracks={[
+          { ...track({ color: '#00aa00' }), kind: 'day_recording' as const },
+          { ...track({ color: '#0000aa' }), kind: 'dawarich_live' as const },
+          { ...track({ color: '#aa0000' }), kind: 'trip_gpx' as const },
+        ]}
+      />
+    );
+
+    const style = (color: string) =>
+      vi.mocked(L.polyline).mock.calls.map(c => c[1] as L.PolylineOptions | undefined).find(o => o?.color === color);
+    expect(style('#00aa00')).toBeDefined();
+    expect(style('#00aa00')?.dashArray).toBeUndefined();
+    expect(style('#0000aa')?.dashArray).toBeUndefined();
+    expect(style('#aa0000')?.dashArray).toBe('8 7');
   });
 
   it('FE-COMP-JOURNEYMAP-043: labels a track with the map tooltip the markers use', () => {
@@ -755,9 +961,8 @@ describe('JourneyMap', () => {
   });
 
   // #2254 — the map effect defers its opening fitBounds/setView to a rAF, so this
-  // effect can draw while the map still has no center or zoom. Clustering
-  // projects to container pixels, which throws in that window and took the whole
-  // public journey page down with it.
+  // effect can draw while the map still has no center or zoom. Projecting in that
+  // window throws and took the whole public journey page down with it.
   it('FE-COMP-JOURNEYMAP-050: waits out a map that has no view yet, then draws on moveend', () => {
     const noView = () => { throw new Error('Set map center and zoom first.'); };
     let hasView = false;
@@ -767,12 +972,12 @@ describe('JourneyMap', () => {
     // The mock hands out one shared map instance, so it can be reached — and
     // stripped of its view — before the component ever builds one. Typed down to
     // the three spies this needs: L.map's signature promises a real Leaflet map.
-    type MapProbe = { getCenter: Mock; latLngToContainerPoint: Mock; on: Mock };
+    type MapProbe = { getCenter: Mock; project: Mock; on: Mock };
     L.map(document.createElement('div'));
     const map = mockedMap() as MapProbe;
     vi.mocked(L.map).mockClear();
     map.getCenter.mockImplementation(() => (hasView ? { lat: 0, lng: 0 } : noView()));
-    map.latLngToContainerPoint.mockImplementation(() => (hasView ? { x: 0, y: 0 } : noView()));
+    map.project.mockImplementation(() => (hasView ? { x: 0, y: 0 } : noView()));
 
     try {
       // Rendering must survive the viewless window, and draw nothing in it.
@@ -793,7 +998,164 @@ describe('JourneyMap', () => {
       expect(photoHtml()[0]).toContain('/uploads/late.jpg');
     } finally {
       map.getCenter.mockImplementation(() => ({ lat: 0, lng: 0 }));
+      map.project.mockImplementation(() => ({ x: 0, y: 0 }));
+    }
+  });
+
+  // JRN-04: the layer switches hide in place, and the plan's places and stays draw beside the entries.
+
+  it('FE-COMP-JOURNEYMAP-052: switching the entries off takes their pin off the map and back, without a rebuild', () => {
+    const marker = mockedMarkerWithRemove();
+    const entry = [entriesWithCoords[0]];
+    const shown = { plan: true, recorded: true, entries: true };
+    const { rerender } = render(<JourneyMap checkins={[]} entries={entry} layerVisibility={shown} />);
+    expect(marker.addTo).toHaveBeenCalledTimes(1);
+
+    rerender(<JourneyMap checkins={[]} entries={entry} layerVisibility={{ ...shown, entries: false }} />);
+    expect(marker.remove).toHaveBeenCalledTimes(1);
+    rerender(<JourneyMap checkins={[]} entries={entry} layerVisibility={shown} />);
+    expect(marker.addTo).toHaveBeenCalledTimes(2);
+    expect(L.map).toHaveBeenCalledTimes(1);
+  });
+
+  it('FE-COMP-JOURNEYMAP-053: a planned place is drawn as its hollow pin, and a click hands it up', () => {
+    const onMarksPick = vi.fn();
+    const mark = {
+      kind: 'plan' as const,
+      key: 'plan:4',
+      lat: 45.43,
+      lng: 12.33,
+      color: '#e11d48',
+      place: {
+        place_id: 4, trip_id: 2, trip_title: 'Venice', name: 'San Marco', lat: 45.43, lng: 12.33,
+        days: [], time: null, category_color: '#e11d48', category_icon: null, entry_id: null,
+      },
+    };
+    render(<JourneyMap checkins={[]} entries={[]} marks={[mark]} onMarksPick={onMarksPick} />);
+
+    const pins = vi.mocked(L.divIcon).mock.calls.map(c => String(c[0]?.html)).filter(h => h.includes('stroke-dasharray'));
+    expect(pins).toHaveLength(1);
+    expect(pins[0]).toContain('#e11d48');
+    const click = mockedMarker().on.mock.calls.filter((c: unknown[]) => c[0] === 'click').pop()?.[1] as () => void;
+    click();
+    expect(onMarksPick).toHaveBeenCalledWith([mark]);
+  });
+
+  it('FE-COMP-JOURNEYMAP-054: an entry pin whose place the plan had too carries the check', () => {
+    render(<JourneyMap checkins={[]} entries={entriesWithCoords} plannedEntryIds={new Set(['e2'])} />);
+    expect(divIconHtml(0)).not.toContain('#16a34a');
+    expect(divIconHtml(1)).toContain('#16a34a');
+  });
+
+  // #2889: a pan used to shift the screen grid the layers cluster on, so photos
+  // near a cell edge changed groups, counts and thumbnails without any zoom.
+  it('FE-COMP-JOURNEYMAP-055: panning keeps the photo and mark groups, only a zoom regroups them', () => {
+    const photos = [
+      { id: 'p1', lat: 45, lng: 5, thumbUrl: '/uploads/a.jpg' },
+      { id: 'p2', lat: 45, lng: 5.05, thumbUrl: '/uploads/b.jpg' },
+    ];
+    const marks = [
+      { kind: 'stay' as const, key: 's1', lat: 45, lng: 5, color: '#14b8a6', stay: {} as JourneyMapStay },
+      { kind: 'stay' as const, key: 's2', lat: 45, lng: 5.05, color: '#14b8a6', stay: {} as JourneyMapStay },
+    ];
+    L.map(document.createElement('div'));
+    const map = mockedMap() as { project: Mock; latLngToContainerPoint: Mock; getZoom: Mock; on: Mock; off: Mock };
+    vi.mocked(L.map).mockClear();
+    let zoom = 3;
+    let pan = 0;
+    map.getZoom.mockImplementation(() => zoom);
+    map.project.mockImplementation(([lat, lng]: [number, number], z: number) => mercatorWorldPx(lat, lng, z, 256));
+    map.latLngToContainerPoint.mockImplementation(([lat, lng]: [number, number]) => {
+      const world = mercatorWorldPx(lat, lng, zoom, 256);
+      return { x: world.x - pan, y: world.y };
+    });
+    const drawnSince = (from: number) =>
+      vi.mocked(L.divIcon).mock.calls.slice(from).map(c => String(c[0]?.html)).filter(h => h.includes('/uploads/') || h.includes('#14b8a6'));
+    const moveEnd = () => act(() => {
+      const gone = new Set(map.off.mock.calls.map(c => c[1]));
+      for (const [event, handler] of map.on.mock.calls) if (event === 'moveend' && !gone.has(handler)) (handler as () => void)();
+    });
+
+    try {
+      render(<JourneyMap checkins={[]} entries={[]} photos={photos} marks={marks} />);
+      let from = vi.mocked(L.divIcon).mock.calls.length;
+      moveEnd();
+      const first = drawnSince(from);
+      expect(first.filter(h => h.includes('/uploads/'))).toEqual([expect.stringContaining('>2<')]);
+      expect(first.filter(h => h.includes('#14b8a6'))).toHaveLength(1);
+      expect(map.project).toHaveBeenCalledWith([45, 5.05], 3);
+      expect(map.latLngToContainerPoint).not.toHaveBeenCalled();
+
+      // A pan that puts a 64 px cell edge between the two photos on screen.
+      const mid = (mercatorWorldPx(45, 5, 3, 256).x + mercatorWorldPx(45, 5.05, 3, 256).x) / 2;
+      pan = mid - (Math.floor(mid / 64) + 0.5) * 64;
+      from = vi.mocked(L.divIcon).mock.calls.length;
+      moveEnd();
+      expect(drawnSince(from)).toEqual(first);
+
+      zoom = 12;
+      from = vi.mocked(L.divIcon).mock.calls.length;
+      moveEnd();
+      const zoomed = drawnSince(from);
+      expect(zoomed.filter(h => h.includes('/uploads/'))).toHaveLength(2);
+      expect(zoomed.filter(h => h.includes('#14b8a6'))).toHaveLength(2);
+    } finally {
+      map.getZoom.mockImplementation(() => 10);
+      map.project.mockImplementation(() => ({ x: 0, y: 0 }));
       map.latLngToContainerPoint.mockImplementation(() => ({ x: 0, y: 0 }));
     }
   });
+
+  describe('the line between the entries on recorded days (#2888)', () => {
+    const days = [
+      { id: 'a', lat: 48.1, lng: 11.5, title: 'A', mood: null, entry_date: '2026-10-29' },
+      { id: 'b', lat: 48.2, lng: 11.6, title: 'B', mood: null, entry_date: '2026-10-29' },
+      { id: 'c', lat: 48.3, lng: 11.7, title: 'C', mood: null, entry_date: '2026-10-30' },
+    ];
+    const tracks = [
+      { place_id: -1, trip_id: 0, name: '2026-10-29', color: '#7c3aed', points: [[48.1, 11.5], [48.2, 11.6]] as [number, number][], kind: 'dawarich_live' as const, date: '2026-10-29' },
+    ];
+    const connectionLines = () => {
+      const polyline = vi.mocked(L.polyline).mock;
+      return polyline.calls
+        .map((call, i) => ({ coords: call[0], dashed: (call[1] as { dashArray?: string } | undefined)?.dashArray === '4 6', line: polyline.results[i].value as { addTo: Mock; remove: Mock } }))
+        .filter(call => call.dashed);
+    };
+
+    it('FE-COMP-JOURNEYMAP-056: leaves the recorded day to its track and keeps the jump to the next day', () => {
+      render(<JourneyMap checkins={[]} entries={days} tracks={tracks} />);
+
+      const lines = connectionLines();
+      expect(lines.map(l => l.coords)).toEqual([
+        [[48.2, 11.6], [48.3, 11.7]],
+        [[48.1, 11.5], [48.2, 11.6]],
+      ]);
+      expect(lines[0].line.addTo).toHaveBeenCalled();
+      expect(lines[1].line.addTo).not.toHaveBeenCalled();
+    });
+
+    it('FE-COMP-JOURNEYMAP-057: hiding what was recorded puts the covered stretch back, hiding the entries takes it off again', () => {
+      mockedMarkerWithRemove();
+      const shown = { plan: true, recorded: true, entries: true };
+      const { rerender } = render(<JourneyMap checkins={[]} entries={days} tracks={tracks} layerVisibility={shown} />);
+      const covered = connectionLines()[1].line;
+
+      rerender(<JourneyMap checkins={[]} entries={days} tracks={tracks} layerVisibility={{ ...shown, recorded: false }} />);
+      expect(covered.addTo).toHaveBeenCalledTimes(1);
+
+      rerender(<JourneyMap checkins={[]} entries={days} tracks={tracks} layerVisibility={{ ...shown, recorded: false, entries: false }} />);
+      expect(covered.remove).toHaveBeenCalledTimes(1);
+      expect(L.map).toHaveBeenCalledTimes(1);
+    });
+  });
 });
+
+/** The shared marker spy with the `remove` a hidden layer is taken off by. */
+function mockedMarkerWithRemove(): { addTo: Mock; remove: Mock } {
+  L.marker([0, 0]);
+  const marker = mockedMarker() as unknown as { addTo: Mock; remove: Mock };
+  marker.remove = vi.fn();
+  vi.mocked(L.marker).mockClear();
+  marker.addTo.mockClear();
+  return marker;
+}

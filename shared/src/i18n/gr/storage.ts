@@ -33,7 +33,7 @@ const storage: TranslationStrings = {
   'storage.backends.add': 'Προσθήκη backend',
   'storage.backends.usedBy': 'Χρησιμοποιείται από: {categories}',
   'storage.backends.unused': 'Δεν έχει ανατεθεί σε καμία κατηγορία',
-  'storage.backends.envReadOnly': 'Ορίζεται από μεταβλητή περιβάλλοντος — μόνο για ανάγνωση',
+  'storage.backends.envReadOnly': 'Ορίζεται από μεταβλητή περιβάλλοντος (μόνο για ανάγνωση)',
   'storage.source.built-in': 'Ενσωματωμένο',
   'storage.source.env': 'Περιβάλλον',
   'storage.source.settings': 'Ρυθμίσεις',
@@ -117,7 +117,8 @@ const storage: TranslationStrings = {
   'storage.sync.error': 'Ο συγχρονισμός απέτυχε: {error}',
   'storage.sync.prompt': 'Τα υπάρχοντα αντικείμενα δεν έχουν αναπαραχθεί ακόμα — συγχρονισμός τώρα;',
   'storage.sync.dismiss': 'Απόρριψη',
-  'storage.usage.line': '{objects} αντικείμενα · {size}',
+  'storage.usage.line': '{count} αντικείμενα · {size}',
+  'storage.usage.line.one': '{count} αντικείμενο · {size}',
   'storage.usage.computed': 'Η χρήση υπολογίστηκε {age}',
   'storage.usage.never': 'Η χρήση δεν έχει υπολογιστεί ακόμα',
   'storage.usage.refresh': 'Ανανέωση',
@@ -126,7 +127,8 @@ const storage: TranslationStrings = {
 
   // Category migration (copy → flip → delta sweep)
   'storage.migrate.promptTitle': 'Μετακίνηση των υπαρχόντων αντικειμένων στο νέο backend;',
-  'storage.migrate.promptLine': '{category}: {objects} αντικείμενα ({size}) από {from} σε {to}',
+  'storage.migrate.promptLine': '{category}: {count} αντικείμενα ({size}) από {from} σε {to}',
+  'storage.migrate.promptLine.one': '{category}: {count} αντικείμενο ({size}) από {from} σε {to}',
   'storage.migrate.promptLineUnknown':
     '{category}: άγνωστο μέγεθος (δεν έχει γίνει ακόμα σάρωση χρήσης) από {from} σε {to}',
   'storage.migrate.move': 'Μετακίνηση υπαρχόντων αντικειμένων',
@@ -136,10 +138,50 @@ const storage: TranslationStrings = {
   'storage.migrate.doneFailures': '{failed} απέτυχαν — αυτά τα αντικείμενα δεν αντιγράφηκαν στο νέο backend',
   'storage.migrate.failed': 'Η μετακίνηση απέτυχε: {error} — η κατηγορία δεν άλλαξε',
   'storage.migrate.cancelled': 'Η μετακίνηση ακυρώθηκε — τίποτα δεν άλλαξε',
-  'storage.migrate.reclaimable': '{objects} αντικείμενα ({size}) παραμένουν στο {from} — ανάκτησέ τα χειροκίνητα',
+  'storage.migrate.reclaimable': '{count} αντικείμενα ({size}) παραμένουν στο {from}, ανάκτησέ τα χειροκίνητα',
+  'storage.migrate.reclaimable.one': '{count} αντικείμενο ({size}) παραμένει στο {from}, ανάκτησέ το χειροκίνητα',
   'storage.migrate.cancel': 'Ακύρωση μετακίνησης',
   'storage.migrate.promptCancel': 'Ακύρωση',
   'storage.migrate.queued': 'Σε αναμονή: {categories}',
-  'storage.migrate.queueDropped': 'Δεν ήταν δυνατή η έναρξη της επόμενης μετακίνησης — η υπόλοιπη ουρά διαγράφηκε: {categories}',
+  'storage.migrate.queueDropped':
+    'Δεν ήταν δυνατή η έναρξη της επόμενης μετακίνησης — η υπόλοιπη ουρά διαγράφηκε: {categories}',
+  'storage.reclaim.title': 'Αρχεία χωρίς αναφορά',
+  'storage.reclaim.hint':
+    'Κάθε νύχτα το TREK αναζητά ανεβασμένα αρχεία που δεν χρησιμοποιούνται πια από κανένα ταξίδι, μέρος, ημερολόγιο, συλλογή ή χρήστη, για παράδειγμα μετά τη διαγραφή ενός ταξιδιού.',
+  'storage.reclaim.check': 'Έλεγχος τώρα',
+  'storage.reclaim.checked': 'Τελευταίος έλεγχος: {age}',
+  'storage.reclaim.never': 'Δεν έχει ελεγχθεί ακόμα',
+  'storage.reclaim.delete': 'Διαγραφή αρχείων χωρίς αναφορά',
+  'storage.reclaim.deleteHint':
+    'Όταν είναι ανενεργό, ο νυχτερινός έλεγχος μόνο αναφέρει. Όταν είναι ενεργό, διαγράφεται κάθε αρχείο που δεν έχει χρησιμοποιηθεί για μία εβδομάδα. Τα αρχεία που διαγράφεις στο TREK αφαιρούνται μία ημέρα αργότερα σε κάθε περίπτωση, όταν καμία αναίρεση δεν μπορεί πια να τα επαναφέρει.',
+  'storage.reclaim.freeable': 'Μπορεί να ελευθερωθεί',
+  'storage.reclaim.waiting': 'Αχρησιμοποίητα για λιγότερο από μία εβδομάδα',
+  'storage.reclaim.deleted': 'Ελευθερώθηκε από τον τελευταίο νυχτερινό καθαρισμό',
+  'storage.reclaim.nothing': 'Δεν βρέθηκαν αρχεία χωρίς αναφορά.',
+  'storage.reclaim.stopped':
+    'Ο τελευταίος έλεγχος σταμάτησε νωρίς επειδή η βάση δεδομένων επαναφέρθηκε κατά την εκτέλεσή του.',
+  'storage.reclaim.skip.sources_missing': 'Παραλείφθηκε: δεν ήταν δυνατή η ερώτηση σε όλα τα μέρη του TREK',
+  'storage.reclaim.skip.shared_location': 'Παραλείφθηκε: μοιράζεται τη θέση του με άλλη κατηγορία',
+  'storage.reclaim.skip.list_failed': 'Παραλείφθηκε: δεν ήταν δυνατή η λίστα των αρχείων',
+  'storage.reclaim.skip.source_failed': 'Παραλείφθηκε: μια αναζήτηση απέτυχε',
+  'storage.reclaim.running': 'Έλεγχος…',
+  'storage.reclaim.stoppedFailed': 'Ο τελευταίος έλεγχος σταμάτησε μετά από σφάλμα. Θα τρέξει ξανά απόψε.',
+  'storage.reclaim.skip.foreign_install': 'Παραλείφθηκε: άλλη εγκατάσταση του TREK χρησιμοποιεί αυτή την αποθήκευση',
+  'storage.reclaim.skip.owner_unknown': 'Παραλείφθηκε: το TREK δεν μπόρεσε να σημάνει αυτή την αποθήκευση ως δική του',
+  'storage.reclaim.skip.delete_failed': 'Διακόπηκε: η αποθήκευση απέρριψε μια διαγραφή',
+  'storage.reclaim.skip.interrupted': 'Διακόπηκε πριν ολοκληρωθεί, τα στοιχεία είναι μερικά',
+  'storage.reclaim.confirmNeeded':
+    'Περισσότερα από το ένα πέμπτο αυτών των αρχείων φαίνονται αχρησιμοποίητα. Τίποτα εδώ δεν διαγράφεται μέχρι να επιβεβαιώσεις ότι αυτό είναι αναμενόμενο.',
+  'storage.reclaim.confirm': 'Επιβεβαίωση',
+  'storage.reclaim.confirmed': 'Επιβεβαιώθηκε για τις επόμενες 14 ημέρες.',
+  'storage.reclaim.error.reclaim_busy': 'Εκτελείται άλλη εργασία αποθήκευσης. Δοκίμασε ξανά σε λίγο.',
+  'storage.reclaim.error.reclaim_demo': 'Μη διαθέσιμο σε demo εγκατάσταση.',
+  'storage.reclaim.error.reclaim_nothing_to_confirm':
+    'Δεν υπάρχει πλέον τίποτα προς επιβεβαίωση. Εκτέλεσε πρώτα έναν έλεγχο.',
+  'storage.reclaim.skip.backup_running': 'Παραλείφθηκε: εκτελούνταν αντίγραφο ασφαλείας',
+  'storage.reclaim.error.reclaim_confirm_stale':
+    'Ο αριθμός άλλαξε από τότε που εμφανίστηκε. Έλεγξε τη νέα τιμή και επιβεβαίωσε ξανά.',
+  'storage.reclaim.error.reclaim_install_unknown':
+    "Το TREK δεν μπόρεσε να διαβάσει το αναγνωριστικό της εγκατάστασής του, γι' αυτό δεν διαγράφει τίποτα. Έλεγξε τον φάκελο δεδομένων.",
 };
 export default storage;

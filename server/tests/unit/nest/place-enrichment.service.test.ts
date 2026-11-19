@@ -4,32 +4,42 @@
  * The service is a fan-out over MapsService primitives plus the shared photo
  * cache, so both are injected as stubs and every provider branch is driven from
  * the test. The SSRF guard is mocked the same way maps.service.test.ts mocks it.
+ *
+ * Rebuilt on PlaceDetailsCacheRepository/AppSettingsRepository (Plan 3c Task
+ * 1, R8's rewrite list): the legacy version stubbed the raw `db.prepare` handle (`get`, `run`)
+ * and branched on whether the SQL text contained `'place_details_cache'` to
+ * tell the settings read (PE1) apart from the cache read (PE2)/write (PE3).
+ * That coupling cannot survive the service calling two named repository
+ * methods instead of one shared connection — each repository method now has
+ * its own controllable fake, with no SQL-text branching anywhere.
  */
+import type { AppSettingsRepository } from '../../../src/db/repositories/AppSettings.repository';
+import type { PlaceDetailsCacheRepository } from '../../../src/db/repositories/PlaceDetailsCache.repository';
+import type { MapsService } from '../../../src/nest/maps/maps.service';
+import type { GooglePlacesClient } from '../../../src/nest/maps/providers/google-places.provider';
+import type { OsmClient } from '../../../src/nest/maps/providers/osm.client';
+import type { WikimediaClient } from '../../../src/nest/maps/providers/wikimedia.client';
+import type { TrekCommunityService } from '../../../src/nest/maps/trek-community.service';
+import {
+  candidateKey,
+  PlaceEnrichmentService,
+  creditLine,
+  collectFacts,
+  collectHours,
+  collectRating,
+  nearbyWouldMislead,
+} from '../../../src/nest/place-enrichment/place-enrichment.service';
+import type { PlacePhotoCacheService } from '../../../src/nest/place-photos/place-photo-cache.service';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-/** Whatever the statement under test selects: a settings row, a cache row, or nothing. */
-type DbRow = Record<string, unknown> | undefined;
-
-const { mockDbGet, mockDbRun, mockSafeFetchFollow } = vi.hoisted(() => ({
-  // Signature taken from the seam below rather than from this default: the
-  // statement text is folded in ahead of the params, so a no-argument spy
-  // would reject both the call site and every mockImplementation here.
-  mockDbGet: vi.fn((_sql: string, ..._params: unknown[]): DbRow => undefined),
-  mockDbRun: vi.fn((_sql: string, ..._params: unknown[]) => {}),
+const { mockGetValue, mockFindEntry, mockUpsertEntry, mockSafeFetchFollow } = vi.hoisted(() => ({
+  mockGetValue: vi.fn(async (_key: string): Promise<string | null> => null),
+  mockFindEntry: vi.fn(
+    async (..._args: unknown[]): Promise<{ payload_json: string; fetched_at: number } | null> => null,
+  ),
+  mockUpsertEntry: vi.fn(async (..._args: unknown[]): Promise<void> => {}),
   mockSafeFetchFollow: vi.fn(async () => ({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer })),
-}));
-
-// prepare() takes the SQL and the statement takes the params, so the spies get
-// the statement text folded back in as their first argument — the assertions
-// below distinguish the settings read from the cache read by exactly that.
-vi.mock('../../../src/db/database', () => ({
-  db: {
-    prepare: (sql: string) => ({
-      get: (...params: unknown[]) => mockDbGet(sql, ...params),
-      run: (...params: unknown[]) => mockDbRun(sql, ...params),
-      all: () => [],
-    }),
-  },
 }));
 
 vi.mock('../../../src/utils/ssrfGuard', () => ({
@@ -37,8 +47,6 @@ vi.mock('../../../src/utils/ssrfGuard', () => ({
   checkSsrf: vi.fn(async () => ({ allowed: true })),
   SsrfBlockedError: class extends Error {},
 }));
-
-vi.mock('../../../src/config', () => ({ JWT_SECRET: 'test-secret', ENCRYPTION_KEY: '0'.repeat(64) }));
 
 // Reached for any `gers:` place id, where the real one is an outbound request
 // to the TREK Places API. Only this export is replaced; the record shaping the
@@ -51,25 +59,27 @@ vi.mock('../../../src/nest/maps/trek-places.client', async (importOriginal) => (
   trekPlacesById: mockTrekPlacesById,
 }));
 
-import { db } from '../../../src/db/database';
-import { DatabaseService } from '../../../src/nest/database/database.service';
-import {
-  candidateKey,
-  PlaceEnrichmentService,
-  creditLine,
-  collectFacts,
-  collectHours,
-  collectRating,
-  nearbyWouldMislead,
-} from '../../../src/nest/place-enrichment/place-enrichment.service';
-import type { MapsService } from '../../../src/nest/maps/maps.service';
-import type { PlacePhotoCacheService } from '../../../src/nest/place-photos/place-photo-cache.service';
+/** Every seam enrichment reaches: the maps orchestrator and the outbound clients it injects beside it. */
+type Seams<T> = { [K in keyof T]: T[K] };
+type EnrichmentSeams = Seams<MapsService> &
+  Seams<GooglePlacesClient> &
+  Seams<OsmClient> &
+  Seams<WikimediaClient> &
+  Seams<TrekCommunityService>;
+
+function appSettingsStub(): AppSettingsRepository {
+  return { getValue: mockGetValue } as unknown as AppSettingsRepository;
+}
+
+function cacheRepoStub(): PlaceDetailsCacheRepository {
+  return { findEntry: mockFindEntry, upsertEntry: mockUpsertEntry } as unknown as PlaceDetailsCacheRepository;
+}
 
 const REQ = { lat: 50.9, lng: 6.96, name: 'Museum Ludwig', placeId: 'ChIJmuseum' };
 const OSM_REQ = { ...REQ, placeId: 'way:12345' };
 
 /** Every MapsService seam the service touches, all inert by default. */
-function mapsStub(over: Partial<Record<keyof MapsService, unknown>> = {}) {
+function mapsStub(over: Partial<Record<keyof EnrichmentSeams, unknown>> = {}) {
   return {
     getMapsKey: vi.fn(() => null as string | null),
     photosDisabled: vi.fn(() => false),
@@ -78,18 +88,26 @@ function mapsStub(over: Partial<Record<keyof MapsService, unknown>> = {}) {
     fetchGooglePhotoBytes: vi.fn(async () => null as Buffer | null),
     fetchCommonsCandidates: vi.fn(async () => [] as any[]),
     fetchEditorialSummary: vi.fn(async () => null as string | null),
-    fetchWikiExtract: vi.fn(async () => null as { text: string; sourceUrl: string; source: 'wikivoyage' | 'wikipedia' } | null),
+    fetchWikiExtract: vi.fn(
+      async () => null as { text: string; sourceUrl: string; source: 'wikivoyage' | 'wikipedia' } | null,
+    ),
     fetchCommonsCategoryCandidates: vi.fn(async () => [] as any[]),
     fetchWikidataCandidates: vi.fn(async () => ({ candidates: [] as any[], commonsCategory: null as string | null })),
     fetchCommonsFilesByName: vi.fn(async () => new Map<string, any>()),
     fetchWikiLeadImageName: vi.fn(async () => null as string | null),
-    resolveOsmIdentity: vi.fn(async () => null as { tags: Record<string, string>; osmUrl: string | null; matchedName: string } | null),
+    resolveOsmIdentity: vi.fn(
+      async () => null as { tags: Record<string, string>; osmUrl: string | null; matchedName: string } | null,
+    ),
     fetchWikidataSitelinks: vi.fn(async () => ({}) as Record<string, string>),
-    fetchWikiExtractFor: vi.fn(async () => null as { text: string; sourceUrl: string; source: 'wikivoyage' | 'wikipedia' } | null),
+    fetchWikiExtractFor: vi.fn(
+      async () => null as { text: string; sourceUrl: string; source: 'wikivoyage' | 'wikipedia' } | null,
+    ),
     details: vi.fn(async () => ({ place: null })),
     trekPlacesEnabled: vi.fn(() => true),
+    photoPaths: vi.fn(async () => [] as string[]),
+    imageBytes: vi.fn(async () => null as Buffer | null),
     ...over,
-  } as unknown as MapsService;
+  } as unknown as EnrichmentSeams;
 }
 
 function cacheStub(over: Record<string, unknown> = {}) {
@@ -104,8 +122,17 @@ function cacheStub(over: Record<string, unknown> = {}) {
   } as unknown as PlacePhotoCacheService;
 }
 
-function make(maps: MapsService, cache: PlacePhotoCacheService) {
-  return new PlaceEnrichmentService(new DatabaseService(db as never), maps, cache);
+function make(maps: EnrichmentSeams, cache: PlacePhotoCacheService) {
+  return new PlaceEnrichmentService(
+    cacheRepoStub(),
+    appSettingsStub(),
+    maps as unknown as MapsService,
+    cache,
+    maps as unknown as GooglePlacesClient,
+    maps as unknown as OsmClient,
+    maps as unknown as WikimediaClient,
+    maps as unknown as TrekCommunityService,
+  );
 }
 
 let candidateSeq = 0;
@@ -133,9 +160,12 @@ beforeEach(() => {
   // Per test, so a fixture's page id is a property of the case rather than of
   // where the case sits in the file.
   candidateSeq = 0;
-  mockDbGet.mockReset();
-  mockDbGet.mockReturnValue(undefined);
-  mockDbRun.mockReset();
+  mockGetValue.mockReset();
+  mockGetValue.mockResolvedValue(null);
+  mockFindEntry.mockReset();
+  mockFindEntry.mockResolvedValue(null);
+  mockUpsertEntry.mockReset();
+  mockUpsertEntry.mockResolvedValue(undefined);
   mockSafeFetchFollow.mockReset();
   mockSafeFetchFollow.mockResolvedValue({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer });
   mockTrekPlacesById.mockReset();
@@ -145,22 +175,22 @@ beforeEach(() => {
 // ── Kill switch ──────────────────────────────────────────────────────────────
 
 describe('enrichDisabled', () => {
-  it('ENRICH-001: is off only when the setting is literally "false"', () => {
+  it('ENRICH-001: is off only when the setting is literally "false"', async () => {
     const svc = make(mapsStub(), cacheStub());
 
-    mockDbGet.mockReturnValue(undefined);
-    expect(svc.enrichDisabled()).toBe(false); // never configured — fail open
+    mockGetValue.mockResolvedValue(null);
+    expect(await svc.enrichDisabled()).toBe(false); // never configured — fail open
 
-    mockDbGet.mockReturnValue({ value: 'true' });
-    expect(svc.enrichDisabled()).toBe(false);
+    mockGetValue.mockResolvedValue('true');
+    expect(await svc.enrichDisabled()).toBe(false);
 
-    mockDbGet.mockReturnValue({ value: 'false' });
-    expect(svc.enrichDisabled()).toBe(true);
+    mockGetValue.mockResolvedValue('false');
+    expect(await svc.enrichDisabled()).toBe(true);
   });
 
   it('ENRICH-002: answers the disabled envelope without touching a provider', async () => {
     const maps = mapsStub();
-    mockDbGet.mockReturnValue({ value: 'false' });
+    mockGetValue.mockResolvedValue('false');
 
     const out = await make(maps, cacheStub()).enrich(1, REQ);
 
@@ -203,6 +233,38 @@ describe('collectPhotos', () => {
 
     expect(out.photos).toHaveLength(1);
     expect(maps.fetchGooglePhotoRefs).not.toHaveBeenCalled();
+  });
+
+  it('ENRICH-005b: puts the community pictures first, credited to the TREK community', async () => {
+    const maps = mapsStub({
+      getMapsKey: vi.fn(() => 'key'),
+      fetchGooglePhotoRefs: vi.fn(async () => [{ name: 'places/p/photos/a', attribution: 'Bob' }]),
+      fetchGooglePhotoBytes: vi.fn(async () => Buffer.from([1, 2, 3])),
+      fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]),
+      photoPaths: vi.fn(async () => ['/v1/contrib/img/0123456789abcdef.webp']),
+      imageBytes: vi.fn(async () => Buffer.from([4, 5, 6])),
+    });
+
+    const out = await make(maps, cacheStub()).enrich(1, OSM_REQ);
+
+    expect(maps.photoPaths).toHaveBeenCalledWith('way:12345');
+    expect(maps.imageBytes).toHaveBeenCalledWith('/v1/contrib/img/0123456789abcdef.webp');
+    expect(out.photos[0]).toMatchObject({
+      source: 'community',
+      attribution: 'TREK Community',
+      license: 'CC BY 4.0',
+      sourceUrl: null,
+    });
+  });
+
+  it('ENRICH-005c: asks no community pictures for a Google place or when the API is off', async () => {
+    const maps = mapsStub({ photoPaths: vi.fn(async () => ['/v1/contrib/img/0123456789abcdef.webp']) });
+    await make(maps, cacheStub()).enrich(1, REQ);
+    expect(maps.photoPaths).not.toHaveBeenCalled();
+
+    const off = mapsStub({ trekPlacesEnabled: vi.fn(() => false), photoPaths: vi.fn(async () => []) });
+    await make(off, cacheStub()).enrich(1, OSM_REQ);
+    expect(off.photoPaths).not.toHaveBeenCalled();
   });
 
   it('ENRICH-005: puts Google pictures ahead of Commons when a key is configured', async () => {
@@ -251,7 +313,11 @@ describe('collectPhotos', () => {
   it('ENRICH-008: reuses a cached candidate instead of downloading it again', async () => {
     const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
     const cache = cacheStub({
-      get: vi.fn(() => ({ photoUrl: '/api/maps/place-photo/ChIJmuseum~p0/bytes', filePath: '/tmp/x', attribution: 'Alice' })),
+      get: vi.fn(() => ({
+        photoUrl: '/api/maps/place-photo/ChIJmuseum~p0/bytes',
+        filePath: '/tmp/x',
+        attribution: 'Alice',
+      })),
     });
 
     const out = await make(maps, cache).enrich(1, REQ);
@@ -291,9 +357,25 @@ describe('collectPhotos', () => {
     expect((await make(maps, cacheStub()).enrich(1, REQ)).photos).toEqual([]);
   });
 
+  it('ENRICH-010b: downloads a third-party picture with a deadline and a size cap', async () => {
+    const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
+
+    await make(maps, cacheStub()).enrich(1, REQ);
+
+    expect(mockSafeFetchFollow).toHaveBeenCalled();
+    for (const [, init, options] of mockSafeFetchFollow.mock.calls as unknown as [string, RequestInit, unknown][]) {
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      expect(options).toEqual({ bypassInternalIpAllowed: true, maxBytes: 8 * 1024 * 1024 });
+    }
+  });
+
   it('ENRICH-011: drops a candidate the cache refuses to store', async () => {
     const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
-    const cache = cacheStub({ put: vi.fn(async () => { throw new Error('disk full'); }) });
+    const cache = cacheStub({
+      put: vi.fn(async () => {
+        throw new Error('disk full');
+      }),
+    });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const out = await make(maps, cache).enrich(1, REQ);
@@ -525,7 +607,11 @@ describe('collectDescription', () => {
   });
 
   it('ENRICH-020: survives a details lookup that throws', async () => {
-    const maps = mapsStub({ details: vi.fn(async () => { throw new Error('overpass down'); }) });
+    const maps = mapsStub({
+      details: vi.fn(async () => {
+        throw new Error('overpass down');
+      }),
+    });
 
     const out = await make(maps, cacheStub()).enrich(1, OSM_REQ);
 
@@ -547,10 +633,18 @@ describe('result cache', () => {
   it('ENRICH-021: serves a fresh entry without calling any provider', async () => {
     const maps = mapsStub();
     const cache = cacheStub({ get: vi.fn(() => ({ photoUrl: '/x', filePath: '/tmp/x', attribution: null })) });
-    mockDbGet.mockImplementation((sql: string) =>
-      String(sql).includes('place_details_cache')
-        ? cachedRow([{ key: 'ChIJmuseum~p0', url: '/x', attribution: null, license: null, licenseUrl: null, sourceUrl: null, source: 'wikimedia' }])
-        : undefined,
+    mockFindEntry.mockResolvedValue(
+      cachedRow([
+        {
+          key: 'ChIJmuseum~p0',
+          url: '/x',
+          attribution: null,
+          license: null,
+          licenseUrl: null,
+          sourceUrl: null,
+          source: 'wikimedia',
+        },
+      ]),
     );
 
     const out = await make(maps, cache).enrich(1, REQ);
@@ -562,9 +656,7 @@ describe('result cache', () => {
   it('ENRICH-022: refetches once the entry is older than a week', async () => {
     const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
     const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000;
-    mockDbGet.mockImplementation((sql: string) =>
-      String(sql).includes('place_details_cache') ? cachedRow([], eightDaysAgo) : undefined,
-    );
+    mockFindEntry.mockResolvedValue(cachedRow([], eightDaysAgo));
 
     await make(maps, cacheStub()).enrich(1, REQ);
 
@@ -584,10 +676,18 @@ describe('result cache', () => {
         return { photoUrl: `/api/maps/place-photo/${key}/bytes`, filePath: '/tmp/x', attribution: null };
       }),
     });
-    mockDbGet.mockImplementation((sql: string) =>
-      String(sql).includes('place_details_cache')
-        ? cachedRow([{ key: 'ChIJmuseum~p0', url: '/x', attribution: null, license: null, licenseUrl: null, sourceUrl: null, source: 'wikimedia' }])
-        : undefined,
+    mockFindEntry.mockResolvedValue(
+      cachedRow([
+        {
+          key: 'ChIJmuseum~p0',
+          url: '/x',
+          attribution: null,
+          license: null,
+          licenseUrl: null,
+          sourceUrl: null,
+          source: 'wikimedia',
+        },
+      ]),
     );
 
     const out = await make(maps, cache).enrich(1, REQ);
@@ -599,10 +699,18 @@ describe('result cache', () => {
   it('ENRICH-023b: keeps serving a cached entry while all its bytes are still there', async () => {
     const maps = mapsStub();
     const cache = cacheStub({ get: vi.fn(() => ({ photoUrl: '/x', filePath: '/tmp/x', attribution: null })) });
-    mockDbGet.mockImplementation((sql: string) =>
-      String(sql).includes('place_details_cache')
-        ? cachedRow([{ key: 'ChIJmuseum~p0', url: '/x', attribution: null, license: null, licenseUrl: null, sourceUrl: null, source: 'wikimedia' }])
-        : undefined,
+    mockFindEntry.mockResolvedValue(
+      cachedRow([
+        {
+          key: 'ChIJmuseum~p0',
+          url: '/x',
+          attribution: null,
+          license: null,
+          licenseUrl: null,
+          sourceUrl: null,
+          source: 'wikimedia',
+        },
+      ]),
     );
 
     const out = await make(maps, cache).enrich(1, REQ);
@@ -614,9 +722,7 @@ describe('result cache', () => {
   it('ENRICH-023c: discards an entry written by an older format version', async () => {
     // Otherwise a release that adds a field keeps serving last week's answers.
     const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
-    mockDbGet.mockImplementation((sql: string) =>
-      String(sql).includes('place_details_cache') ? cachedRow([], Date.now(), 1) : undefined,
-    );
+    mockFindEntry.mockResolvedValue(cachedRow([], Date.now(), 1));
 
     await make(maps, cacheStub()).enrich(1, REQ);
 
@@ -625,9 +731,7 @@ describe('result cache', () => {
 
   it('ENRICH-024: ignores an unreadable cache row and rebuilds', async () => {
     const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
-    mockDbGet.mockImplementation((sql: string) =>
-      String(sql).includes('place_details_cache') ? { payload_json: '{not json', fetched_at: Date.now() } : undefined,
-    );
+    mockFindEntry.mockResolvedValue({ payload_json: '{not json', fetched_at: Date.now() });
 
     const out = await make(maps, cacheStub()).enrich(1, REQ);
 
@@ -639,17 +743,70 @@ describe('result cache', () => {
 
     await make(maps, cacheStub()).enrich(1, { ...REQ, lang: 'de' });
 
-    const write = mockDbRun.mock.calls.find((c) => String(c[0]).includes('INSERT OR REPLACE INTO place_details_cache'));
-    expect(write).toBeDefined();
-    expect(write![1]).toBe('ChIJmuseum');
-    expect(write![2]).toBe('de');
+    expect(mockUpsertEntry).toHaveBeenCalledTimes(1);
+    const [written] = mockUpsertEntry.mock.calls[0] as [
+      { place_id: string; lang: string; expanded: number; payload_json: string; fetched_at: number },
+    ];
+    expect(written.place_id).toBe('ChIJmuseum');
+    expect(written.lang).toBe('de');
     // expanded = 2 — the plain (0) and reviews (1) caches keep their rows.
-    expect(write![3]).toBe(2);
+    expect(written.expanded).toBe(2);
+  });
+
+  it('ENRICH-027: a gers place is read again once the index serves another community version', async () => {
+    const GERS_REQ = { ...REQ, placeId: 'gers:ceba0e62-172b-4343-bb3b-78b915a18383' };
+    const row = {
+      payload_json: JSON.stringify({ photos: [], description: null, facts: [], v: 4, cv: 1 }),
+      fetched_at: Date.now(),
+    };
+    const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
+
+    mockFindEntry.mockResolvedValue(row);
+    await make(maps, cacheStub()).enrich(1, { ...GERS_REQ, details: { community_version: 1 } });
+    expect(maps.fetchCommonsCandidates).not.toHaveBeenCalled();
+
+    await make(maps, cacheStub()).enrich(1, { ...GERS_REQ, details: { community_version: 2 } });
+    expect(maps.fetchCommonsCandidates).toHaveBeenCalled();
+    const [written] = mockUpsertEntry.mock.calls.at(-1) as [{ payload_json: string }];
+    expect(JSON.parse(written.payload_json).cv).toBe(2);
+  });
+
+  it('ENRICH-027b: an OSM place opened for editing, without details, reads its version and drops a stale answer', async () => {
+    // Installation A cached the place before installation B's picture was approved (version 1 -> 2).
+    const row = {
+      payload_json: JSON.stringify({ photos: [], description: null, facts: [], v: 4, cv: 1 }),
+      fetched_at: Date.now(),
+    };
+    const maps = mapsStub({
+      details: vi.fn(async () => ({
+        place: { source: 'openstreetmap', name: 'Helgas Kitchen', community_version: 2 },
+      })),
+      photoPaths: vi.fn(async () => ['/v1/contrib/img/0123456789abcdef.webp']),
+      imageBytes: vi.fn(async () => Buffer.from([7, 8, 9])),
+    });
+    mockFindEntry.mockResolvedValue(row);
+
+    const out = await make(maps, cacheStub()).enrich(1, OSM_REQ);
+
+    expect(maps.details).toHaveBeenCalledTimes(1);
+    expect(out.photos.map((p) => p.source)).toEqual(['community']);
+    const [written] = mockUpsertEntry.mock.calls.at(-1) as [{ payload_json: string }];
+    expect(JSON.parse(written.payload_json).cv).toBe(2);
+  });
+
+  it('ENRICH-028: any other place keeps its week, whatever a request says about versions', async () => {
+    const maps = mapsStub();
+    mockFindEntry.mockResolvedValue({
+      payload_json: JSON.stringify({ photos: [], description: null, facts: [], v: 4 }),
+      fetched_at: Date.now(),
+    });
+    await make(maps, cacheStub()).enrich(1, { ...REQ, details: { community_version: 9 } });
+    expect(maps.fetchCommonsCandidates).not.toHaveBeenCalled();
   });
 
   it('ENRICH-026: keeps working when the cache write fails', async () => {
     const maps = mapsStub({ fetchCommonsCandidates: vi.fn(async () => [commonsCandidate()]) });
-    mockDbRun.mockImplementation(() => { throw new Error('db locked'); });
+    mockUpsertEntry.mockRejectedValue(new Error('db locked'));
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const out = await make(maps, cacheStub()).enrich(1, REQ);
@@ -900,8 +1057,8 @@ describe('picture source ladder', () => {
     const maps = mapsStub({
       details: withTags({ wikipedia: 'de:Flughafen Hamburg' }),
       fetchWikiLeadImageName: vi.fn(async () => 'Hamburg airport terminals.jpg'),
-      fetchCommonsFilesByName: vi.fn(async () =>
-        new Map([['hamburg airport terminals.jpg', commonsCandidate({ attribution: 'Alice' })]]),
+      fetchCommonsFilesByName: vi.fn(
+        async () => new Map([['hamburg airport terminals.jpg', commonsCandidate({ attribution: 'Alice' })]]),
       ),
     });
 
@@ -943,7 +1100,7 @@ describe('picture source ladder', () => {
     expect(out.photos.every((p) => p.source === 'google')).toBe(true);
   });
 
-  it('ENRICH-065: keeps the coordinate search off the critical path of Google\'s listing', async () => {
+  it("ENRICH-065: keeps the coordinate search off the critical path of Google's listing", async () => {
     // Waiting for the listing before deciding put two round trips end to end,
     // which is what pushed this endpoint past the client timeout once before.
     const order: string[] = [];

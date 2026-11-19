@@ -6,7 +6,9 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.prevMonth': 'Önceki ay',
   'mobileVacay.nextMonth': 'Sonraki ay',
   'mobileVacay.usedCount': '{count} kullanıldı',
+  'mobileVacay.usedCount.one': '{count} kullanıldı',
   'mobileVacay.leftCount': '{count} kaldı',
+  'mobileVacay.leftCount.one': '{count} kaldı',
   'mobileVacay.left': 'kaldı',
   'mobileVacay.modeCompany': 'Şirket',
   'mobileVacay.decreaseAllowance': 'Hakkı azalt',
@@ -14,6 +16,8 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.companyLegend': 'Şirket tatili',
   'mobileVacay.editCalendar': 'Takvimi düzenle',
   'mobileVacay.viewYear': 'Yılı görüntüle',
+  'mobileVacay.people': 'Kişiler',
+  'mobileVacay.legend': 'Açıklama',
 };
 
 export default mobileVacay;

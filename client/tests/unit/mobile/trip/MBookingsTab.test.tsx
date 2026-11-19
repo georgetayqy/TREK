@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import MBookingsTab from '../../../../src/mobile/screens/trip/tabs/MBookingsTab'
 import type { MTripShellApi, TripPlanner } from '../../../../src/mobile/screens/trip/MTripShell'
 import { openFile } from '../../../../src/utils/fileDownload'
+import { formatMoney } from '../../../../src/utils/formatters'
 import type { Day, Reservation, TripFile } from '../../../../src/types'
 import { usePluginStore } from '../../../../src/store/pluginStore'
 import { buildSettings } from '../../../helpers/factories'
@@ -10,6 +11,10 @@ import { fireEvent, render, screen, waitFor, within } from '../../../helpers/ren
 import { seedStore } from '../../../helpers/store'
 
 // FE-MOB-BKTAB-001 to FE-MOB-BKTAB-023
+
+// A card shows a price the way formatMoney writes it; getByText collapses the
+// no-break space Intl puts between amount and symbol, so the expectation does too.
+const money = (amount: number, currency: string) => formatMoney(amount, currency, 'en').replace(/\s/g, ' ')
 
 vi.mock('../../../../src/utils/fileDownload', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../../src/utils/fileDownload')>()),
@@ -191,17 +196,17 @@ describe('MBookingsTab', () => {
     const card = cardOf('Bamboo walk')
     expect(within(card).queryByText('reservations.meta.from')).not.toBeInTheDocument()
     expect(within(card).getByText('reservations.price')).toBeInTheDocument()
-    expect(within(card).getByText('30 JPY')).toBeInTheDocument()
+    // Formatted as money in the booking's own currency.
+    expect(within(card).getByText(money(30, 'JPY'))).toBeInTheDocument()
     expect(within(card).getAllByText('—')).toHaveLength(2)
   })
 
-  it('FE-MOB-BKTAB-012: opens the reservation editor from the row', () => {
+  it('FE-MOB-BKTAB-012: a tap on the card shows the booking first, as a transport and the desktop do', () => {
     const p = planner()
-    renderTab(p)
+    const { shell } = renderTab(p)
     fireEvent.click(screen.getByText('Sushi Saito'))
-    expect(p.can).toHaveBeenCalledWith('reservation_edit', p.trip)
-    expect(p.setEditingReservation).toHaveBeenCalledWith(expect.objectContaining({ id: 202 }))
-    expect(p.setShowReservationModal).toHaveBeenCalledWith(true)
+    expect(shell.openSheet).toHaveBeenCalledWith('transport', { reservationId: 202 })
+    expect(p.setShowReservationModal).not.toHaveBeenCalled()
   })
 
   it('FE-MOB-BKTAB-013: opens the same editor from the pencil', () => {
@@ -211,10 +216,11 @@ describe('MBookingsTab', () => {
     expect(p.setEditingReservation).toHaveBeenCalledWith(expect.objectContaining({ id: 201 }))
   })
 
-  it('FE-MOB-BKTAB-014: a read-only member gets no editor and no actions', () => {
+  it('FE-MOB-BKTAB-014: a read-only member may look at a booking but gets no editor and no actions', () => {
     const p = planner({ can: vi.fn(() => false) as unknown as TripPlanner['can'] })
-    renderTab(p)
+    const { shell } = renderTab(p)
     fireEvent.click(screen.getByText('Sushi Saito'))
+    expect(shell.openSheet).toHaveBeenCalledWith('transport', { reservationId: 202 })
     expect(p.setShowReservationModal).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: 'common.edit' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'common.delete' })).not.toBeInTheDocument()
@@ -320,5 +326,13 @@ describe('MBookingsTab', () => {
     renderTab(planner(), buildShell({ bookingsCompact: true }))
     expect(screen.getByText('Hotel Granvia')).toBeInTheDocument()
     expect(screen.queryByTestId('plugin-frame')).not.toBeInTheDocument()
+  })
+
+  it('FE-MOB-BKTAB-024: a section lays its cards in as many columns as the page holds', () => {
+    renderTab()
+    const header = screen.getByRole('button', { name: 'reservations.confirmed2' })
+    const grid = header.nextElementSibling as HTMLElement
+    expect(grid.className).toContain('wide:columns-[380px]')
+    expect(within(grid).getByText('Hotel Granvia')).toBeInTheDocument()
   })
 })

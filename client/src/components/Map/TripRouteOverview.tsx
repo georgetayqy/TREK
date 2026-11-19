@@ -1,9 +1,8 @@
 import { AlertTriangle, Route } from 'lucide-react'
 import { useTranslation } from '../../i18n'
-import { Tooltip } from '../shared/Tooltip'
-import { profileIcon } from '../Planner/DayPlanSidebarRouteConnector'
-import { formatDistance } from '../../utils/units'
-import { MAP_CONTROL_SHADOW } from './mapControlShadow'
+import { MapTogglePill } from './MapTogglePill'
+import { routeModeIcon } from '../Planner/routeModes'
+import { routeDistanceLabel } from './tripRouteLabels'
 import type { TripRouteOverview as Overview } from './useTripRouteOverview'
 import type { DistanceUnit } from '../../types'
 
@@ -13,40 +12,14 @@ import type { DistanceUnit } from '../../types'
  */
 export function TripRouteOverviewPill({ active, onToggle }: { active: boolean; onToggle: () => void }) {
   const { t } = useTranslation()
-  const label = active ? t('map.overview.hide') : t('map.overview.show')
   return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center', padding: 4, borderRadius: 999, pointerEvents: 'auto',
-      background: 'var(--sidebar-bg)',
-      backdropFilter: 'blur(20px) saturate(180%)',
-      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-      boxShadow: MAP_CONTROL_SHADOW,
-    }}>
-      {/* TREK's own tooltip, not the browser's — the native one ignores the
-          colour scheme, waits a second and a half, and cannot be read on a touch
-          device at all. `left`, because these controls hug the right edge of the
-          map and a tooltip to the right would hang off it. */}
-      <Tooltip label={label} placement="left">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={label}
-          aria-pressed={active}
-          data-testid="trip-overview-pill"
-          className={active ? 'text-accent' : 'text-content-muted'}
-          style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 34, height: 34, borderRadius: 999, border: 'none', cursor: 'pointer',
-            background: 'transparent', padding: 0,
-            transition: 'background 0.14s, color 0.14s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-        >
-          <Route size={17} strokeWidth={2} />
-        </button>
-      </Tooltip>
-    </div>
+    <MapTogglePill
+      active={active}
+      onToggle={onToggle}
+      label={active ? t('map.overview.hide') : t('map.overview.show')}
+      testId="trip-overview-pill"
+      icon={<Route size={17} strokeWidth={2} />}
+    />
   )
 }
 
@@ -92,7 +65,7 @@ export function TripRouteOverviewPanel({ overview, unit, selectedDayId, onSelect
         {/* Same tier as the label beside it: the two read as one line rather than as a
             heading with a number stuck under it. */}
         <span className="text-content" style={{ fontSize: 'calc(11px * var(--fs-scale-caption, 1))', fontWeight: 600 }}>
-          {formatDistance(overview.totalDistance / 1000, unit)}
+          {routeDistanceLabel(overview.totalDistance, unrouted, unit, t)}
           {/* Still routing: the number is a partial sum, and saying so beats a total
               that silently grows while you read it. */}
           {overview.loading && <span className="text-content-muted" style={{ fontWeight: 400 }}>{' '}…</span>}
@@ -123,7 +96,7 @@ export function TripRouteOverviewPanel({ overview, unit, selectedDayId, onSelect
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0 }} className="text-content-muted">
                 {day.modes.map(mode => {
-                  const Icon = profileIcon(mode)
+                  const Icon = routeModeIcon(mode)
                   return <Icon key={mode} size={12} strokeWidth={2} aria-hidden />
                 })}
               </span>
@@ -139,13 +112,13 @@ export function TripRouteOverviewPanel({ overview, unit, selectedDayId, onSelect
                 />
               )}
               <span className="text-content-muted" style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-                {formatDistance(day.distance / 1000, unit)}
+                {routeDistanceLabel(day.distance, dayUnrouted, unit, t)}
               </span>
             </>
           )
           const style = {
             display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-            padding: '7px 14px', textAlign: 'left' as const,
+            padding: '7px 14px', textAlign: 'start' as const,
             fontSize: 'calc(12px * var(--fs-scale-body, 1))',
             background: day.dayId === selectedDayId ? 'var(--bg-hover)' : 'transparent',
             border: 'none',

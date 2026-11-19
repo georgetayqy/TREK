@@ -5,8 +5,12 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.nextYear': 'Další rok',
   'mobileVacay.prevMonth': 'Předchozí měsíc',
   'mobileVacay.nextMonth': 'Další měsíc',
-  'mobileVacay.usedCount': '{count} využito',
-  'mobileVacay.leftCount': 'Zbývá {count}',
+  'mobileVacay.usedCount': 'Vyčerpáno: {count}',
+  'mobileVacay.usedCount.one': 'Vyčerpáno: {count}',
+  'mobileVacay.usedCount.few': 'Vyčerpáno: {count}',
+  'mobileVacay.leftCount': 'Zbývá: {count}',
+  'mobileVacay.leftCount.one': 'Zbývá: {count}',
+  'mobileVacay.leftCount.few': 'Zbývá: {count}',
   'mobileVacay.left': 'zbývá',
   'mobileVacay.modeCompany': 'Firma',
   'mobileVacay.decreaseAllowance': 'Snížit nárok',
@@ -14,6 +18,8 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.companyLegend': 'Firemní dny',
   'mobileVacay.editCalendar': 'Upravit kalendář',
   'mobileVacay.viewYear': 'Zobrazit rok',
+  'mobileVacay.people': 'Lidé',
+  'mobileVacay.legend': 'Legenda',
 };
 
 export default mobileVacay;

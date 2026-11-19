@@ -1,15 +1,14 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 
 /*
- * These cases are about the layouts written in autoLayout.ts, which are what an
- * entry falls back on when no hand-drawn template suits it. With the real
- * templates in place they would be testing whichever spread somebody last drew
- * in Studio — so the set is empty here on purpose.
+ * These cases are about the layouts written as code in the shared auto layout
+ * (shared/src/book/auto), which are what an entry falls back on when no
+ * hand-drawn template suits it. With the real templates in place they would be
+ * testing whichever spread somebody last drew in Studio, so the inputs pass an
+ * empty template set on purpose.
  */
-vi.mock('../../../src/components/Studio/bookTemplates.data', () => ({ SPREAD_TEMPLATES: [] }))
-import type { BookPageSetup, BookSpread, JourneyStats } from '@trek/shared'
-import { buildBook, emptyBook, type AutoEntry, type AutoInput } from '../../../src/components/Studio/autoLayout'
-import { bookPageSetupSchema } from '@trek/shared'
+import type { AutoEntry, AutoInput, BookPageSetup, BookSpread, JourneyStats } from '@trek/shared'
+import { bookPageSetupSchema, buildBook, emptyBook } from '@trek/shared'
 
 /**
  * The auto layout, once it knows what the journey adds up to (#1973).
@@ -62,6 +61,7 @@ function build(over: Partial<AutoInput> = {}) {
     entries: [entry()],
     page,
     stats: stats(),
+    templates: [],
     ...over,
   })
 }
@@ -268,9 +268,11 @@ describe('the entry spreads', () => {
 })
 
 describe('the document as a whole', () => {
-  it('stays within the schema cap on spreads', () => {
+  it('lays out a long journey whole, its last page and back cover after the entries', () => {
     const many = Array.from({ length: 200 }, (_, i) => entry({ id: i + 1 }))
-    expect(build({ entries: many }).spreads.length).toBeLessThanOrEqual(150)
+    const doc = build({ entries: many })
+    expect(doc.spreads.length).toBeGreaterThan(150)
+    expect(doc.spreads.slice(-2).map(sp => sp.role)).toEqual(['last', 'back'])
   })
 
   it('gives every spread and every element an id of its own', () => {
@@ -312,6 +314,7 @@ describe('an empty book', () => {
     entries: [entry()],
     page,
     stats: stats(),
+    templates: [],
   }
 
   it('has a cover, a first page, a spread, a last page and a back cover, and nothing on any of them', () => {

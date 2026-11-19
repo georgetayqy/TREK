@@ -75,8 +75,9 @@ describe('getIntlLanguage', () => {
 // ── FE-COMP-I18N-007/008: isRtlLanguage ──────────────────────────────────────
 
 describe('isRtlLanguage', () => {
-  it('FE-COMP-I18N-007: returns true only for Arabic', () => {
+  it('FE-COMP-I18N-007: returns true for Arabic and Hebrew', () => {
     expect(isRtlLanguage('ar')).toBe(true)
+    expect(isRtlLanguage('he')).toBe(true)
   })
 
   it('FE-COMP-I18N-008: returns false for all other supported languages', () => {
@@ -91,7 +92,7 @@ describe('isRtlLanguage', () => {
 describe('SUPPORTED_LANGUAGES', () => {
   it('FE-COMP-I18N-009: contains expected entries with value/label shape', () => {
     expect(Array.isArray(SUPPORTED_LANGUAGES)).toBe(true)
-    expect(SUPPORTED_LANGUAGES).toHaveLength(23)
+    expect(new Set(SUPPORTED_LANGUAGES.map(l => l.value)).size).toBe(SUPPORTED_LANGUAGES.length)
     expect(SUPPORTED_LANGUAGES).toContainEqual(expect.objectContaining({ value: 'en', label: 'English' }))
     expect(SUPPORTED_LANGUAGES).toContainEqual(expect.objectContaining({ value: 'tr', label: 'Türkçe' }))
     expect(SUPPORTED_LANGUAGES).toContainEqual(expect.objectContaining({ value: 'ja', label: '日本語' }))

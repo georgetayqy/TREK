@@ -1,6 +1,7 @@
 import React from 'react'
 import { useParams } from 'react-router'
 import PageShell from '../components/Layout/PageShell'
+import HelpAnchor from '../components/Help/HelpAnchor'
 import PluginFrame from '../components/Plugins/PluginFrame'
 import { usePluginStore } from '../store/pluginStore'
 import { useTranslation } from '../i18n'
@@ -26,7 +27,9 @@ export default function PluginPage(): React.ReactElement {
 
   return (
     <PageShell background="var(--bg-secondary)" navOffset="var(--nav-h, 56px)">
-      <div style={{ height: 'calc(100vh - var(--nav-h, 56px))' }}>
+      <HelpAnchor id="settings-plugins" />
+      {/* The phone shell sets --plugin-page-h and its own insets (mobile.css). */}
+      <div data-plugin-page style={{ height: 'var(--plugin-page-h, calc(100vh - var(--nav-h, 56px)))' }}>
         <PluginFrame pluginId={pluginId} title={plugin?.name} fill surface="plugin-page" className="w-full h-full" />
       </div>
     </PageShell>

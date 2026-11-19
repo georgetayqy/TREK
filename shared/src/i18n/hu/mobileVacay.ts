@@ -6,7 +6,9 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.prevMonth': 'Előző hónap',
   'mobileVacay.nextMonth': 'Következő hónap',
   'mobileVacay.usedCount': '{count} felhasználva',
+  'mobileVacay.usedCount.one': '{count} felhasználva',
   'mobileVacay.leftCount': '{count} maradt',
+  'mobileVacay.leftCount.one': '{count} maradt',
   'mobileVacay.left': 'maradt',
   'mobileVacay.modeCompany': 'Céges',
   'mobileVacay.decreaseAllowance': 'Keret csökkentése',
@@ -14,6 +16,8 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.companyLegend': 'Céges szabadság',
   'mobileVacay.editCalendar': 'Naptár szerkesztése',
   'mobileVacay.viewYear': 'Év megtekintése',
+  'mobileVacay.people': 'Személyek',
+  'mobileVacay.legend': 'Jelmagyarázat',
 };
 
 export default mobileVacay;

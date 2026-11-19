@@ -5,8 +5,10 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.nextYear': 'Επόμενο έτος',
   'mobileVacay.prevMonth': 'Προηγούμενος μήνας',
   'mobileVacay.nextMonth': 'Επόμενος μήνας',
-  'mobileVacay.usedCount': '{count} σε χρήση',
+  'mobileVacay.usedCount': '{count} χρησιμοποιήθηκαν',
+  'mobileVacay.usedCount.one': '{count} χρησιμοποιήθηκε',
   'mobileVacay.leftCount': '{count} απομένουν',
+  'mobileVacay.leftCount.one': '{count} απομένει',
   'mobileVacay.left': 'απομένουν',
   'mobileVacay.modeCompany': 'Εταιρεία',
   'mobileVacay.decreaseAllowance': 'Μείωση δικαιώματος',
@@ -14,6 +16,8 @@ const mobileVacay: TranslationStrings = {
   'mobileVacay.companyLegend': 'Άδεια εταιρείας',
   'mobileVacay.editCalendar': 'Επεξεργασία ημερολογίου',
   'mobileVacay.viewYear': 'Προβολή έτους',
+  'mobileVacay.people': 'Άτομα',
+  'mobileVacay.legend': 'Υπόμνημα',
 };
 
 export default mobileVacay;

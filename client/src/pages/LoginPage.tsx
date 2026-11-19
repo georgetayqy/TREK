@@ -4,7 +4,7 @@ import {
   EyeOff,
   Fingerprint,
   Globe,
-  KeyRound,
+  Loader2,
   Lock,
   Mail,
   Plane,
@@ -14,9 +14,11 @@ import {
 import React from 'react';
 import ToggleSwitch from '../components/Settings/ToggleSwitch';
 import { SUPPORTED_LANGUAGES, useTranslation } from '../i18n';
-import { useLogin } from './login/useLogin';
+import { IDP_LOGIN_URL, useLogin } from './login/useLogin';
 import LoginWorld from './login/LoginWorld';
-import { clearSignedOut } from '../utils/signedOut'
+import NativeServerLink from './login/NativeServerLink';
+import MfaCodeStep from './login/MfaCodeStep';
+import PasswordChecklist from '../components/shared/PasswordChecklist';
 
 /** Fixed so the sky does not reshuffle on every render. */
 const STARFIELD = [
@@ -79,9 +81,11 @@ export default function LoginPage(): React.ReactElement {
     noRedirect,
     showRegisterOption,
     oidcOnly,
-    handleDemoLogin,
-    handleSubmit,
-    handlePasskeyLogin,
+    redirectScreen,
+    configWait,
+    idpSlow,
+    idpName,
+    handleDemoLogin, handleSubmit, handlePasskeyLogin, handleSsoClick,
   } = useLogin();
 
   const oidcButtonShown = !!(appConfig?.oidc_configured && appConfig?.oidc_login && !oidcOnly);
@@ -96,7 +100,9 @@ export default function LoginPage(): React.ReactElement {
 
   const inputBase: React.CSSProperties = {
     width: '100%',
-    padding: '11px 12px 11px 40px',
+    paddingBlock: 11,
+    paddingInlineEnd: 12,
+    paddingInlineStart: 40,
     border: '1px solid #e5e7eb',
     borderRadius: 12,
     fontSize: 'calc(14px * var(--fs-scale-body, 1))',
@@ -222,8 +228,8 @@ export default function LoginPage(): React.ReactElement {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', fontFamily: 'var(--font-system)', position: 'relative' }}>
-      {/* Language dropdown */}
-      <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
+      {/* Language dropdown, below the status bar in the app and under a notch, not behind them */}
+      <div className="absolute end-4 top-[calc(env(safe-area-inset-top,0px)+16px)] z-10">
         <button type="button"
           onClick={(e) => {
             e.stopPropagation();
@@ -275,7 +281,7 @@ export default function LoginPage(): React.ReactElement {
             style={{
               position: 'absolute',
               top: '100%',
-              right: 0,
+              insetInlineEnd: 0,
               marginTop: 4,
               background: 'white',
               borderRadius: 12,
@@ -298,7 +304,7 @@ export default function LoginPage(): React.ReactElement {
                 style={{
                   display: 'block',
                   width: '100%',
-                  textAlign: 'left',
+                  textAlign: 'start',
                   padding: '9px 16px',
                   border: 'none',
                   background: value === language ? 'rgba(99,102,241,0.08)' : 'transparent',
@@ -466,7 +472,36 @@ export default function LoginPage(): React.ReactElement {
               boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
             }}
           >
-            {oidcOnly ? (
+            {redirectScreen ? (
+              // On the way to the IdP: nothing here asks for input, the page only
+              // says where it is going (#1167). The link comes after a while, for
+              // a redirect that stalls.
+              <div
+                role="status"
+                aria-live="polite"
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '16px 0', textAlign: 'center' }}
+              >
+                <Loader2 size={24} className="animate-spin" style={{ color: '#6b7280' }} aria-hidden="true" />
+                <p style={{ margin: 0, fontSize: 'calc(15px * var(--fs-scale-body, 1))', fontWeight: 600, color: '#111827' }}>
+                  {t('login.oidcRedirecting', { name: idpName })}
+                </p>
+                {idpSlow && (
+                  <a
+                    href={IDP_LOGIN_URL}
+                    onClick={handleSsoClick}
+                    style={{ fontSize: 'calc(13px * var(--fs-scale-body, 1))', color: '#6b7280' }}
+                  >
+                    {t('login.oidcRedirectSlow', { name: idpName })}
+                  </a>
+                )}
+              </div>
+            ) : configWait ? (
+              // Which sign-in this instance offers is not known yet: no form it
+              // might not accept, only that something is on its way.
+              <div role="status" aria-label={t('common.loading')} style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
+                <Loader2 size={24} className="animate-spin" style={{ color: '#9ca3af' }} aria-hidden="true" />
+              </div>
+            ) : oidcOnly ? (
               <>
                 <h2
                   style={{
@@ -497,7 +532,7 @@ export default function LoginPage(): React.ReactElement {
                   </div>
                 )}
                 <a
-                  onClick={clearSignedOut}
+                  onClick={handleSsoClick}
                   // No remember-me switch in OIDC-only mode: the IdP owns the session
                   // policy, so always ask for the remembered lifetime (#1927).
                   href={`/api/auth/oidc/login${inviteToken ? '?invite=' + encodeURIComponent(inviteToken) + '&' : '?'}remember=1`}
@@ -641,7 +676,7 @@ export default function LoginPage(): React.ReactElement {
                             className="text-[#9ca3af]"
                             style={{
                               position: 'absolute',
-                              left: 13,
+                              insetInlineStart: 13,
                               top: '50%',
                               transform: 'translateY(-50%)',
                               pointerEvents: 'none',
@@ -660,6 +695,7 @@ export default function LoginPage(): React.ReactElement {
                             onBlur={(e: React.FocusEvent<HTMLInputElement>) => (e.target.style.borderColor = '#e5e7eb')}
                           />
                         </div>
+                        <PasswordChecklist password={newPassword} className="mt-2" tone="light" />
                       </div>
                       <div>
                         <label
@@ -679,7 +715,7 @@ export default function LoginPage(): React.ReactElement {
                             className="text-[#9ca3af]"
                             style={{
                               position: 'absolute',
-                              left: 13,
+                              insetInlineStart: 13,
                               top: '50%',
                               transform: 'translateY(-50%)',
                               pointerEvents: 'none',
@@ -703,71 +739,18 @@ export default function LoginPage(): React.ReactElement {
                   )}
 
                   {mode === 'login' && mfaStep && !passwordChangeStep && (
-                    <div>
-                      <label
-                        style={{
-                          display: 'block',
-                          fontSize: 'calc(12.5px * var(--fs-scale-body, 1))',
-                          fontWeight: 600,
-                          color: '#374151',
-                          marginBottom: 6,
-                        }}
-                      >
-                        {t('login.mfaCodeLabel')}
-                      </label>
-                      <div style={{ position: 'relative' }}>
-                        <KeyRound
-                          size={15}
-                          className="text-[#9ca3af]"
-                          style={{
-                            position: 'absolute',
-                            left: 13,
-                            top: '50%',
-                            transform: 'translateY(-50%)',
-                            pointerEvents: 'none',
-                          }}
-                        />
-                        <input
-                          type="text"
-                          inputMode="text"
-                          autoComplete="one-time-code"
-                          value={mfaCode}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setMfaCode(e.target.value.toUpperCase().slice(0, 24))
-                          }
-                          placeholder="000000 or XXXX-XXXX"
-                          required
-                          autoFocus
-                          style={inputBase}
-                          onFocus={(e: React.FocusEvent<HTMLInputElement>) => (e.target.style.borderColor = '#111827')}
-                          onBlur={(e: React.FocusEvent<HTMLInputElement>) => (e.target.style.borderColor = '#e5e7eb')}
-                        />
-                      </div>
-                      <p style={{ fontSize: 'calc(12px * var(--fs-scale-body, 1))', color: '#9ca3af', marginTop: 8 }}>
-                        {t('login.mfaHint')}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMfaStep(false);
-                          setMfaToken('');
-                          setMfaCode('');
-                          setError('');
-                        }}
-                        style={{
-                          marginTop: 8,
-                          background: 'none',
-                          border: 'none',
-                          color: '#6b7280',
-                          fontSize: 'calc(13px * var(--fs-scale-body, 1))',
-                          cursor: 'pointer',
-                          padding: 0,
-                          fontFamily: 'inherit',
-                        }}
-                      >
-                        {t('login.mfaBack')}
-                      </button>
-                    </div>
+                    <MfaCodeStep
+                      email={email}
+                      code={mfaCode}
+                      onCode={setMfaCode}
+                      inputStyle={inputBase}
+                      onBack={() => {
+                        setMfaStep(false);
+                        setMfaToken('');
+                        setMfaCode('');
+                        setError('');
+                      }}
+                    />
                   )}
 
                   {/* Username (register only) */}
@@ -790,7 +773,7 @@ export default function LoginPage(): React.ReactElement {
                           className="text-[#9ca3af]"
                           style={{
                             position: 'absolute',
-                            left: 13,
+                            insetInlineStart: 13,
                             top: '50%',
                             transform: 'translateY(-50%)',
                             pointerEvents: 'none',
@@ -830,7 +813,7 @@ export default function LoginPage(): React.ReactElement {
                           className="text-[#9ca3af]"
                           style={{
                             position: 'absolute',
-                            left: 13,
+                            insetInlineStart: 13,
                             top: '50%',
                             transform: 'translateY(-50%)',
                             pointerEvents: 'none',
@@ -870,7 +853,7 @@ export default function LoginPage(): React.ReactElement {
                           className="text-[#9ca3af]"
                           style={{
                             position: 'absolute',
-                            left: 13,
+                            insetInlineStart: 13,
                             top: '50%',
                             transform: 'translateY(-50%)',
                             pointerEvents: 'none',
@@ -882,7 +865,7 @@ export default function LoginPage(): React.ReactElement {
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
                           required
                           placeholder="••••••••"
-                          style={{ ...inputBase, paddingRight: 44 }}
+                          style={{ ...inputBase, paddingInlineEnd: 44 }}
                           onFocus={(e: React.FocusEvent<HTMLInputElement>) => (e.target.style.borderColor = '#111827')}
                           onBlur={(e: React.FocusEvent<HTMLInputElement>) => (e.target.style.borderColor = '#e5e7eb')}
                         />
@@ -891,7 +874,7 @@ export default function LoginPage(): React.ReactElement {
                           onClick={() => setShowPassword((v) => !v)}
                           style={{
                             position: 'absolute',
-                            right: 12,
+                            insetInlineEnd: 12,
                             top: '50%',
                             transform: 'translateY(-50%)',
                             background: 'none',
@@ -927,6 +910,7 @@ export default function LoginPage(): React.ReactElement {
                           />
                         </button>
                       </div>
+                      {mode === 'register' && !passwordChangeStep && <PasswordChecklist password={password} className="mt-2" tone="light" />}
                       {mode === 'login' && (
                         <div
                           style={{
@@ -1101,7 +1085,7 @@ export default function LoginPage(): React.ReactElement {
                 <div style={{ flex: 1, height: 1, background: '#e5e7eb' }} />
               </div>
               <a
-                onClick={clearSignedOut}
+                onClick={handleSsoClick}
                 href={`/api/auth/oidc/login${
                   inviteToken ? '?invite=' + encodeURIComponent(inviteToken) : ''
                 }${
@@ -1238,6 +1222,7 @@ export default function LoginPage(): React.ReactElement {
               {t('login.demoHint')}
             </button>
           )}
+          <NativeServerLink />
         </div>
       </div>
 

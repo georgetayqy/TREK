@@ -45,17 +45,6 @@ export function weatherMeta(id: string | null | undefined): WeatherMeta | undefi
   return id ? MOBILE_WEATHERS.find(w => w.id === id) : undefined
 }
 
-export function journeyWeatherCategory(main: string, description: string): string {
-  const normalizedMain = main.toLowerCase()
-  const normalizedDescription = description.toLowerCase()
-  if (normalizedMain === 'clear') return 'sunny'
-  if (normalizedMain === 'thunderstorm') return 'stormy'
-  if (normalizedMain === 'snow') return 'cold'
-  if (normalizedMain === 'rain' || normalizedMain === 'drizzle') return 'rainy'
-  if (normalizedDescription.includes('partly') || normalizedDescription.includes('teilweise')) return 'partly'
-  return 'cloudy'
-}
-
 /** Journey cover_image is stored relative — prefix /uploads/ unless it already is. */
 export function journeyCoverSrc(coverImage: string | null | undefined): string | null {
   if (!coverImage) return null
@@ -67,4 +56,18 @@ export function journeyCoverStyle(journey: { id: number; cover_image?: string | 
   const src = journeyCoverSrc(journey.cover_image)
   if (src) return { backgroundImage: `url('${src}')`, backgroundSize: 'cover', backgroundPosition: 'center' }
   return { background: pickGradient(journey.id) }
+}
+
+/**
+ * The opening of a story as plain text for the card: the reader opens the entry
+ * for the formatted story, and links inside a tappable card would compete with it.
+ */
+export function storyExcerpt(story: string | null | undefined): string {
+  if (!story) return ''
+  return story
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*_`~]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }

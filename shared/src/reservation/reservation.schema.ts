@@ -1,3 +1,5 @@
+import { RESERVATION_STATUSES, RESERVATION_TYPE_KEYS } from './reservation-types';
+
 import { z } from 'zod';
 
 /**
@@ -14,6 +16,23 @@ import { z } from 'zod';
  */
 
 const open = z.record(z.string(), z.unknown());
+
+/**
+ * A reservation's `type` as the API returns it: one of the catalog's types
+ * (`RESERVATION_TYPES`), or whatever free text an older row or an import
+ * stored, which is passed through as it is.
+ */
+export const reservationTypeSchema = z.enum(RESERVATION_TYPE_KEYS).or(z.string());
+
+/** A reservation's `status` as the API returns it: a known status, or a stored value outside them. */
+export const reservationStatusSchema = z.enum(RESERVATION_STATUSES).or(z.string());
+
+// Inside reservationSchema the two fields stay z.string(), described by the
+// catalog. Zod 4 types a union field as optional for a consumer compiled
+// without strictNullChecks (the client), so the union there would loosen the
+// inferred Reservation type; the runtime answer is the same, any string.
+const reservationTypeField = z.string().describe('One of RESERVATION_TYPES, or free text an older row stored');
+const reservationStatusField = z.string().describe('One of RESERVATION_STATUSES, or a value an older row stored');
 
 /**
  * A reservation endpoint (flight/train leg terminal) — row of the
@@ -148,8 +167,8 @@ export const reservationSchema = z.object({
   confirmation_number: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
   url: z.string().nullable().optional(),
-  status: z.string(),
-  type: z.string(),
+  status: reservationStatusField,
+  type: reservationTypeField,
   accommodation_id: z.union([z.number(), z.string()]).nullable().optional(),
   metadata: z.string().nullable().optional(),
   needs_review: z.number().optional(),
@@ -171,6 +190,10 @@ export const reservationSchema = z.object({
   accommodation_name: z.string().nullable().optional(),
   accommodation_start_day_id: z.number().nullable().optional(),
   accommodation_end_day_id: z.number().nullable().optional(),
+  // The stay's check-in window and check-out, for a hotel booking whose own metadata has none.
+  accommodation_check_in: z.string().nullable().optional(),
+  accommodation_check_in_end: z.string().nullable().optional(),
+  accommodation_check_out: z.string().nullable().optional(),
   day_positions: z.record(z.string(), z.number()).nullable().optional(),
   endpoints: z.array(reservationEndpointSchema).optional(),
   // Trip members / named guests this booking is for (#1517). Joined in listReservations.
@@ -217,20 +240,37 @@ export const reservationUrlSchema = z.string().refine(
   // Browsers strip control characters and whitespace before they resolve the
   // scheme, so a tab spliced into 'javascript:' still runs. Everything at
   // or below U+0020 goes, which is the same set a browser drops.
-  v => !/^(javascript|data|vbscript):/i.test(Array.from(v).filter(c => c > ' ').join('')),
+  (v) =>
+    !/^(javascript|data|vbscript):/i.test(
+      Array.from(v)
+        .filter((c) => c > ' ')
+        .join(''),
+    ),
   { message: 'must not be a javascript:, data: or vbscript: URL' },
 );
 
+/**
+ * The price an MCP booking tool takes and files as the booking's linked expense
+ * (create_reservation, create_transport, create_transit_journey), and the budget
+ * category of that expense.
+ */
+export const bookingPriceSchema = z.number().nonnegative();
+export const bookingBudgetCategorySchema = z.string().max(100);
+
 /** Reservation create: title is required; the many optional fields stay open. */
-export const reservationCreateRequestSchema = open.and(z.object({
-  title: z.string().min(1),
-  url: reservationUrlSchema.nullable().optional(),
-}));
+export const reservationCreateRequestSchema = open.and(
+  z.object({
+    title: z.string().min(1),
+    url: reservationUrlSchema.nullable().optional(),
+  }),
+);
 export type ReservationCreateRequest = z.infer<typeof reservationCreateRequestSchema>;
 
-export const reservationUpdateRequestSchema = open.and(z.object({
-  url: reservationUrlSchema.nullable().optional(),
-}));
+export const reservationUpdateRequestSchema = open.and(
+  z.object({
+    url: reservationUrlSchema.nullable().optional(),
+  }),
+);
 export type ReservationUpdateRequest = z.infer<typeof reservationUpdateRequestSchema>;
 
 /** Assign trip members/guests to a reservation (mirrors budget's PUT :id/members). */
@@ -366,3 +406,20 @@ export const bookingImportConfirmResponseSchema = z.object({
   created: z.array(reservationSchema),
 });
 export type BookingImportConfirmResponse = z.infer<typeof bookingImportConfirmResponseSchema>;
+
+/**
+ * GET /api/trips/:tripId/reservations/:id/wallet-pass/google: the booking as a
+ * Google Wallet pass, by the save link the TREK services signed. The Android app
+ * opens it, and Google Wallet adds the pass (native/wallet.ts).
+ */
+export const googleWalletSaveResponseSchema = z.object({
+  saveUrl: z.string().url().startsWith('https://pay.google.com/gp/v/save/'),
+});
+export type GoogleWalletSaveResponse = z.infer<typeof googleWalletSaveResponseSchema>;
+
+/**
+ * GET /api/trips/:tripId/reservations/google-wallet: whether this server can make
+ * Google Wallet passes right now (passes on, and liketrek's Wallet issuer live).
+ */
+export const googleWalletAvailabilityResponseSchema = z.object({ available: z.boolean() });
+export type GoogleWalletAvailabilityResponse = z.infer<typeof googleWalletAvailabilityResponseSchema>;

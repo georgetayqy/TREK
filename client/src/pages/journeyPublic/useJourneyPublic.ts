@@ -5,8 +5,12 @@ import { useSettingsStore } from '../../store/settingsStore'
 import type { JourneyMapHandle } from '../../components/Journey/JourneyMap'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { DAY_COLORS } from '../../components/Journey/dayColors'
+import { journeyMapStops } from '../../components/Journey/journeyMapStops'
 import { posterlessVideo } from '../journeyDetail/JourneyDetailPage.helpers'
 import { groupByDate, type PublicEntry, type PublicGalleryPhoto } from './journeyPublicModel'
+import { useJourneyMapLayers } from '../../components/Journey/useJourneyMapLayers'
+import { journeyOpenAtEntryId } from '../../components/Journey/journeyOpenAt'
+import { localIsoDate } from '../../utils/localDate'
 
 /**
  * Public-journey (read-only share) data hook — owns the token fetch, the
@@ -24,10 +28,12 @@ export function useJourneyPublic() {
   const [error, setError] = useState(false)
   const isMobile = useIsMobile()
   const [view, setView] = useState<'timeline' | 'gallery' | 'map'>('timeline')
-  const [lightbox, setLightbox] = useState<{ photos: { id: string; src: string; caption?: string | null; mediaType?: string | null }[]; index: number } | null>(null)
+  const [lightbox, setLightbox] = useState<{ photos: { id: string; src: string; thumbSrc?: string; caption?: string | null; mediaType?: string | null }[]; index: number } | null>(null)
   const [showLangPicker, setShowLangPicker] = useState(false)
   const locale = useSettingsStore(s => s.settings.language) || 'en'
   const mapRef = useRef<JourneyMapHandle>(null)
+  // The desktop feed, for the day picker to scroll (#2998).
+  const feedRef = useRef<HTMLDivElement>(null)
   const [activeEntryId, setActiveEntryId] = useState<string | null>(null)
   const [viewingEntry, setViewingEntry] = useState<PublicEntry | null>(null)
 
@@ -57,10 +63,6 @@ export function useJourneyPublic() {
   // Chronological throughout: this is what the day colours and the stop numbers are
   // derived from, so flipping the reading order must not renumber the trip.
   const sortedDates = useMemo(() => [...groupedEntries.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), [groupedEntries])
-  const mapEntries = useMemo(
-    () => timelineEntries.filter(e => e.location_lat && e.location_lng),
-    [timelineEntries],
-  )
   const allPhotos = gallery
 
   // Map entries with day color/label for colored markers.
@@ -72,10 +74,8 @@ export function useJourneyPublic() {
   // missing entirely (#1962). It is now the stop's place in the whole journey, so
   // every number appears exactly once and the colour still groups the day.
   const sidebarMapItems = useMemo(() => {
-    let stop = 0
-    return mapEntries.map(e => {
+    return journeyMapStops(timelineEntries).map(({ entry: e, stop }) => {
       const dayIdx = sortedDates.indexOf(e.entry_date)
-      const dayLabel = ++stop
       return {
         id: String(e.id),
         lat: e.location_lat!,
@@ -85,7 +85,7 @@ export function useJourneyPublic() {
         created_at: e.entry_date,
         entry_date: e.entry_date,
         dayColor: DAY_COLORS[dayIdx % DAY_COLORS.length],
-        dayLabel,
+        dayLabel: stop,
         // Through the share token, like every other picture on this page: the
         // reader has no session, so `/api/photos/:id` would answer 401. The
         // poster rather than the file, as the owner's own map card does, since
@@ -97,13 +97,15 @@ export function useJourneyPublic() {
           .map(p => `/api/public/journey/${token}/photos/${p.photo_id}/thumbnail`),
       }
     })
-  }, [mapEntries, sortedDates, token])
+  }, [timelineEntries, sortedDates, token])
 
   // The same number the marker carries, so the timeline is the key to the map
   // rather than a second, unrelated numbering.
   const stopNumberById = useMemo(() => {
     const m = new Map<string, number>()
-    sidebarMapItems.forEach(i => m.set(i.id, i.dayLabel))
+    sidebarMapItems.forEach(i => {
+      if (i.dayLabel !== null) m.set(i.id, i.dayLabel)
+    })
     return m
   }, [sidebarMapItems])
 
@@ -116,6 +118,27 @@ export function useJourneyPublic() {
     [gallery],
   )
 
+  // The shared map's layers (JRN-04): the server cuts them to what the link
+  // shares, so the switches only ever hide. Read only while the map is shared.
+  const entryIdsOnMap = useMemo(() => new Set(sidebarMapItems.map(i => i.id)), [sidebarMapItems])
+  const entryById = useMemo(() => new Map(((data?.entries ?? []) as PublicEntry[]).map(e => [e.id, e])), [data?.entries])
+  const dateOfEntry = useCallback((entryId: number) => entryById.get(entryId)?.entry_date ?? null, [entryById])
+  const entryTitleOf = useCallback((entryId: number) => {
+    const entry = entryById.get(entryId)
+    return entry ? entry.title || entry.location_name || null : null
+  }, [entryById])
+  const colorOfDay = useCallback((date: string) => {
+    const dayIdx = sortedDates.indexOf(date)
+    return dayIdx === -1 ? null : DAY_COLORS[dayIdx % DAY_COLORS.length]
+  }, [sortedDates])
+  const mapLayers = useJourneyMapLayers({
+    source: token && perms.share_map ? { token } : null,
+    entryIdsOnMap,
+    photoCount: mapPhotos.length,
+    colorOfDay,
+    dateOfEntry,
+  })
+
   // A journey shared while the trip is still running reads like a blog, so the owner
   // can publish it newest-first (#1614). The reader may flip it either way; only the
   // display order changes, never the numbering.
@@ -124,6 +147,12 @@ export function useJourneyPublic() {
   const displayDates = useMemo(
     () => (effectiveNewestFirst ? [...sortedDates].reverse() : sortedDates),
     [sortedDates, effectiveNewestFirst],
+  )
+  // The phone's map carousel keeps the trip in time order, so newest-first there means
+  // opening on the latest day instead of reversing the cards (#2851).
+  const openAtEntryId = useMemo(
+    () => journeyOpenAtEntryId(timelineEntries, { today: localIsoDate(), newestFirst: effectiveNewestFirst }),
+    [timelineEntries, effectiveNewestFirst],
   )
 
   // Two-column desktop layout: timeline feed left + sticky map right
@@ -143,10 +172,11 @@ export function useJourneyPublic() {
   return {
     token, data, loading, error, isMobile, locale,
     view, setView, lightbox, setLightbox, showLangPicker, setShowLangPicker,
-    mapRef, activeEntryId, setActiveEntryId, viewingEntry, setViewingEntry, handleMarkerClick,
+    mapRef, feedRef, activeEntryId, setActiveEntryId, viewingEntry, setViewingEntry, handleMarkerClick,
     perms, journey, stats,
     timelineEntries, groupedEntries, sortedDates, displayDates, sidebarMapItems, allPhotos, stopNumberById, mapPhotos,
-    newestFirst: effectiveNewestFirst, setNewestFirst,
+    mapLayers, entryTitleOf,
+    newestFirst: effectiveNewestFirst, setNewestFirst, openAtEntryId,
     desktopTwoColumn,
   }
 }

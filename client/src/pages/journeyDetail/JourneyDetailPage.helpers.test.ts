@@ -1,10 +1,16 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { PROVIDER_SELECT_ALL_MAX_PAGES } from '@trek/shared';
 import {
   createDraftJourneyEntry,
+  entryForPlace,
   distanceBetweenGeoPoints,
+  fetchRemainingProviderPages,
   groupPhotosByDate,
   matchJourneyEntries,
   posterlessVideo,
+  PROVIDER_SEARCH_LAST_PAGE,
+  PROVIDER_SEARCH_PAGE_SIZE,
+  sortByCaptureTimeAsc,
   sortProviderPhotos,
   utcOffsetMinutesForDay,
 } from './JourneyDetailPage.helpers';
@@ -180,6 +186,35 @@ describe('createDraftJourneyEntry', () => {
   });
 });
 
+describe('entryForPlace', () => {
+  const place = { place_id: 4, name: 'Piazza San Marco', lat: 45.434, lng: 12.3388, days: ['2026-05-14', '2026-05-15'], time: '10:00' };
+
+  it('a planned place starts a new entry on its first day, at its time and spot, named after it', () => {
+    const entry = entryForPlace({ id: 7, entries: [] }, place, new Date('2026-06-01T08:00:00'));
+    expect(entry).toMatchObject({
+      id: 0,
+      journey_id: 7,
+      entry_date: '2026-05-14',
+      entry_time: '10:00',
+      title: 'Piazza San Marco',
+      location_name: 'Piazza San Marco',
+      location_lat: 45.434,
+      location_lng: 12.3388,
+    });
+  });
+
+  it('writes up the suggestion the trip left for the place, so the entry stays linked to it', () => {
+    const suggestion = { ...createDraftJourneyEntry(7), id: 31, type: 'skeleton' as const, source_place_id: 4 };
+    const other = { ...createDraftJourneyEntry(7), id: 32, type: 'skeleton' as const, source_place_id: 5 };
+    expect(entryForPlace({ id: 7, entries: [other, suggestion] }, place)).toBe(suggestion);
+  });
+
+  it('a place without a planned time takes the time of now', () => {
+    const entry = entryForPlace({ id: 7 }, { ...place, time: null }, new Date('2026-06-01T08:05:00'));
+    expect(entry.entry_time).toBe('08:05');
+  });
+});
+
 describe('matchJourneyEntries', () => {
   const entries = [
     { id: 1, title: 'Mercado da Ribeira', story: 'Ate too much', location_name: 'Lisbon', tags: ['food'] },
@@ -223,5 +258,135 @@ describe('posterlessVideo (#2341)', () => {
     expect(posterlessVideo({ media_type: 'image', provider: 'local', thumbnail_path: null })).toBe(false);
     expect(posterlessVideo({ provider: 'local', thumbnail_path: null })).toBe(false);
     expect(posterlessVideo({ media_type: 'video', provider: 'immich', thumbnail_path: null })).toBe(false);
+  });
+});
+
+describe('fetchRemainingProviderPages (#1587)', () => {
+  it('asks for every page from the one given until the provider says there are no more', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ assets: [`p${page}`], hasMore: page < 4 }));
+    const onPage = vi.fn();
+
+    const result = await fetchRemainingProviderPages(fetchPage, 2, new AbortController().signal, onPage);
+
+    expect(fetchPage.mock.calls.map(([page]) => page)).toEqual([2, 3, 4]);
+    expect(onPage.mock.calls).toEqual([
+      [['p2'], 2, true],
+      [['p3'], 3, true],
+      [['p4'], 4, false],
+    ]);
+    expect(result).toEqual({ assets: ['p2', 'p3', 'p4'], hasMore: false });
+  });
+
+  it('keeps going over a page the filter emptied, and treats a missing list as empty', async () => {
+    const fetchPage = vi.fn(async (page: number) => (page === 1 ? { hasMore: true } : { assets: ['x'], hasMore: false }));
+
+    const result = await fetchRemainingProviderPages(fetchPage, 1, new AbortController().signal, () => {});
+
+    expect(result).toEqual({ assets: ['x'], hasMore: false });
+  });
+
+  it('stops at the last page and says there is still more', async () => {
+    const fetchPage = vi.fn(async (page: number) => ({ assets: [page], hasMore: true }));
+
+    const result = await fetchRemainingProviderPages(fetchPage, 5, new AbortController().signal, () => {}, 7);
+
+    expect(fetchPage).toHaveBeenCalledTimes(3);
+    expect(result).toEqual({ assets: [5, 6, 7], hasMore: true });
+  });
+
+  it('never asks past page 251 by default, wherever the run starts', async () => {
+    const endless = () => vi.fn(async (page: number) => ({ assets: [page], hasMore: true }));
+
+    // A run from the first page takes the 250 after it, and ends at photo 50,200.
+    const fromStart = endless();
+    await fetchRemainingProviderPages(fromStart, 2, new AbortController().signal, () => {});
+    expect(fromStart).toHaveBeenCalledTimes(PROVIDER_SELECT_ALL_MAX_PAGES);
+    expect(fromStart).toHaveBeenLastCalledWith(PROVIDER_SEARCH_LAST_PAGE);
+    expect(PROVIDER_SEARCH_LAST_PAGE).toBe(251);
+    expect(PROVIDER_SEARCH_LAST_PAGE * PROVIDER_SEARCH_PAGE_SIZE).toBe(50200);
+
+    // Pages scrolled into view first do not push it deeper.
+    const scrolled = endless();
+    await fetchRemainingProviderPages(scrolled, 12, new AbortController().signal, () => {});
+    expect(scrolled).toHaveBeenLastCalledWith(PROVIDER_SEARCH_LAST_PAGE);
+
+    // A second press after the first stopped there asks for nothing, and the
+    // search stays open: the count keeps its "+".
+    const again = endless();
+    const onPage = vi.fn();
+    const result = await fetchRemainingProviderPages(again, PROVIDER_SEARCH_LAST_PAGE + 1, new AbortController().signal, onPage);
+    expect(again).not.toHaveBeenCalled();
+    expect(onPage).not.toHaveBeenCalled();
+    expect(result).toEqual({ assets: [], hasMore: true });
+  });
+
+  it('stops quietly once aborted, before and between pages, and hands nothing on after the abort', async () => {
+    const controller = new AbortController();
+    const onPage = vi.fn();
+    const fetchPage = vi.fn(async (page: number) => {
+      if (page === 2) controller.abort();
+      return { assets: [page], hasMore: true };
+    });
+
+    const result = await fetchRemainingProviderPages(fetchPage, 1, controller.signal, onPage);
+
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(onPage).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ assets: [1], hasMore: true });
+
+    const never = vi.fn();
+    await fetchRemainingProviderPages(never, 1, controller.signal, onPage);
+    expect(never).not.toHaveBeenCalled();
+  });
+
+  it('lets a failing page reject, so the caller can keep what arrived', async () => {
+    const fetchPage = vi.fn(async (page: number) => {
+      if (page === 2) throw new Error('502');
+      return { assets: [page], hasMore: true };
+    });
+    const onPage = vi.fn();
+
+    await expect(fetchRemainingProviderPages(fetchPage, 1, new AbortController().signal, onPage)).rejects.toThrow('502');
+    expect(onPage).toHaveBeenCalledWith([1], 1, true);
+  });
+});
+
+describe('sortByCaptureTimeAsc (#1587)', () => {
+  it('puts the oldest first, by the photographer\'s wall clock where there is one', () => {
+    const items = [
+      { id: 'late', takenAt: '2026-03-15T12:00:00.000Z' },
+      { id: 'early', takenAt: '2026-03-15T08:00:00.000Z' },
+      { id: 'wallclock', takenAt: '2026-03-15T20:00:00.000Z', localTakenAt: '2026-03-15T06:00:00.000Z' },
+    ];
+
+    expect(sortByCaptureTimeAsc(items).map((i) => i.id)).toEqual(['wallclock', 'early', 'late']);
+  });
+
+  it('breaks a wall-clock tie on the instant, then on the order the items came in', () => {
+    const items = [
+      { id: 'b', localTakenAt: '2026-03-15T10:00:00.000Z', takenAt: '2026-03-15T09:00:00.000Z' },
+      { id: 'a', localTakenAt: '2026-03-15T10:00:00.000Z', takenAt: '2026-03-15T08:00:00.000Z' },
+      { id: 'c', takenAt: '2026-03-15T11:00:00.000Z' },
+      { id: 'd', takenAt: '2026-03-15T11:00:00.000Z' },
+    ];
+
+    expect(sortByCaptureTimeAsc(items).map((i) => i.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('keeps photos without a readable time at the end, in the order they came in', () => {
+    const items = [
+      { id: 'none' },
+      { id: 'garbage', takenAt: 'not a date' },
+      { id: 'dated', takenAt: '2026-03-15T08:00:00.000Z' },
+      { id: 'blank', takenAt: '', localTakenAt: null },
+    ];
+
+    expect(sortByCaptureTimeAsc(items).map((i) => i.id)).toEqual(['dated', 'none', 'garbage', 'blank']);
+  });
+
+  it('leaves the input alone', () => {
+    const items = [{ id: 'b', takenAt: '2026-03-16T00:00:00Z' }, { id: 'a', takenAt: '2026-03-15T00:00:00Z' }];
+    sortByCaptureTimeAsc(items);
+    expect(items.map((i) => i.id)).toEqual(['b', 'a']);
   });
 });

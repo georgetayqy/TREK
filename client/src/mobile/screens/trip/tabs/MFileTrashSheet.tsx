@@ -1,14 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Loader2, RotateCcw, Trash2 } from 'lucide-react'
 import MSheet from '../../../components/MSheet'
 import MConfirmSheet from '../../settings/MConfirmSheet'
-import { filesApi } from '../../../../api/client'
-import type { TripFile } from '../../../../types'
 import type { TripPlanner } from '../MTripShell'
 import { TileHeader } from '../sheets/MTripSheetUi'
 import { formatFileDate, getFileTypeMeta } from './filesModel'
 import { useTranslation } from '../../../../i18n'
 import { formatSize } from '../../../../components/Files/FileManager.helpers'
+import { useFileTrash } from '../../../../components/Files/useFileTrash'
 
 interface MFileTrashSheetProps {
   planner: TripPlanner
@@ -17,66 +16,38 @@ interface MFileTrashSheetProps {
 }
 
 /**
- * Trash sheet (spec 03 §5.3 trashGo, §7.3): fetches the trashed files
- * (filesApi.list(tripId, true)) on open, same lazy-load-on-toggle pattern as
- * useFileManager.ts's toggleTrash/loadTrash. Restore/permanent-delete/empty
- * all bypass the store like the rest of §7.3.
+ * Trash sheet (spec 03 §5.3 trashGo, §7.3): the trashed files load on open
+ * through useFileTrash, the same hook the desktop trash view reads. Restore,
+ * permanent delete and empty run there too; this sheet adds the confirm sheets
+ * and the busy markers.
  */
 export default function MFileTrashSheet({ planner, open, onClose }: MFileTrashSheetProps) {
   const { t, tripId, can, trip, toast, tripActions } = planner
   const { locale } = useTranslation()
-  const [files, setFiles] = useState<TripFile[]>([])
-  const [loading, setLoading] = useState(false)
+  const { files, loading, ...trash } = useFileTrash({ tripId, t, toast, onRestored: () => tripActions.loadFiles(tripId), open })
   const [busyId, setBusyId] = useState<number | null>(null)
   const [emptying, setEmptying] = useState(false)
   const [confirmEmpty, setConfirmEmpty] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
 
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setLoading(true)
-    filesApi.list(tripId, true)
-      .then((data: { files?: TripFile[] }) => { if (!cancelled) setFiles(data.files || []) })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [open, tripId])
-
   const canDelete = can('file_delete', trip)
 
   const restore = (id: number) => {
     setBusyId(id)
-    filesApi.restore(tripId, id)
-      .then(() => {
-        setFiles(prev => prev.filter(f => f.id !== id))
-        tripActions.loadFiles(tripId)
-        toast.success(t('files.toast.restored'))
-      })
-      .catch(() => toast.error(t('files.toast.restoreError')))
-      .finally(() => setBusyId(null))
+    void trash.restore(id).finally(() => setBusyId(null))
   }
 
   const permanentDelete = (id: number) => {
     setConfirmDeleteId(null)
     setBusyId(id)
-    filesApi.permanentDelete(tripId, id)
-      .then(() => {
-        setFiles(prev => prev.filter(f => f.id !== id))
-        toast.success(t('files.toast.deleted'))
-      })
-      .catch(() => toast.error(t('files.toast.deleteError')))
-      .finally(() => setBusyId(null))
+    void trash.permanentDelete(id).finally(() => setBusyId(null))
   }
 
   // Row actions stay disabled while this runs so a restore cannot race the empty.
   const emptyTrash = () => {
     setConfirmEmpty(false)
     setEmptying(true)
-    filesApi.emptyTrash(tripId)
-      .then(() => { setFiles([]); toast.success(t('files.toast.trashEmptied')) })
-      .catch(() => toast.error(t('files.toast.deleteError')))
-      .finally(() => setEmptying(false))
+    void trash.emptyTrash().finally(() => setEmptying(false))
   }
 
   return (
@@ -121,7 +92,7 @@ export default function MFileTrashSheet({ planner, open, onClose }: MFileTrashSh
                       <TypeIcon size={15} strokeWidth={2} />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[0.78125rem] font-semibold text-m-ink">{file.original_name}</div>
+                      <div dir="auto" className="truncate text-[0.78125rem] font-semibold text-m-ink">{file.original_name}</div>
                       <div className="mt-[2px] font-geist text-[0.625rem] text-m-faint">
                         {[formatSize(file.file_size), formatFileDate(file.created_at, locale)].filter(Boolean).join(' · ')}
                       </div>

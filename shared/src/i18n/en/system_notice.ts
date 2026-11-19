@@ -52,16 +52,20 @@ const system_notice: TranslationStrings = {
   'system_notice.thank_you_support.cta_kofi': 'Support on Ko-fi',
   // The release modal. One stable set of keys: each big release swaps the copy in place.
   'system_notice.release_notes.eyebrow': 'Update installed',
-  'system_notice.release_notes.headline': 'Four things TREK now does on its own.',
-  'system_notice.release_notes.intro': 'Its own place API, road trips planned end to end, your location history back in your hands, and your documents in sync.',
+  'system_notice.release_notes.headline': 'The right place, first.',
+  'system_notice.release_notes.intro':
+    "Place search, address search and routing now run on TREK's own servers, sponsored by dataforest cloud, and every TREK can share what it knows about places with all the others.",
   'system_notice.release_notes.features_label': 'The headliners',
   'system_notice.release_notes.features_aside': 'Far from everything',
-  'system_notice.release_notes.feature_places_title': 'TREK Places API',
-  'system_notice.release_notes.feature_places_body': 'The first open source travel planner with its own place API. 73.6 million places, no key, no quota.',
-  'system_notice.release_notes.feature_roadtrip_title': 'Roadtrip Addon',
-  'system_notice.release_notes.feature_roadtrip_body': 'Plans the drive itself: route, distance, hours and stops. Off until an admin turns it on.',
-  'system_notice.release_notes.feature_dawarich_title': 'Dawarich Integration',
-  'system_notice.release_notes.feature_dawarich_body': 'The self-hosted answer to Google Timeline, now readable inside TREK. TREK reads, and only reads.',
+  'system_notice.release_notes.feature_search_title': 'Place search that gets it right',
+  'system_notice.release_notes.feature_search_body':
+    'Cities, islands, landmarks and airports by their code come first, cafés come from around you, and suggestions appear while you type.',
+  'system_notice.release_notes.feature_share_title': 'Place details, shared',
+  'system_notice.release_notes.feature_share_body':
+    'Share websites, opening hours and photos with every TREK, field by field, and your saved places pick up what others added.',
+  'system_notice.release_notes.feature_routing_title': 'Faster routing',
+  'system_notice.release_notes.feature_routing_body':
+    'A whole day routes in one go with up to twenty stops, one slow route no longer holds up the rest, and transit asks a second provider when the first finds nothing.',
   'system_notice.release_notes.footnote': 'Plus a long list of smaller changes across the rest of TREK.',
   'system_notice.release_notes.notes_label': 'Release notes',
   'system_notice.release_notes.note_eyebrow': 'A note from the maintainer',
@@ -75,10 +79,10 @@ const system_notice: TranslationStrings = {
   'system_notice.release_notes.note_body_after':
     'Then you did. Within a few months there were thousands of you: stars, bug reports, translations into languages I do not speak, pull requests from people I have never met. I still check the repository first thing every morning, and it still does not quite feel real.',
   'system_notice.release_notes.note_closing': 'Thank you for being here, from Maurice.',
-  'system_notice.release_notes.support_lead':
-    'TREK is free and always will be, but servers, domains and a lot of late nights are not.',
+  'system_notice.release_notes.support_label': 'Staying independent',
+  'system_notice.release_notes.support_lead': 'Without Google and co.',
   'system_notice.release_notes.support_text':
-    'If it has earned a place in your trips, buy me a coffee and help keep the next release coming.',
+    "Place search, address search and routing run on TREK's own servers, sponsored by dataforest cloud today. I fight for that every day, and keeping it that way takes your support.",
   'system_notice.release_notes.cta_bmc': 'Buy me a coffee',
   'system_notice.release_notes.cta_kofi': 'Support on Ko-fi',
   'system_notice.pager.prev': 'Previous notice',
@@ -86,7 +90,5 @@ const system_notice: TranslationStrings = {
   'system_notice.pager.counter': '{current} / {total}',
   'system_notice.pager.goto': 'Go to notice {n}',
   'system_notice.pager.position': 'Notice {current} of {total}',
-  'system_notice.release_notes.feature_docsync_title': 'Document Sync',
-  'system_notice.release_notes.feature_docsync_body': 'Paperless-ngx, Papra, Nextcloud, OpenCloud and Synology Drive. A trip’s documents flow both ways with the store you already run.',
 };
 export default system_notice;

@@ -67,6 +67,8 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-07-05T12:00:00Z'));
   installMatchMedia();
   resetAllStores();
+  // The currency tool waits for the saved pair (#3009); the page renders with settings in place.
+  useSettingsStore.setState({ isLoaded: true });
   seedStore(useAuthStore, { isAuthenticated: true, user: buildUser() });
   usePluginStore.setState({ plugins: [], loaded: true });
   onlyTrips([TRIP]);
@@ -347,10 +349,10 @@ describe('DashboardPage (desktop)', () => {
     render(<DashboardPage />);
     await waitFor(() => expect(screen.getAllByText('Paris Adventure').length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Subscribe to all trips calendar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Subscribe to all trips' }));
     const description = await screen.findByText(/One calendar feed for all your active trips/);
 
-    fireEvent.click((description.parentElement as HTMLElement).querySelector('button') as HTMLElement);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
 
     await waitFor(() =>
       expect(screen.queryByText(/One calendar feed for all your active trips/)).not.toBeInTheDocument());

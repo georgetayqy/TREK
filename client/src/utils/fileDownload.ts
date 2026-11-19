@@ -1,5 +1,9 @@
 import { getCachedBlob } from '../db/offlineDb'
 import { isEffectivelyOffline } from '../sync/networkMode'
+import { isIosStandalone } from './iosDevice'
+import { isNativeApp } from '../native/platform'
+import { fileNameFromUrl, openNativeFile, shareFile } from '../native/nativeFiles'
+import { reportNativeFailure } from '../native/reportFailure'
 
 // MIME types safe to open inline (will not execute script in any browser).
 // Everything else (text/html, image/svg+xml, text/javascript, …) is forced to
@@ -33,13 +37,6 @@ function triggerAnchorDownload(blobUrl: string, filename?: string): void {
   document.body.appendChild(a)
   a.click()
   setTimeout(() => { URL.revokeObjectURL(blobUrl); a.remove() }, 100)
-}
-
-// navigator.standalone is true only on iOS when running as an
-// add-to-home-screen PWA. In that context, target="_blank" hands off to
-// Safari, which cannot access blob URLs sandboxed to the WebView.
-function isIosStandalone(): boolean {
-  return (navigator as any).standalone === true
 }
 
 /**
@@ -80,6 +77,10 @@ async function getFileBlob(url: string): Promise<Blob> {
  * in the same tick can abort the download in other browsers.
  */
 export function downloadBlob(blob: Blob, filename: string): void {
+  if (isNativeApp()) {
+    shareFile(blob, filename).catch(reportNativeFailure)
+    return
+  }
   const blobUrl = URL.createObjectURL(blob)
   triggerAnchorDownload(blobUrl, filename)
 }
@@ -93,6 +94,7 @@ export function downloadBlob(blob: Blob, filename: string): void {
  */
 export async function downloadFile(url: string, filename?: string): Promise<void> {
   const blob = await getFileBlob(url)
+  if (isNativeApp()) return shareFile(blob, filename ?? fileNameFromUrl(url))
   const blobUrl = URL.createObjectURL(blob)
   triggerAnchorDownload(blobUrl, filename)
 }
@@ -116,6 +118,9 @@ export async function downloadFile(url: string, filename?: string): Promise<void
  */
 export async function openFile(url: string, filename?: string): Promise<void> {
   const blob = await getFileBlob(url)
+  // A blob tab has nowhere to open inside the app: the system's viewer shows it,
+  // or the share sheet where the app has none.
+  if (isNativeApp()) return openNativeFile(blob, filename ?? fileNameFromUrl(url))
   const blobUrl = URL.createObjectURL(blob)
 
   // Force download for MIME types that can execute script when rendered inline
@@ -124,7 +129,8 @@ export async function openFile(url: string, filename?: string): Promise<void> {
     return
   }
 
-  // iOS PWA: target="_blank" would open Safari, which can't access the blob
+  // iOS PWA: target="_blank" hands off to Safari, which cannot reach a blob URL
+  // sandboxed to the installed app's WebView.
   if (isIosStandalone()) {
     triggerAnchorDownload(blobUrl, filename)
     return

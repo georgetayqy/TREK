@@ -1,18 +1,20 @@
 /// <reference types="@aws-lite/s3-types" />
-import awsLite from '@aws-lite/client';
-import { PassThrough, Transform, type Readable } from 'node:stream';
-import fs from 'node:fs';
 import { assertValidKey, assertValidPrefix, isValidKey } from '../storage-keys';
 import {
   StorageBackendError,
   StorageNotFoundError,
   isLocalTempFile,
   type ByteRange,
+  type ListOptions,
   type LocalTempFile,
   type ObjectStat,
   type PutOptions,
   type StorageDriver,
 } from '../storage.types';
+import awsLite from '@aws-lite/client';
+
+import fs from 'node:fs';
+import { PassThrough, Transform, type Readable } from 'node:stream';
 
 /**
  * S3-compatible driver over @aws-lite/client + @aws-lite/s3 (spec:
@@ -50,9 +52,9 @@ export interface S3Api {
   }>;
   HeadObject(input: Record<string, unknown>): Promise<{ ContentLength?: number; LastModified?: Date; ETag?: string }>;
   DeleteObject(input: Record<string, unknown>): Promise<unknown>;
-  ListObjectsV2(input: Record<string, unknown>): Promise<
-    AsyncIterable<{ Contents?: Array<{ Key?: string; Size?: number; LastModified?: Date }> }>
-  >;
+  ListObjectsV2(
+    input: Record<string, unknown>,
+  ): Promise<AsyncIterable<{ Contents?: Array<{ Key?: string; Size?: number; LastModified?: Date }> }>>;
 }
 
 // `Omit<S3ClientOptions, 'keepAlive'>` rather than a bare `S3ClientOptions &`:
@@ -375,7 +377,10 @@ export class S3Driver implements StorageDriver {
     assertValidKey(key);
     const s3 = await this.client();
     try {
-      const res = await this.deadlined(s3.HeadObject({ Bucket: this.bucket, Key: this.keyPrefix + key }), `stat '${key}'`);
+      const res = await this.deadlined(
+        s3.HeadObject({ Bucket: this.bucket, Key: this.keyPrefix + key }),
+        `stat '${key}'`,
+      );
       return {
         key,
         size: res.ContentLength ?? 0,
@@ -399,13 +404,15 @@ export class S3Driver implements StorageDriver {
     }
   }
 
-  async *list(prefix: string): AsyncIterable<ObjectStat> {
+  async *list(prefix: string, opts: ListOptions = {}): AsyncIterable<ObjectStat> {
     assertValidPrefix(prefix);
     const s3 = await this.client();
+    // A delimiter makes S3 fold every deeper key into CommonPrefixes, which are not read.
+    const shallow = opts.shallow === true ? { Delimiter: '/' } : {};
     let pages: AsyncIterable<{ Contents?: Array<{ Key?: string; Size?: number; LastModified?: Date }> }>;
     try {
       pages = await this.deadlined(
-        s3.ListObjectsV2({ Bucket: this.bucket, Prefix: this.keyPrefix + prefix, paginate: 'iterator' }),
+        s3.ListObjectsV2({ Bucket: this.bucket, Prefix: this.keyPrefix + prefix, paginate: 'iterator', ...shallow }),
         `list '${prefix}'`,
       );
     } catch (err) {

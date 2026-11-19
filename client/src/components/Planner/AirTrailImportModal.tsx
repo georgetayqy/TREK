@@ -5,9 +5,12 @@ import { Plane, X, Check } from 'lucide-react'
 import type { AirtrailFlight, AirtrailImportResult } from '@trek/shared'
 import { useTranslation } from '../../i18n'
 import { useToast } from '../shared/Toast'
-import { airtrailApi, reservationsApi } from '../../api/client'
+import { airtrailApi } from '../../api/client'
 import { useTripStore } from '../../store/tripStore'
+import { isEffectivelyOffline } from '../../sync/networkMode'
 import { parseReservationMetadata } from '../../utils/flightLegs'
+import { useDateFormat } from '../../hooks/useDateFormat'
+import { formatDisplayDate } from '../../utils/dateFormat'
 
 interface AirTrailImportModalProps {
   isOpen: boolean
@@ -51,15 +54,15 @@ export function detectConnections(flights: AirtrailFlight[]): AirtrailFlight[][]
 }
 
 /** Locale-aware date (e.g. de → 13.06.2026, en-US → 06/13/2026). */
-function fmtDate(d: string | null, locale: string): string {
+function fmtDate(d: string | null, locale: string, dateFormat: string): string {
   if (!d) return ''
   try {
-    return new Date(d + 'T00:00:00Z').toLocaleDateString(locale, {
+    return formatDisplayDate(new Date(d + 'T00:00:00Z'), locale, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       timeZone: 'UTC',
-    })
+    }, dateFormat)
   } catch {
     return d
   }
@@ -67,10 +70,12 @@ function fmtDate(d: string | null, locale: string): string {
 
 export default function AirTrailImportModal({ isOpen, onClose, tripId, pushUndo }: AirTrailImportModalProps) {
   const { t, locale } = useTranslation()
+  const dateFormat = useDateFormat()
   const toast = useToast()
   const trip = useTripStore(s => s.trip)
   const reservations = useTripStore(s => s.reservations)
   const loadReservations = useTripStore(s => s.loadReservations)
+  const deleteReservation = useTripStore(s => s.deleteReservation)
   const mouseDownTarget = useRef<EventTarget | null>(null)
 
   const [loading, setLoading] = useState(false)
@@ -117,6 +122,12 @@ export default function AirTrailImportModal({ isOpen, onClose, tripId, pushUndo 
     setError('')
     setSelected(new Set())
     setJoinOff(new Set())
+    // The flights live on the AirTrail server, which only a connection reaches.
+    if (isEffectivelyOffline()) {
+      setFlights([])
+      setError(t('reservations.needsConnection'))
+      return
+    }
     setLoading(true)
     airtrailApi
       .flights()
@@ -196,6 +207,7 @@ export default function AirTrailImportModal({ isOpen, onClose, tripId, pushUndo 
   const handleImport = async () => {
     const ids = [...selected].filter(id => !importedIds.has(id))
     if (ids.length === 0 || importing) return
+    if (isEffectivelyOffline()) { setError(t('reservations.needsConnection')); return }
     setImporting(true)
     setError('')
     try {
@@ -209,7 +221,7 @@ export default function AirTrailImportModal({ isOpen, onClose, tripId, pushUndo 
           const linked = useTripStore.getState().reservations.filter(
             r => r.external_source === 'airtrail' && r.external_id && imported.includes(String(r.external_id)),
           )
-          await Promise.all(linked.map(r => reservationsApi.delete(tripId, r.id).catch(() => {})))
+          await Promise.all(linked.map(r => deleteReservation(tripId, r.id).catch(() => {})))
           await loadReservations(tripId)
         })
         toast.success(t('reservations.airtrail.imported', { count: imported.length }))
@@ -242,7 +254,7 @@ export default function AirTrailImportModal({ isOpen, onClose, tripId, pushUndo 
         disabled={already}
         className={already ? 'bg-surface-tertiary' : isSelected ? 'bg-surface-secondary' : 'bg-transparent'}
         style={{
-          width: '100%', textAlign: 'left', borderRadius: 10, padding: '10px 12px', marginBottom: 8,
+          width: '100%', textAlign: 'start', borderRadius: 10, padding: '10px 12px', marginBottom: 8,
           border: `1px solid ${isSelected && !already ? 'var(--accent)' : 'var(--border-primary)'}`,
           opacity: already ? 0.55 : 1, cursor: already ? 'default' : 'pointer',
           display: 'flex', gap: 10, alignItems: 'center', fontFamily: 'inherit',
@@ -261,7 +273,7 @@ export default function AirTrailImportModal({ isOpen, onClose, tripId, pushUndo 
         <span style={{ flex: 1, minWidth: 0 }}>
           <span style={{ display: 'block', fontSize: 'calc(13px * var(--fs-scale-body, 1))', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
           <span style={{ display: 'block', fontSize: 'calc(11px * var(--fs-scale-caption, 1))', color: 'var(--text-muted)' }}>
-            {f.fromCode ?? f.fromName ?? '?'} → {f.toCode ?? f.toName ?? '?'}{f.date ? ` · ${fmtDate(f.date, locale)}` : ''}
+            {f.fromCode ?? f.fromName ?? '?'} → {f.toCode ?? f.toName ?? '?'}{f.date ? ` · ${fmtDate(f.date, locale, dateFormat)}` : ''}
           </span>
         </span>
         {already && (
@@ -283,7 +295,7 @@ export default function AirTrailImportModal({ isOpen, onClose, tripId, pushUndo 
           onClick={() => toggleJoin(chain)}
           className="bg-transparent"
           style={{
-            display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+            display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'start',
             border: 'none', borderTop: '1px solid var(--border-faint)', borderRadius: 0,
             padding: '9px 4px 10px', cursor: 'pointer', fontFamily: 'inherit',
           }}
